@@ -80,6 +80,9 @@ public sealed class NwcDocument
     /// <summary>Configured Clash Detective tests and results for this document.</summary>
     public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
 
+    /// <summary>Spatial grid system (axes and levels) associated with the document.</summary>
+    public Model.Grids.NwcGridSystem? GridSystem { get; set; }
+
     /// <summary>Gets the total 3D bounding box over all meshes in the document.</summary>
     public BoundingBox3d BoundingBox => SpatialIndex.Bounds;
 
@@ -526,4 +529,26 @@ public sealed class NwcDocument
     {
         Model.Viewer.NwcHtmlViewerExporter.Save(path, this, options);
     }
+
+    /// <summary>
+    /// Compares this document (as baseline) against a revision document, detecting additions, deletions, coordinate shifts, and property changes.
+    /// </summary>
+    public Model.Diff.NwcDiffReport Compare(NwcDocument revision, Model.Diff.NwcDiffOptions? options = null) =>
+        Model.Diff.NwcDiffEngine.Compare(this, revision, options);
+
+    /// <summary>
+    /// Populates clash grid location tags across all clash detective tests in this document using the provided or attached grid system.
+    /// </summary>
+    public int AssignGridLocations(Model.Grids.NwcGridSystem? gridSystem = null)
+    {
+        var grids = gridSystem ?? GridSystem ?? ExtractGridSystem();
+        GridSystem = grids;
+        return grids.AssignGridLocations(this);
+    }
+
+    /// <summary>
+    /// Automatically extracts grid lines from scene hierarchy nodes and metadata.
+    /// </summary>
+    public Model.Grids.NwcGridSystem ExtractGridSystem() =>
+        Model.Grids.NwcGridSystem.ExtractFromDocument(this);
 }

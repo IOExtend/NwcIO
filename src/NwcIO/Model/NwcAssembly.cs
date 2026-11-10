@@ -281,6 +281,9 @@ public sealed class NwcAssembly
     /// <summary>Configured Clash Detective tests and results for this federated assembly.</summary>
     public List<Clash.NwcClashTest> ClashTests { get; } = [];
 
+    /// <summary>Spatial grid system (axes and levels) associated with the federated assembly.</summary>
+    public Grids.NwcGridSystem? GridSystem { get; set; }
+
     /// <summary>
     /// Executes full mesh-level triangle collision detection across all contributing models of the assembly.
     /// </summary>
@@ -435,6 +438,45 @@ public sealed class NwcAssembly
     public void SaveHtmlViewer(string path, Viewer.NwcHtmlViewerOptions? options = null)
     {
         Viewer.NwcHtmlViewerExporter.Save(path, this, options);
+    }
+
+    /// <summary>
+    /// Compares this federated assembly (as baseline) against a revision assembly, detecting additions, deletions, coordinate shifts, and property changes.
+    /// </summary>
+    public Diff.NwcDiffReport Compare(NwcAssembly revision, Diff.NwcDiffOptions? options = null) =>
+        Diff.NwcDiffEngine.Compare(this, revision, options);
+
+    /// <summary>
+    /// Populates clash grid location tags across all clash tests in this assembly and its contributing models using the provided or attached grid system.
+    /// </summary>
+    public int AssignGridLocations(Grids.NwcGridSystem? gridSystem = null)
+    {
+        var grids = gridSystem ?? GridSystem;
+        if (grids is null)
+        {
+            foreach (var m in Models)
+            {
+                var extracted = m.ExtractGridSystem();
+                if (extracted.Lines.Count > 0)
+                {
+                    grids = extracted;
+                    break;
+                }
+            }
+        }
+        grids ??= new Grids.NwcGridSystem("Assembly Grids");
+        GridSystem = grids;
+
+        int count = 0;
+        foreach (var test in ClashTests)
+        {
+            count += grids.AssignGridLocations(test);
+        }
+        foreach (var m in Models)
+        {
+            count += grids.AssignGridLocations(m);
+        }
+        return count;
     }
 
     /// <summary>Exports a structured summary of the federated assembly to a JSON file.</summary>

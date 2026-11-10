@@ -16,6 +16,9 @@ public sealed class NwcHtmlViewerOptions
     public bool IncludeViewpoints { get; set; } = true;
     public bool IncludeRedlines { get; set; } = true;
     public bool IncludeSectioning { get; set; } = true;
+    public bool IncludeMeasure { get; set; } = true;
+    public bool IncludeGrids { get; set; } = true;
+    public Grids.NwcGridSystem? GridSystem { get; set; }
     public string Theme { get; set; } = "dark";
     public int MaxMeshVertices { get; set; } = 500000;
 }
@@ -35,6 +38,7 @@ public static class NwcHtmlViewerExporter
         ArgumentNullException.ThrowIfNull(doc);
 
         options ??= new NwcHtmlViewerOptions { Title = Path.GetFileNameWithoutExtension(path) };
+        options.GridSystem ??= doc.GridSystem;
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
         Write(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options);
@@ -49,6 +53,7 @@ public static class NwcHtmlViewerExporter
         ArgumentNullException.ThrowIfNull(assembly);
 
         options ??= new NwcHtmlViewerOptions { Title = assembly.Name };
+        options.GridSystem ??= assembly.GridSystem;
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
         Write(writer, assembly.AllMeshes, assembly.SavedViewpoints, assembly.ClashTests, assembly.BoundingBox, options);
@@ -127,6 +132,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 .section-panel label { font-size: 11px; color: #bbb; display: flex; align-items: center; gap: 6px; }
 .section-panel input[type=range] { width: 100px; }
 .hud-stats { position: absolute; top: 12px; left: 12px; font-size: 11px; color: #777; background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px; pointer-events: none; }
+.measure-panel { position: absolute; top: 16px; right: 16px; background: rgba(25,25,25,0.92); border: 1px solid #007acc; border-radius: 6px; padding: 10px 14px; font-size: 11px; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,0.5); min-width: 180px; }
+.measure-panel .title { font-weight: 600; color: #4dabf7; margin-bottom: 4px; display: flex; justify-content: space-between; }
+.measure-panel .row { display: flex; justify-content: space-between; margin: 2px 0; color: #ccc; }
+.measure-panel .val { font-weight: 600; color: #fff; }
 </style>
 """;
     }
@@ -137,9 +146,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 <header>
   <h1>{System.Net.WebUtility.HtmlEncode(title)}</h1>
   <div class="toolbar">
-    <button class="btn" id="btn-reset-cam">Reset View</button>
+    <button class="btn" id="btn-measure">Measure</button>
     <button class="btn" id="btn-toggle-sec">Sectioning</button>
     <button class="btn" id="btn-wireframe">Wireframe</button>
+    <button class="btn" id="btn-reset-cam">Reset View</button>
     <button class="btn" id="btn-fullscreen">Fullscreen</button>
   </div>
 </header>
@@ -158,6 +168,16 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     <div class="hud-stats" id="hud-stats">Meshes: 0 | Vertices: 0</div>
     <canvas id="glcanvas"></canvas>
     <canvas id="overlay"></canvas>
+    <div class="measure-panel" id="measure-panel" style="display:none;">
+      <div class="title"><span>3D Measure</span><span id="measure-clear" style="cursor:pointer;color:#888;">&times;</span></div>
+      <div id="measure-status" style="color:#aaa;margin-bottom:4px;">Click 2 points to measure</div>
+      <div id="measure-results" style="display:none;">
+        <div class="row"><span>Distance:</span><span class="val" id="m-dist">0.00 m</span></div>
+        <div class="row"><span>Horiz Dist:</span><span class="val" id="m-horiz">0.00 m</span></div>
+        <div class="row"><span>dX / dY / dZ:</span><span class="val" id="m-deltas">0 / 0 / 0</span></div>
+        <div class="row"><span>Pitch:</span><span class="val" id="m-pitch">0.0°</span></div>
+      </div>
+    </div>
     <div class="section-panel" id="sec-controls" style="display:none;">
       <label><input type="checkbox" id="clip-x-en"> Cut X</label>
       <input type="range" id="clip-x-val" min="-100" max="100" value="0">
@@ -203,6 +223,11 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   let lastMouseY = 0;
   let selectedMeshIndex = -1;
   let wireframeMode = false;
+  let measureMode = false;
+  let measureP1 = null;
+  let measureP2 = null;
+  let lastPMat = null;
+  let lastVMat = null;
 
   // Clipping Planes State
   const clipPlanes = {
@@ -409,6 +434,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     gl.uniform4f(loc.uClipY, 0, clipPlanes.yVal, 0, clipPlanes.yEn ? 1.0 : 0.0);
     gl.uniform4f(loc.uClipZ, 0, 0, clipPlanes.zVal, clipPlanes.zEn ? 1.0 : 0.0);
 
+    lastPMat = pMat;
+    lastVMat = vMat;
+
     for (const gm of gpuMeshes) {
       gl.bindBuffer(gl.ARRAY_BUFFER, gm.vbo);
       gl.vertexAttribPointer(loc.aPos, 3, gl.FLOAT, false, 0, 0);
@@ -433,6 +461,160 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       const mode = wireframeMode ? gl.LINES : gl.TRIANGLES;
       gl.drawElements(mode, gm.count, gl.UNSIGNED_SHORT, 0);
     }
+
+    drawOverlay(pMat, vMat);
+  }
+
+  function worldToScreen(p, pMat, vMat) {
+    if (!pMat || !vMat) return null;
+    const x = p[0], y = p[1], z = p[2];
+    const vx = vMat[0]*x + vMat[4]*y + vMat[8]*z + vMat[12];
+    const vy = vMat[1]*x + vMat[5]*y + vMat[9]*z + vMat[13];
+    const vz = vMat[2]*x + vMat[6]*y + vMat[10]*z + vMat[14];
+    const vw = vMat[3]*x + vMat[7]*y + vMat[11]*z + vMat[15];
+
+    const cx = pMat[0]*vx + pMat[4]*vy + pMat[8]*vz + pMat[12]*vw;
+    const cy = pMat[1]*vx + pMat[5]*vy + pMat[9]*vz + pMat[13]*vw;
+    const cz = pMat[2]*vx + pMat[6]*vy + pMat[10]*vz + pMat[14]*vw;
+    const cw = pMat[3]*vx + pMat[7]*vy + pMat[11]*vz + pMat[15]*vw;
+
+    if (cw <= 0.001) return null;
+    const ndcX = cx / cw;
+    const ndcY = cy / cw;
+    if (ndcX < -1.5 || ndcX > 1.5 || ndcY < -1.5 || ndcY > 1.5) return null;
+
+    return [
+      (ndcX * 0.5 + 0.5) * overlay.width,
+      (1.0 - (ndcY * 0.5 + 0.5)) * overlay.height
+    ];
+  }
+
+  function drawOverlay(pMat, vMat) {
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+    if (modelData.grids && modelData.grids.length > 0) {
+      ctx.save();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(77, 171, 247, 0.45)';
+      ctx.setLineDash([6, 6]);
+      ctx.fillStyle = '#4dabf7';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      for (const g of modelData.grids) {
+        const s = worldToScreen(g.start, pMat, vMat);
+        const e = worldToScreen(g.end, pMat, vMat);
+        if (s && e) {
+          ctx.beginPath();
+          ctx.moveTo(s[0], s[1]);
+          ctx.lineTo(e[0], e[1]);
+          ctx.stroke();
+
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.arc(s[0], s[1], 10, 0, Math.PI * 2);
+          ctx.fillStyle = '#111';
+          ctx.fill();
+          ctx.strokeStyle = '#4dabf7';
+          ctx.stroke();
+          ctx.fillStyle = '#4dabf7';
+          ctx.fillText(g.name, s[0], s[1]);
+
+          ctx.beginPath();
+          ctx.arc(e[0], e[1], 10, 0, Math.PI * 2);
+          ctx.fillStyle = '#111';
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#4dabf7';
+          ctx.fillText(g.name, e[0], e[1]);
+          ctx.setLineDash([6, 6]);
+        }
+      }
+      ctx.restore();
+    }
+
+    if (measureP1) {
+      const s1 = worldToScreen(measureP1, pMat, vMat);
+      if (s1) {
+        ctx.beginPath();
+        ctx.arc(s1[0], s1[1], 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff922b';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+    if (measureP1 && measureP2) {
+      const s1 = worldToScreen(measureP1, pMat, vMat);
+      const s2 = worldToScreen(measureP2, pMat, vMat);
+      if (s1 && s2) {
+        ctx.beginPath();
+        ctx.arc(s2[0], s2[1], 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff922b';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(s1[0], s1[1]);
+        ctx.lineTo(s2[0], s2[1]);
+        ctx.strokeStyle = '#ffa94d';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const midX = (s1[0] + s2[0]) * 0.5;
+        const midY = (s1[1] + s2[1]) * 0.5;
+        const dx = measureP2[0] - measureP1[0];
+        const dy = measureP2[1] - measureP1[1];
+        const dz = measureP2[2] - measureP1[2];
+        const d = Math.hypot(dx, dy, dz);
+
+        ctx.fillStyle = 'rgba(20,20,20,0.85)';
+        const text = `${d.toFixed(2)} m`;
+        ctx.font = 'bold 12px sans-serif';
+        const tw = ctx.measureText(text).width;
+        ctx.fillRect(midX - tw / 2 - 4, midY - 10, tw + 8, 20);
+        ctx.strokeStyle = '#ffa94d';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(midX - tw / 2 - 4, midY - 10, tw + 8, 20);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, midX, midY);
+      }
+    }
+  }
+
+  function pickPoint(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+
+    let bestDist = 40;
+    let bestPt = null;
+
+    for (const m of modelData.meshes) {
+      const v = m.vertices;
+      for (let i = 0; i < v.length; i += 3) {
+        const pt = [v[i], v[i+1], v[i+2]];
+        const sp = worldToScreen(pt, lastPMat, lastVMat);
+        if (sp) {
+          const d = Math.hypot(sp[0] - mx, sp[1] - my);
+          if (d < bestDist) {
+            bestDist = d;
+            bestPt = pt;
+          }
+        }
+      }
+    }
+
+    return bestPt || [camTarget[0], camTarget[1], camTarget[2]];
   }
 
   function resizeCanvas() {
@@ -481,9 +663,35 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     requestAnimationFrame(render);
   }, { passive: false });
 
-  // Element Selection & Property Inspector
+  // Element Selection & Property Inspector & Measure
   canvas.addEventListener('click', e => {
     if (Math.abs(e.clientX - lastMouseX) > 3 || Math.abs(e.clientY - lastMouseY) > 3) return;
+
+    if (measureMode) {
+      const pt = pickPoint(e.clientX, e.clientY);
+      if (!measureP1) {
+        measureP1 = pt;
+        document.getElementById('measure-status').textContent = 'Click second point';
+      } else {
+        measureP2 = pt;
+        const dx = measureP2[0] - measureP1[0];
+        const dy = measureP2[1] - measureP1[1];
+        const dz = measureP2[2] - measureP1[2];
+        const dist = Math.hypot(dx, dy, dz);
+        const horiz = Math.hypot(dx, dy);
+        const pitch = dist > 1e-6 ? Math.asin(Math.max(-1, Math.min(1, dz / dist))) * 180 / Math.PI : 0;
+
+        document.getElementById('measure-status').textContent = 'Measurement complete:';
+        document.getElementById('measure-results').style.display = 'block';
+        document.getElementById('m-dist').textContent = `${dist.toFixed(3)} m`;
+        document.getElementById('m-horiz').textContent = `${horiz.toFixed(3)} m`;
+        document.getElementById('m-deltas').textContent = `${dx.toFixed(2)} / ${dy.toFixed(2)} / ${dz.toFixed(2)} m`;
+        document.getElementById('m-pitch').textContent = `${pitch.toFixed(1)}°`;
+      }
+      requestAnimationFrame(render);
+      return;
+    }
+
     if (gpuMeshes.length === 0) return;
     selectedMeshIndex = (selectedMeshIndex + 1) % gpuMeshes.length;
     showProperties(gpuMeshes[selectedMeshIndex].raw);
@@ -602,6 +810,25 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   document.getElementById('btn-wireframe').addEventListener('click', function() {
     wireframeMode = !wireframeMode;
     this.classList.toggle('active', wireframeMode);
+    requestAnimationFrame(render);
+  });
+
+  document.getElementById('btn-measure').addEventListener('click', function() {
+    measureMode = !measureMode;
+    this.classList.toggle('active', measureMode);
+    document.getElementById('measure-panel').style.display = measureMode ? 'block' : 'none';
+    if (!measureMode) {
+      measureP1 = null; measureP2 = null;
+      document.getElementById('measure-results').style.display = 'none';
+      document.getElementById('measure-status').textContent = 'Click 2 points to measure';
+    }
+    requestAnimationFrame(render);
+  });
+
+  document.getElementById('measure-clear').addEventListener('click', () => {
+    measureP1 = null; measureP2 = null;
+    document.getElementById('measure-results').style.display = 'none';
+    document.getElementById('measure-status').textContent = 'Click 2 points to measure';
     requestAnimationFrame(render);
   });
 
@@ -804,6 +1031,29 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 }
                 writer.WriteEndArray(); // allClashes
 
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
+
+        // Grids
+        if (options.IncludeGrids && options.GridSystem is not null && options.GridSystem.Lines.Count > 0)
+        {
+            writer.WriteStartArray("grids");
+            foreach (var line in options.GridSystem.Lines)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", line.Name);
+                writer.WriteStartArray("start");
+                writer.WriteNumberValue(line.Start.X);
+                writer.WriteNumberValue(line.Start.Y);
+                writer.WriteNumberValue(line.Start.Z);
+                writer.WriteEndArray();
+                writer.WriteStartArray("end");
+                writer.WriteNumberValue(line.End.X);
+                writer.WriteNumberValue(line.End.Y);
+                writer.WriteNumberValue(line.End.Z);
+                writer.WriteEndArray();
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();

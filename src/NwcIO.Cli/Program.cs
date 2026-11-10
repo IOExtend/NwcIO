@@ -35,6 +35,12 @@ internal static class Program
           --clash-group <mode> Group clashes: proximity, element, grid, layer
           --clash-radius <m>   Cluster radius in meters for proximity grouping (default: 1.0)
           --clash-tolerance <m> Set clash detection tolerance in meters (default: 0.001)
+          --diff <baseline.nwc> Compare model against baseline revision
+          --diff-json <file.json> Export revision comparison report to JSON
+          --diff-bcf <file.bcfzip> Export revision comparison to buildingSMART BCF 2.1 zip
+          --diff-tolerance <m> Geometric displacement tolerance for diff (default: 0.005m)
+          --grids <file.xml>   Load spatial grid system from XML (.xml)
+          --export-grids <file.xml> Export extracted or loaded grid system to XML (.xml)
           --nwf-xml <file.xml> Export Navisworks federated coordination manifest (.nwf.xml)
           --ifc <file.ifc>   Export 3D geometry, materials, and properties to IFC (IFC2x3 / IFC4)
           --ifc-schema <schema> Target IFC schema: IFC2X3 (default) or IFC4 (Tessellation)
@@ -106,6 +112,12 @@ internal static class Program
         string? explicitViewpointsXmlPath = null;
         string? explicitClashHtmlPath = null;
         string? explicitHtmlViewerPath = null;
+        string? explicitDiffBaseline = null;
+        string? explicitDiffJsonPath = null;
+        string? explicitDiffBcfPath = null;
+        string? explicitGridsPath = null;
+        string? explicitExportGridsPath = null;
+        double diffTolerance = 0.005;
         string? clashGroupMode = null;
         double clashRadius = 1.0;
         string? raycastArg = null;
@@ -254,6 +266,53 @@ internal static class Program
                         Console.Error.WriteLine("Error: Invalid or missing argument for --clash-tolerance.");
                         return 1;
                     }
+                    break;
+                case "--diff":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --diff.");
+                        return 1;
+                    }
+                    explicitDiffBaseline = args[++i];
+                    break;
+                case "--diff-json":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --diff-json.");
+                        return 1;
+                    }
+                    explicitDiffJsonPath = args[++i];
+                    break;
+                case "--diff-bcf":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --diff-bcf.");
+                        return 1;
+                    }
+                    explicitDiffBcfPath = args[++i];
+                    break;
+                case "--diff-tolerance":
+                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out diffTolerance))
+                    {
+                        Console.Error.WriteLine("Error: Invalid or missing argument for --diff-tolerance.");
+                        return 1;
+                    }
+                    break;
+                case "--grids":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --grids.");
+                        return 1;
+                    }
+                    explicitGridsPath = args[++i];
+                    break;
+                case "--export-grids":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --export-grids.");
+                        return 1;
+                    }
+                    explicitExportGridsPath = args[++i];
                     break;
                 case "--nwf-xml":
                     if (i + 1 >= args.Length)
@@ -643,6 +702,71 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitHtmlViewerPath);
                 doc.SaveHtmlViewer(explicitHtmlViewerPath);
+            }
+
+            if (!string.IsNullOrEmpty(explicitGridsPath))
+            {
+                if (!File.Exists(explicitGridsPath))
+                {
+                    Console.Error.WriteLine($"Error: Grids file '{explicitGridsPath}' not found.");
+                    return 2;
+                }
+                var grids = Model.Grids.NwcGridSystem.LoadXml(explicitGridsPath);
+                doc.GridSystem = grids;
+                int assigned = doc.AssignGridLocations(grids);
+                if (printReport)
+                {
+                    Console.Error.WriteLine($"Loaded grid system '{grids.Name}' with {grids.Lines.Count} lines. Assigned grid locations to {assigned} clashes.");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(explicitExportGridsPath))
+            {
+                EnsureParentDirectory(explicitExportGridsPath);
+                var grids = doc.GridSystem ?? doc.ExtractGridSystem();
+                grids.SaveXml(explicitExportGridsPath);
+                if (printReport)
+                {
+                    Console.Error.WriteLine($"Exported grid system '{grids.Name}' ({grids.Lines.Count} lines) to '{explicitExportGridsPath}'.");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(explicitDiffBaseline))
+            {
+                if (!File.Exists(explicitDiffBaseline))
+                {
+                    Console.Error.WriteLine($"Error: Baseline file '{explicitDiffBaseline}' not found.");
+                    return 2;
+                }
+                var baseDoc = NwcDocument.Open(explicitDiffBaseline);
+                var diffReport = baseDoc.Compare(doc, new Model.Diff.NwcDiffOptions { GeometricTolerance = diffTolerance });
+
+                if (!string.IsNullOrEmpty(explicitDiffJsonPath))
+                {
+                    EnsureParentDirectory(explicitDiffJsonPath);
+                    diffReport.SaveJson(explicitDiffJsonPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"Revision diff exported to JSON: '{explicitDiffJsonPath}'.");
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(explicitDiffBcfPath))
+                {
+                    EnsureParentDirectory(explicitDiffBcfPath);
+                    diffReport.SaveBcf(explicitDiffBcfPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"Revision diff exported to BCF 2.1: '{explicitDiffBcfPath}'.");
+                    }
+                }
+
+                Console.WriteLine($"Model Revision Comparison ({diffReport.BaselineName} vs {diffReport.RevisionName}):");
+                Console.WriteLine($"  Added:     {diffReport.Added.Count}");
+                Console.WriteLine($"  Deleted:   {diffReport.Deleted.Count}");
+                Console.WriteLine($"  Modified:  {diffReport.Modified.Count}");
+                Console.WriteLine($"  Unchanged: {diffReport.Unchanged.Count}");
+                Console.WriteLine($"  Total:     {diffReport.TotalChangesCount} changes");
             }
 
             if (!string.IsNullOrEmpty(explicitTimeLinerCsvPath))

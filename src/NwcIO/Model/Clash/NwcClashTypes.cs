@@ -217,6 +217,7 @@ public sealed class NwcClashGroup
     public string? AssignedTo { get; set; }
     public string? ApprovedBy { get; set; }
     public DateTimeOffset CreatedDate { get; set; } = DateTimeOffset.UtcNow;
+    public string? GridLocation { get; set; }
     public List<NwcClashResult> Clashes { get; } = [];
     public List<NwcClashComment> Comments { get; } = [];
     public NwcSavedViewpoint? Viewpoint { get; set; }

@@ -12,6 +12,9 @@ Built clean-room following the architectural principles of [mahach666/RvtIO](htt
 
 ## What It Does
 
+- **Model Revision Comparison & Diff Engine (`NwcDiffEngine`)**: Compare revisions of Navisworks documents and federated assemblies to detect added, deleted, modified, and unchanged elements, 3D translation shifts beyond configurable tolerance, and property value additions, removals, and alterations. Export diff reports to structured JSON or buildingSMART BCF 2.1 zip archives with 3D camera viewpoints and highlighted components.
+- **Spatial Grid System & Axis Management (`NwcGridSystem`)**: Manage building grid lines and axes, calculate 2D/3D intersections, format human-readable grid location descriptors (e.g. `A (+0.50m) / 1 (-0.20m)`), and automatically assign grid locations to detected clashes.
+- **High-Precision 3D Measure Engine (`NwcMeasureEngine`)**: Double-precision point-to-point 3D distance and coordinate projections ($\Delta X, \Delta Y, \Delta Z$, horizontal/vertical distance, pitch/azimuth), point-to-mesh shortest distance with Christer Ericson's exact Voronoi-region closest point on triangle algorithm, mesh-to-mesh clearance, polyline path measurement, triangle normal/area, and mesh surface area/volume.
 - **Container Serialization & Decompression (`NwcWriter` / `NwcContainerReader`)**: Direct byte-stream writing and parsing of `#LcUStream-V1.1` containers, continuous zlib compression/decompression (`lichunk-008`, `lizlib`), and checksum gap framing without third-party libraries. Programmatically create, modify, and save `.nwc` files from code.
 - **Fluent Document Builder (`NwcDocumentBuilder`)**: Construct Navisworks documents from scratch with 3D polygon meshes, spatial transformation matrices, hierarchy trees, materials, element GUIDs, and camera viewpoints.
 - **Industry Foundation Classes (IFC2x3 & IFC4)**: Pure managed exporter generating ISO 10303-21 STEP physical files compliant with **IFC2x3 Coordination View V2.0** (`IfcFacetedBrep`, `IfcClosedShell`, `IfcFace`, `IfcPolyLoop`, `IfcCartesianPoint`) and modern **IFC4 Design Transfer / Reference View** with compact mesh tessellation (`IfcTriangulatedFaceSet`, `IfcCartesianPointList3D`) reducing file sizes by over 60%, spatial hierarchy (`IfcProject`, `IfcSite`, `IfcBuilding`, `IfcBuildingStorey`), element mapping (`IfcWall`, `IfcSlab`, `IfcColumn`, `IfcBeam`, `IfcReinforcingBar`, etc.), type product definitions (`IfcWallType`, `IfcSlabType`, `IfcColumnType`, `IfcReinforcingBarType`, etc. linked via `IfcRelDefinesByType`), surface styles (`IfcSurfaceStyle`, `IfcColourRgb`), property sets (`IfcPropertySet`, `IfcPropertySingleValue`), and buildingSMART 22-character GUID encoding.
@@ -169,6 +172,15 @@ nwcio model.nwc --timeliner-csv ./schedule.csv
 
 # Simulate 4D construction progress at a milestone date
 nwcio model.nwc --timeliner-simulate 2026-06-01 --report
+
+# Compare model revisions (Added, Deleted, Modified geometry & properties)
+nwcio revision.nwc --diff baseline.nwc --diff-json diff.json --diff-bcf diff.bcfzip
+
+# Load spatial grid system from XML and populate clash grid tags
+nwcio model.nwc --grids grids.xml --clash-xml clashes.xml
+
+# Export extracted building grid system to XML
+nwcio model.nwc --export-grids exported_grids.xml
 ```
 
 ### Navisworks Appearance Profiler & Color Overrides
@@ -580,6 +592,74 @@ var tooltipData = qp.Extract(node);
 // Save definitions to standard Navisworks XML format
 string xml = qp.ToXml();
 File.WriteAllText("quickproperties.xml", xml);
+```
+
+### Model Revision Comparison & BCF Issue Export
+
+```csharp
+using NwcIO;
+using NwcIO.Model.Diff;
+
+var baseline = NwcDocument.Open("baseline.nwc");
+var revision = NwcDocument.Open("revision.nwc");
+
+// Compare revisions: detects additions, deletions, 3D translation shifts, and property deltas
+var report = baseline.Compare(revision, new NwcDiffOptions
+{
+    GeometricTolerance = 0.005, // 5mm
+    CompareProperties = true,
+});
+
+Console.WriteLine($"Added: {report.Added.Count}, Deleted: {report.Deleted.Count}, Modified: {report.Modified.Count}");
+
+// Export diff to structured JSON or buildingSMART BCF 2.1 archive
+report.SaveJson("revision_delta.json");
+report.SaveBcf("revision_issues.bcfzip");
+```
+
+### Spatial Grid System & Clash Grid Location Assignment
+
+```csharp
+using NwcIO;
+using NwcIO.Model.Grids;
+
+var doc = NwcDocument.Open("hospital.nwc");
+
+// Define or load building grids
+var grids = new NwcGridSystem("Main Building Grids");
+grids.AddLine("A", new Vector3d(0, -20, 0), new Vector3d(0, 20, 0));
+grids.AddLine("B", new Vector3d(6, -20, 0), new Vector3d(6, 20, 0));
+grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(20, 0, 0));
+grids.AddLine("2", new Vector3d(-10, 8, 0), new Vector3d(20, 8, 0));
+
+// Find nearest grid intersection or format location
+string location = grids.FormatLocation(new Vector3d(0.5, -0.2, 3.0));
+// => "A (+0.50m) / 1 (-0.20m)"
+
+// Automatically assign grid locations across all Clash Detective tests
+doc.AssignGridLocations(grids);
+
+// Cluster clashes by structural grid cell
+NwcClashGrouper.GroupByGrid(doc.ClashTests[0]);
+```
+
+### High-Precision 3D Measure Engine
+
+```csharp
+using NwcIO.Model;
+using NwcIO.Model.Measure;
+
+// Point-to-point 3D measurement with coordinate projections
+var dist = NwcMeasureEngine.MeasureDistance(new Vector3d(0, 0, 0), new Vector3d(3, 4, 12));
+Console.WriteLine($"Distance: {dist.Distance:F2} m (dX: {dist.DeltaX}, dY: {dist.DeltaY}, dZ: {dist.DeltaZ})");
+
+// Shortest point-to-mesh distance with closest point on triangle
+var pointMeas = NwcMeasureEngine.MeasurePointToMesh(new Vector3d(2, 5, 8), mesh);
+Console.WriteLine($"Clearance: {pointMeas.Distance:F3} m to closest point {pointMeas.ClosestPoint}");
+
+// Mesh surface area and closed solid volume
+double area = NwcMeasureEngine.ComputeMeshSurfaceArea(mesh);
+double volume = NwcMeasureEngine.ComputeMeshVolume(mesh);
 ```
 
 ---

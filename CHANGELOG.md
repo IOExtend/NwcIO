@@ -2,7 +2,42 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
-## [0.7.0] - 2026-11-10
+## [0.8.0] - 2026-11-11
+
+### Major Additions & Capabilities
+- **Model Revision Comparison & Diff Engine (`NwcDiffEngine`, `NwcDiffTypes`)**:
+  - Full revision comparison of Navisworks documents and federated assemblies (`baseline.Compare(revision, options)`).
+  - Identification of added, deleted, modified, and unchanged BIM elements and scene nodes by GUID and composite hierarchy matching.
+  - Double-precision 3D geometric deviation detection, measuring translation shift vectors and bounding box alterations beyond configurable tolerance (default 5mm).
+  - Deep property record delta inspection, tracking added, removed, and modified parameter values across categories.
+  - JSON revision delta report export (`report.SaveJson`, `report.ToJson`).
+  - buildingSMART BCF 2.1 zip export (`report.SaveBcf`), generating issue topics with framed 3D viewpoints and highlighted IFC component GUIDs.
+- **Spatial Grid System & Axis Management (`NwcGridSystem`, `NwcGridLine`, `NwcGridIntersection`)**:
+  - Strongly typed object model for building axes and coordination grids (`NwcGridSystem`, `NwcGridLine`, `NwcGridIntersection`).
+  - Automatic 2D/3D intersection calculation between crossing grid lines (e.g. "A / 1", "B / 4").
+  - Point-to-grid spatial querying: `FindNearestGrid` and `FindNearestIntersection`.
+  - Human-readable grid location formatting (`FormatLocation`), displaying exact grid intersection tags or signed perpendicular offsets with direction awareness (e.g. "A (+0.50m) / 1 (-0.20m)").
+  - Automatic population of `clash.GridLocation` on `NwcClashResult` and `NwcClashGroup` (`doc.AssignGridLocations`, `assembly.AssignGridLocations`), seamlessly integrating with `NwcClashGrouper.GroupByGrid`.
+  - Automatic extraction of grid systems from document hierarchy and metadata (`doc.ExtractGridSystem()`).
+  - Full XML exchange serialization and deserialization (`SaveXml` / `LoadXml`).
+- **High-Precision 3D Measure Engine (`NwcMeasureEngine`)**:
+  - Point-to-point 3D Euclidean distance, coordinate deltas ($\Delta X, \Delta Y, \Delta Z$), horizontal distance, vertical height difference, pitch angle, and azimuth direction.
+  - Point-to-mesh shortest distance with Christer Ericson's exact Voronoi-region closest point on triangle algorithm.
+  - Mesh-to-mesh clearance measurement and closest vertex pair identification.
+  - Cumulative polyline path length measurement.
+  - Triangle surface area and unit normal vector calculation.
+  - Mesh total surface area, closed manifold solid volume calculation ($\sum \frac{1}{6}(v_0 \cdot (v_1 \times v_2))$), and 3D centroid calculation.
+  - Angle measurement between direction vectors and 3-point vertices.
+- **Interactive HTML 3D Viewer Enhancements**:
+  - Interactive 3D measurement tool: measure distances directly in the browser by clicking two points on the model, displaying dimension lines, distance badges, and coordinate deltas.
+  - Spatial grid lines overlay: rendering grid lines with coordinate bubble labels directly over the 3D scene.
+- **CLI Enhancements (`nwcio`)**:
+  - Added `--diff <baseline.nwc>`: Compares current model against a baseline revision.
+  - Added `--diff-json <file.json>`: Exports revision comparison report to JSON.
+  - Added `--diff-bcf <file.bcfzip>`: Exports revision comparison issues to buildingSMART BCF 2.1 archive.
+  - Added `--diff-tolerance <m>`: Sets geometric displacement tolerance for diff (default: 0.005m).
+  - Added `--grids <file.xml>`: Loads a spatial grid system from XML and assigns grid locations.
+  - Added `--export-grids <file.xml>`: Exports extracted or configured grid systems to XML.
 
 ### Major Additions & Capabilities
 - **Intelligent Clash Grouping & Clustering Engine (`NwcClashGrouper`)**:
