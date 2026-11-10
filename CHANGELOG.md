@@ -2,7 +2,31 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
-## [0.5.0] - 2026-11-10
+## [0.6.0] - 2026-11-10
+
+### Major Additions & Capabilities
+- **Dynamic 3D Sectioning & Mesh Clipping Engine**:
+  - Strongly typed sectioning model (`NwcIO.Model.Sectioning`): `NwcSectionPlane`, `NwcSectionBox`, and `NwcSectionAlignment`.
+  - Up to 6 simultaneous dynamic clipping planes conforming to Autodesk Navisworks sectioning modes (`Top`, `Bottom`, `Front`, `Back`, `Left`, `Right`, `View`, `Custom`).
+  - High-performance 3D polygon clipping engine (`NwcMeshClipper`) based on Sutherland-Hodgman polygon clipping, splitting triangle meshes against arbitrary section planes and oriented section boxes in pure managed C#.
+- **Redline Markup Annotations**:
+  - Comprehensive redline markup object model (`NwcIO.Model.Redline`): `NwcRedline`, `NwcRedlineText`, `NwcRedlineLine`, `NwcRedlineArrow`, `NwcRedlineCloud`, `NwcRedlineEllipse`, `NwcRedlineTag`, `NwcRedlineStatus`.
+  - Support for 2D/3D markup positions, custom RGBA colors, font size, stroke thickness, revision authors, timestamps, and review status workflows.
+  - Linked to `NwcSavedViewpoint.Redlines` collection.
+- **Autodesk Navisworks XML Viewpoint Exchange (`NwcXmlViewpointSerializer`)**:
+  - Full reading and writing of Autodesk Navisworks saved viewpoints exchange XML (`viewpoints.xml`) conforming to `nw-exchange-12.0.xsd`.
+  - Preserves camera projection, positions, orientation quaternions, active clipping section planes, and all redline markup annotations.
+- **buildingSMART BCF 2.1 Viewpoint & Redline Bridge (`NwcViewpointBcfExporter`)**:
+  - Exports saved viewpoints, clipping planes (`<ClippingPlanes>`), and redline line/markup annotations (`<Lines>`) directly to BCF 2.1 zip archives (`.bcfzip`).
+  - Cross-platform BIM collaboration bridge enabling Navisworks markups and sections to be viewed directly in Revit, Solibri, Archicad, and BIMcollab.
+- **Section-Aware IFC Export**:
+  - Extended `NwcIfcExportOptions` with `SectionBox`, `SectionPlanes`, and `ClipGeometryWithSectionPlanes`.
+  - Automatically clips 3D geometry during IFC export (`Ifc2x3` and `Ifc4`), generating clean cropped IFC models.
+- **Document & Assembly API Integration**:
+  - Added `NwcDocument.SaveViewpointsXml(...)` and `NwcDocument.ToViewpointsXml()`.
+  - Added `NwcAssembly.SaveViewpointsXml(...)` and `NwcAssembly.ToViewpointsXml()`.
+- **CLI Enhancements (`nwcio`)**:
+  - Added `--viewpoints-xml <file.xml>`: exports saved viewpoints, active section planes, and redlines to Autodesk Navisworks XML format.
 
 ### Major Additions & Capabilities
 - **Navisworks Clash Detective & 3D Triangle Collision Engine**:

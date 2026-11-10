@@ -41,6 +41,7 @@ internal static class Program
           --obj <file.obj>   Export 3D geometry to Wavefront OBJ format
           --bcf <file.bcfzip> Export cross-model clashes to buildingSMART BCF 2.1 zip archive
           --viewpoints-bcf <file.bcfzip> Export saved viewpoints to buildingSMART BCF 2.1 zip archive
+          --viewpoints-xml <file.xml>    Export saved viewpoints and redlines to Navisworks XML format
           --viewpoints       List saved viewpoints and cameras to standard output
           --clash-html <file.html> Export interactive HTML clash detection report with matrix
           --local-coords     Export geometry in local coordinate space (default: world coordinates)
@@ -99,6 +100,7 @@ internal static class Program
         double clashTolerance = 0.001;
         string? explicitBcfPath = null;
         string? explicitViewpointsBcfPath = null;
+        string? explicitViewpointsXmlPath = null;
         string? explicitClashHtmlPath = null;
         string? raycastArg = null;
         NwcIfcSchemaVersion ifcSchema = NwcIfcSchemaVersion.Ifc2x3;
@@ -295,6 +297,14 @@ internal static class Program
                     }
                     explicitViewpointsBcfPath = args[++i];
                     break;
+                case "--viewpoints-xml":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --viewpoints-xml.");
+                        return 1;
+                    }
+                    explicitViewpointsXmlPath = args[++i];
+                    break;
                 case "--viewpoints":
                     listViewpoints = true;
                     break;
@@ -369,7 +379,7 @@ internal static class Program
         {
             return ProcessAssemblyDirectory(
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
-                explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath, explicitProfilerPath,
+                explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                 explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance);
         }
@@ -379,7 +389,7 @@ internal static class Program
         {
             return ProcessNwfAssembly(
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
-                explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath, explicitProfilerPath,
+                explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                 explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance);
         }
@@ -539,6 +549,12 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitViewpointsBcfPath);
                 doc.SaveViewpointsBcf(explicitViewpointsBcfPath);
+            }
+
+            if (!string.IsNullOrEmpty(explicitViewpointsXmlPath))
+            {
+                EnsureParentDirectory(explicitViewpointsXmlPath);
+                doc.SaveViewpointsXml(explicitViewpointsXmlPath);
             }
 
             if (!string.IsNullOrEmpty(explicitClashHtmlPath))
@@ -702,6 +718,7 @@ internal static class Program
         string? explicitNwcPath,
         string? explicitBcfPath,
         string? explicitViewpointsBcfPath,
+        string? explicitViewpointsXmlPath,
         string? explicitClashHtmlPath,
         string? explicitProfilerPath,
         bool worldCoords,
@@ -803,6 +820,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitObjPath)) { EnsureParentDirectory(explicitObjPath); assembly.SaveObj(explicitObjPath, worldCoords); }
         if (!string.IsNullOrEmpty(explicitBcfPath)) { EnsureParentDirectory(explicitBcfPath); assembly.SaveBcf(explicitBcfPath, clashes); }
         if (!string.IsNullOrEmpty(explicitViewpointsBcfPath)) { EnsureParentDirectory(explicitViewpointsBcfPath); assembly.SaveViewpointsBcf(explicitViewpointsBcfPath); }
+        if (!string.IsNullOrEmpty(explicitViewpointsXmlPath)) { EnsureParentDirectory(explicitViewpointsXmlPath); assembly.SaveViewpointsXml(explicitViewpointsXmlPath); }
         if (!string.IsNullOrEmpty(explicitClashHtmlPath)) { EnsureParentDirectory(explicitClashHtmlPath); assembly.SaveClashReportHtml(explicitClashHtmlPath, clashes); }
         if (!string.IsNullOrEmpty(explicitClashXmlPath))
         {
@@ -876,6 +894,7 @@ internal static class Program
         string? explicitNwcPath,
         string? explicitBcfPath,
         string? explicitViewpointsBcfPath,
+        string? explicitViewpointsXmlPath,
         string? explicitClashHtmlPath,
         string? explicitProfilerPath,
         bool worldCoords,
@@ -976,6 +995,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitObjPath)) { EnsureParentDirectory(explicitObjPath); assembly.SaveObj(explicitObjPath, worldCoords); }
         if (!string.IsNullOrEmpty(explicitBcfPath)) { EnsureParentDirectory(explicitBcfPath); assembly.SaveBcf(explicitBcfPath, clashes); }
         if (!string.IsNullOrEmpty(explicitViewpointsBcfPath)) { EnsureParentDirectory(explicitViewpointsBcfPath); assembly.SaveViewpointsBcf(explicitViewpointsBcfPath); }
+        if (!string.IsNullOrEmpty(explicitViewpointsXmlPath)) { EnsureParentDirectory(explicitViewpointsXmlPath); assembly.SaveViewpointsXml(explicitViewpointsXmlPath); }
         if (!string.IsNullOrEmpty(explicitClashHtmlPath)) { EnsureParentDirectory(explicitClashHtmlPath); assembly.SaveClashReportHtml(explicitClashHtmlPath, clashes); }
         if (!string.IsNullOrEmpty(explicitClashXmlPath))
         {

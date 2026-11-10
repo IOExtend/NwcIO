@@ -1,3 +1,5 @@
+using NwcIO.Model.Sectioning;
+
 namespace NwcIO;
 
 /// <summary>
@@ -96,4 +98,13 @@ public sealed class NwcIfcExportOptions
 
     /// <summary>Application name for the STEP header (default: "NwcIO").</summary>
     public string Application { get; set; } = "NwcIO";
+
+    /// <summary>Optional 3D section box to crop exported IFC geometry.</summary>
+    public NwcSectionBox? SectionBox { get; set; }
+
+    /// <summary>Optional active clipping section planes to crop exported IFC geometry.</summary>
+    public IReadOnlyList<NwcSectionPlane>? SectionPlanes { get; set; }
+
+    /// <summary>Whether to clip triangle geometry against active section planes/box (default: true).</summary>
+    public bool ClipGeometryWithSectionPlanes { get; set; } = true;
 }

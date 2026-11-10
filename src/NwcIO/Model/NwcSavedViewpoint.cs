@@ -1,3 +1,6 @@
+using NwcIO.Model.Redline;
+using NwcIO.Model.Sectioning;
+
 namespace NwcIO.Model;
 
 /// <summary>
@@ -19,6 +22,15 @@ public sealed record NwcSavedViewpoint
 
     /// <summary>Optional user comments or review notes associated with this viewpoint.</summary>
     public IReadOnlyList<string> Comments { get; init; } = Array.Empty<string>();
+
+    /// <summary>Dynamic clipping section planes active in this viewpoint (up to 6 planes).</summary>
+    public IReadOnlyList<NwcSectionPlane> SectionPlanes { get; init; } = Array.Empty<NwcSectionPlane>();
+
+    /// <summary>Optional 3D bounding section box cropping visible geometry in this viewpoint.</summary>
+    public NwcSectionBox? SectionBox { get; init; }
+
+    /// <summary>Review redline markup annotations (arrows, text, clouds, tags) drawn on this viewpoint.</summary>
+    public IReadOnlyList<NwcRedline> Redlines { get; init; } = Array.Empty<NwcRedline>();
 
     /// <summary>
     /// Creates a default perspective viewpoint framing the provided bounding box.

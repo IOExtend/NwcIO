@@ -26,6 +26,9 @@ Built clean-room following the architectural principles of [mahach666/RvtIO](htt
 - **Autodesk Navisworks Clash Report XML Exchange**: Full reading and writing of official Navisworks Clash Report XML documents (`nw-clashreport-11.0.xsd`) including batch tests, clash tests, clash results, clash points, grid locations, and comments (`NwcXmlClashSerializer`).
 - **Federated Multi-Model Assemblies (.nwf)**: Aggregates multiple discipline models into a unified coordination coordinate system, reads `.nwf` external references, and authors federated project manifests (`NwcNwfManifest`).
 - **Saved Viewpoints & Cameras**: Extracts user saved viewpoints and camera views (`NwcCamera`, `NwcSavedViewpoint`) from stream tag 517 (double-precision eye coordinates, unit rotation quaternions, viewing direction, up vector, focal distance, FOV, and aspect ratio). Automatically embeds viewpoints as standard `cameras` and `nodes` in glTF 2.0 (GLB), outputs them in JSON, and exports to buildingSMART BCF 2.1 zip archives (`SaveViewpointsBcf`).
+- **Dynamic 3D Sectioning & Mesh Clipping**: Supports up to 6 simultaneous clipping planes (`NwcSectionPlane`) aligned to Navisworks sectioning modes (`Top`, `Bottom`, `Left`, `Right`, `Front`, `Back`, `View`, `Custom`) and oriented section boxes (`NwcSectionBox`). Fast Sutherland-Hodgman polygon mesh clipping engine (`NwcMeshClipper`) in pure managed C#.
+- **Redline Markup Annotations**: 2D and 3D visual review markups (`NwcRedlineText`, `NwcRedlineLine`, `NwcRedlineArrow`, `NwcRedlineCloud`, `NwcRedlineEllipse`, `NwcRedlineTag`) with custom colors, stroke thickness, authors, and review status workflows (`New`, `Active`, `Approved`, `Resolved`).
+- **Autodesk Navisworks XML Viewpoints Exchange**: Full roundtrip serialization and deserialization of saved viewpoints, cameras, clipping planes, and redlines in official Navisworks XML format (`NwcXmlViewpointSerializer`, `SaveViewpointsXml`).
 - **Selection Sets & Dynamic Search Sets**: Strongly-typed model hierarchy (`NwcSelectionSet`, `NwcSearchSet`, `NwcSelectionSetFolder`) with scene graph query evaluation. Dynamic search rules (`NwcSearchCondition`) with rich operators (`Equals`, `NotEquals`, `Contains`, `StartsWith`, `Wildcard`, `GreaterThan`, etc.) filtering by properties, categories, names, and GUIDs. Standard Autodesk Navisworks Selection Sets XML (`.xml`) reader and writer (`ExportSelectionSetsXml`).
 - **4D TimeLiner Construction Schedules**: Work Breakdown Structure (WBS) task trees (`NwcTimeLinerSchedule`, `NwcTimeLinerTask`) with planned and actual schedules, budget tracking, and selection set bindings. 4D temporal simulation engine (`GetActiveTasksAt`, `GetSimulationProgressAt`, `GetNodeStateAt`) and standard TimeLiner CSV exchange (`ExportTimeLinerCsv`).
 - **buildingSMART BCF 2.1 Collaboration**: Pure managed exporter generating standard BIM Collaboration Format (`.bcfzip`) archives with topic folders, `markup.bcf`, viewpoints (`viewpoint.bcfv`), perspective cameras focused on clash centers, and colored component highlights (`IfcGuid`).
@@ -132,6 +135,9 @@ nwcio model.nwc --viewpoints
 
 # Export saved viewpoints to buildingSMART BCF 2.1 zip archive
 nwcio model.nwc --viewpoints-bcf ./viewpoints.bcfzip
+
+# Export saved viewpoints, section planes, and redlines to Autodesk Navisworks XML format
+nwcio model.nwc --viewpoints-xml ./viewpoints.xml
 
 # Simultaneous multi-format export
 nwcio ./BuildingK4/ ./assembly.glb --bcf ./clashes.bcfzip --clash-html ./report.html --report
@@ -314,6 +320,71 @@ foreach (var vp in doc.SavedViewpoints)
 // Export saved viewpoints directly to buildingSMART BCF 2.1 zip archive
 doc.SaveViewpointsBcf("viewpoints.bcfzip");
 assembly.SaveViewpointsBcf("assembly_viewpoints.bcfzip");
+
+// Export viewpoints, clipping planes, and redlines to Autodesk Navisworks XML
+doc.SaveViewpointsXml("viewpoints.xml");
+assembly.SaveViewpointsXml("assembly_viewpoints.xml");
+```
+
+### Dynamic Sectioning, Redlines & Viewpoint Exchange
+
+```csharp
+using NwcIO.Model.Redline;
+using NwcIO.Model.Sectioning;
+
+// Define dynamic clipping planes and bounding section box
+var sectionPlane = NwcSectionPlane.CreateTop(zElevation: 15.0);
+var sectionBox = new NwcSectionBox(new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(50, 50, 20)));
+
+// Clip mesh geometry in pure managed C#
+var clippedMesh = NwcMeshClipper.Clip(mesh, sectionBox);
+
+// Create saved viewpoint with sectioning and redline markups
+var vp = new NwcSavedViewpoint
+{
+    Name = "Level 2 HVAC Coordination",
+    Camera = new NwcCamera
+    {
+        Position = new Vector3d(10, 20, 15),
+        Rotation = Quaterniond.Identity,
+        FocalDistance = 15.0,
+    },
+    SectionPlanes = [sectionPlane],
+    SectionBox = sectionBox,
+    Redlines =
+    [
+        new NwcRedlineText
+        {
+            Text = "Verify clash with concrete beam",
+            Position = new Vector3d(10, 12, 14.5),
+            Color = new RgbaColor(1f, 0f, 0f, 1f),
+            Author = "BIM Coordinator",
+        },
+        new NwcRedlineArrow
+        {
+            StartPoint = new Vector3d(10, 12, 16),
+            EndPoint = new Vector3d(10, 12, 14.5),
+            Color = new RgbaColor(1f, 0f, 0f, 1f),
+        },
+        new NwcRedlineTag
+        {
+            TagNumber = 101,
+            Position = new Vector3d(10, 12, 14.5),
+            Comment = "RFI #42 pending structural approval",
+            Status = NwcRedlineStatus.Active,
+        }
+    ]
+};
+
+// Export viewpoints to Navisworks XML exchange format (.xml)
+NwcXmlViewpointSerializer.Save("coordination_viewpoints.xml", [vp]);
+
+// Export section-cropped geometry to IFC
+doc.SaveIfc("clipped_model.ifc", new NwcIfcExportOptions
+{
+    SectionBox = sectionBox,
+    ClipGeometryWithSectionPlanes = true,
+});
 ```
 
 ### Selection Sets & Dynamic Search Sets

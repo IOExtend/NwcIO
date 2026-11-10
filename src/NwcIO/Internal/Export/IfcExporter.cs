@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using NwcIO.Model;
+using NwcIO.Model.Sectioning;
 
 namespace NwcIO.Internal.Export;
 
@@ -126,9 +127,24 @@ internal static class IfcExporter
         var typeMap = new Dictionary<string, (int TypeId, List<int> ElementIds)>(StringComparer.OrdinalIgnoreCase);
         int typeIdSeed = 1000;
 
+        var activePlanes = new List<NwcSectionPlane>();
+        if (options.SectionPlanes is not null)
+        {
+            activePlanes.AddRange(options.SectionPlanes.Where(p => p.IsEnabled));
+        }
+        if (options.SectionBox is not null && options.SectionBox.IsEnabled)
+        {
+            activePlanes.AddRange(options.SectionBox.ToSectionPlanes());
+        }
+
         for (int m = 0; m < doc.Meshes.Count; m++)
         {
             var mesh = doc.Meshes[m];
+            if (activePlanes.Count > 0 && options.ClipGeometryWithSectionPlanes)
+            {
+                mesh = NwcMeshClipper.Clip(mesh, activePlanes);
+            }
+
             var vertices = options.WorldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
             if (vertices.Count < 3 || mesh.Indices.Count < 3)
             {
@@ -341,9 +357,24 @@ internal static class IfcExporter
 
             var modelElementIds = new List<int>(model.Meshes.Count);
 
+            var activePlanes = new List<NwcSectionPlane>();
+            if (options.SectionPlanes is not null)
+            {
+                activePlanes.AddRange(options.SectionPlanes.Where(p => p.IsEnabled));
+            }
+            if (options.SectionBox is not null && options.SectionBox.IsEnabled)
+            {
+                activePlanes.AddRange(options.SectionBox.ToSectionPlanes());
+            }
+
             for (int m = 0; m < model.Meshes.Count; m++)
             {
                 var mesh = model.Meshes[m];
+                if (activePlanes.Count > 0 && options.ClipGeometryWithSectionPlanes)
+                {
+                    mesh = NwcMeshClipper.Clip(mesh, activePlanes);
+                }
+
                 var vertices = options.WorldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
                 if (vertices.Count < 3 || mesh.Indices.Count < 3)
                 {

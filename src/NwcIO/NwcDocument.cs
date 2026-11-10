@@ -485,6 +485,18 @@ public sealed class NwcDocument
         Internal.Export.BcfExporter.WriteViewpoints(SavedViewpoints, stream, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
     }
 
+    /// <summary>Exports saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints file.</summary>
+    public void SaveViewpointsXml(string path, string units = "m")
+    {
+        Model.Sectioning.NwcXmlViewpointSerializer.Save(path, SavedViewpoints, units);
+    }
+
+    /// <summary>Serializes saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints string.</summary>
+    public string ToViewpointsXml(string units = "m")
+    {
+        return Model.Sectioning.NwcXmlViewpointSerializer.Serialize(SavedViewpoints, units);
+    }
+
     /// <summary>Exports the document to a JSON file.</summary>
     public void SaveJson(string path, NwcJsonExportOptions? options = null)
     {

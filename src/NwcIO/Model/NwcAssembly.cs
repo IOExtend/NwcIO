@@ -392,6 +392,24 @@ public sealed class NwcAssembly
     }
 
     /// <summary>
+    /// Exports saved viewpoints of the assembly to an Autodesk Navisworks XML viewpoints file.
+    /// </summary>
+    public void SaveViewpointsXml(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null, string units = "m")
+    {
+        viewpoints ??= SavedViewpoints;
+        Sectioning.NwcXmlViewpointSerializer.Save(path, viewpoints, units);
+    }
+
+    /// <summary>
+    /// Serializes saved viewpoints of the assembly to an Autodesk Navisworks XML viewpoints string.
+    /// </summary>
+    public string ToViewpointsXml(IReadOnlyList<NwcSavedViewpoint>? viewpoints = null, string units = "m")
+    {
+        viewpoints ??= SavedViewpoints;
+        return Sectioning.NwcXmlViewpointSerializer.Serialize(viewpoints, units);
+    }
+
+    /// <summary>
     /// Exports an interactive, self-contained HTML clash detection report with a discipline clash matrix and filterable clash table.
     /// </summary>
     /// <param name="path">Destination .html file path.</param>
