@@ -4,6 +4,12 @@
 
 # NwcIO
 
+[![Docs](https://img.shields.io/badge/Docs-Online-3B82F6?style=flat-square&logo=github)](https://ioextend.github.io/NwcIO/)
+[![NuGet](https://img.shields.io/nuget/v/NwcIO?style=flat-square&color=3B82F6&logo=nuget)](https://www.nuget.org/packages/NwcIO)
+[![Release](https://img.shields.io/github/v/release/IOExtend/NwcIO?style=flat-square&color=3B82F6)](https://github.com/IOExtend/NwcIO/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
+
 **NwcIO** is a fast, 100% managed .NET library and CLI tool that reads Autodesk Navisworks files (`.nwc`, `.nwd`, `.nwf`) directly from disk **without requiring Autodesk Navisworks or the Navisworks API to be installed**, and exports 3D geometry, materials, scene hierarchies, and properties to **Industry Foundation Classes (IFC2x3 Coordination View)**, **glTF 2.0 Binary (GLB)**, **Wavefront OBJ**, and **JSON**.
 
 Built clean-room following the architectural principles of [IOExtend/RvtIO](https://github.com/IOExtend/RvtIO): zero native dependencies, zero external libraries, strict typing, high performance, and cross-platform compatibility.
@@ -722,6 +728,12 @@ doc.SaveHtmlViewer("construction_simulation.html");
 // Export schedule to XML
 doc.ExportTimeLinerXml("updated_schedule.xml");
 ```
+
+---
+
+## Documentation
+
+The documentation site with API references and guides is available at <https://ioextend.github.io/NwcIO/>. [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/IOExtend/NwcIO) offers an automatically generated overview of the repository.
 
 ---
 
