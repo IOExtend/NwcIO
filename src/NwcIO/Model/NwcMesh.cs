@@ -28,6 +28,9 @@ public sealed class NwcMesh
     /// <summary>Surface material and color assigned to this mesh.</summary>
     public NwcMaterial? Material { get; set; }
 
+    /// <summary>Owning scene hierarchy node associated with this mesh.</summary>
+    public NwcNode? Node { get; set; }
+
     /// <summary>Number of triangle faces in this mesh.</summary>
     public int TriangleCount => Indices.Count / 3;
 

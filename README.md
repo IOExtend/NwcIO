@@ -22,7 +22,9 @@ Built clean-room following the architectural principles of [mahach666/RvtIO](htt
 - **Binary glTF 2.0 (GLB) Exporter**: Generates specification-compliant `.glb` files with 12-byte header, 4-byte padded JSON chunk (`0x20`), 4-byte padded binary chunk (`0x00`), vertex positions, normals, indices, and PBR materials.
 - **Wavefront OBJ Exporter**: Streams 3D meshes to `.obj` with 1-based indexing in local or project world coordinates.
 - **Spatial Acceleration Index (BVH)**: Balanced Bounding Volume Hierarchy over all meshes for sub-millisecond range queries (`QueryBox`) and double-precision Möller–Trumbore raycasting (`Raycast`).
-- **Federated Multi-Model Assemblies (.nwf)**: Aggregates multiple discipline models into a unified coordination coordinate system, reads `.nwf` external references, and detects spatial clashes (`FindClashes`).
+- **Navisworks Clash Detective & 3D Triangle Collision**: Complete clean-room collision engine (`NwcClashDetector`) executing broad-phase BVH and narrow-phase Möller 3D triangle-to-triangle intersection tests. Status lifecycles (`New`, `Active`, `Reviewed`, `Approved`, `Resolved`), test types (`Hard`, `Clearance`), and exclusion rules (`IgnoreSameLayer`, `IgnoreSameGroup`, `IgnoreSameFile`).
+- **Autodesk Navisworks Clash Report XML Exchange**: Full reading and writing of official Navisworks Clash Report XML documents (`nw-clashreport-11.0.xsd`) including batch tests, clash tests, clash results, clash points, grid locations, and comments (`NwcXmlClashSerializer`).
+- **Federated Multi-Model Assemblies (.nwf)**: Aggregates multiple discipline models into a unified coordination coordinate system, reads `.nwf` external references, and authors federated project manifests (`NwcNwfManifest`).
 - **Saved Viewpoints & Cameras**: Extracts user saved viewpoints and camera views (`NwcCamera`, `NwcSavedViewpoint`) from stream tag 517 (double-precision eye coordinates, unit rotation quaternions, viewing direction, up vector, focal distance, FOV, and aspect ratio). Automatically embeds viewpoints as standard `cameras` and `nodes` in glTF 2.0 (GLB), outputs them in JSON, and exports to buildingSMART BCF 2.1 zip archives (`SaveViewpointsBcf`).
 - **Selection Sets & Dynamic Search Sets**: Strongly-typed model hierarchy (`NwcSelectionSet`, `NwcSearchSet`, `NwcSelectionSetFolder`) with scene graph query evaluation. Dynamic search rules (`NwcSearchCondition`) with rich operators (`Equals`, `NotEquals`, `Contains`, `StartsWith`, `Wildcard`, `GreaterThan`, etc.) filtering by properties, categories, names, and GUIDs. Standard Autodesk Navisworks Selection Sets XML (`.xml`) reader and writer (`ExportSelectionSetsXml`).
 - **4D TimeLiner Construction Schedules**: Work Breakdown Structure (WBS) task trees (`NwcTimeLinerSchedule`, `NwcTimeLinerTask`) with planned and actual schedules, budget tracking, and selection set bindings. 4D temporal simulation engine (`GetActiveTasksAt`, `GetSimulationProgressAt`, `GetNodeStateAt`) and standard TimeLiner CSV exchange (`ExportTimeLinerCsv`).
@@ -115,6 +117,15 @@ nwcio ./BuildingK4/ ./clashes.bcfzip
 
 # Export interactive, self-contained HTML clash report with matrix
 nwcio ./BuildingK4/ ./clash_report.html
+
+# Run mesh-level clash detection and export Navisworks Clash Report XML
+nwcio ./BuildingK4/ --clash-xml ClashReport.xml --clash-tolerance 0.005
+
+# Run clash detection and export to buildingSMART BCF 2.1 zip archive
+nwcio ./BuildingK4/ --clash-bcf Clashes.bcfzip
+
+# Export federated coordination manifest (NWF XML)
+nwcio ./BuildingK4/ --nwf-xml Campus.nwf.xml
 
 # List all saved viewpoints and cameras to stdout
 nwcio model.nwc --viewpoints
@@ -400,6 +411,37 @@ doc.ExportAppearanceProfilerXml("appearance_rules.xml");
 // Load external XML rules and apply to any model or assembly
 var externalRules = NwcXmlAppearanceProfilerSerializer.Open("external_rules.xml");
 assembly.ApplyAppearanceProfiler(externalRules);
+```
+
+### Navisworks Clash Detective & BCF 2.1 Coordination
+
+```csharp
+using NwcIO.Model.Clash;
+
+// Configure a clash test with exclusion rules and tolerance
+var test = new NwcClashTest("Structure vs MEP", NwcClashTestType.Hard, tolerance: 0.002);
+test.Rules.Add(NwcClashRule.SameLayer());
+test.Rules.Add(NwcClashRule.SameFile());
+
+// Execute mesh-level 3D triangle collision detection
+doc.RunClashDetection(test);
+
+Console.WriteLine($"Total Clashes: {test.TotalCount} (New: {test.NewCount})");
+foreach (var clash in test.Results)
+{
+    Console.WriteLine($"[{clash.Status}] {clash.Name}: {clash.Item1.Name} vs {clash.Item2.Name}");
+    Console.WriteLine($"  Point:    {clash.ClashPoint}");
+    Console.WriteLine($"  Distance: {clash.Distance:F3} m");
+}
+
+// Export official Autodesk Navisworks Clash Report XML
+doc.ExportClashReportXml("ClashReport.xml");
+
+// Export directly to buildingSMART BCF 2.1 archive for Revit / Solibri
+doc.ExportClashBcf("ClashIssues.bcfzip");
+
+// Export federated project coordination manifest (NWF XML)
+assembly.SaveNwf("CoordinationProject.nwf.xml");
 ```
 
 ---

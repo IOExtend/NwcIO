@@ -2,6 +2,41 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
+## [0.5.0] - 2026-11-10
+
+### Major Additions & Capabilities
+- **Navisworks Clash Detective & 3D Triangle Collision Engine**:
+  - High-performance, clean-room 3D clash detection engine (`NwcClashDetector`):
+    - Broad-phase collision pruning using bounding volume hierarchy (BVH) and axis-aligned bounding boxes (AABB).
+    - Narrow-phase exact triangle-to-triangle intersection testing using Möller's algorithm in pure managed C#.
+    - Exact clash point calculation and penetration distance / clearance computation.
+    - Automatic creation of isometric perspective viewpoints focused on each collision volume.
+  - Strongly typed object model (`NwcIO.Model.Clash`): `NwcClashTest`, `NwcClashResult`, `NwcClashObject`, `NwcClashComment`, `NwcClashRule`, `NwcClashSelection`, `NwcClashBatch`.
+  - Clash status lifecycle: `New`, `Active`, `Reviewed`, `Approved`, `Resolved`.
+  - Test types: `Hard`, `Clearance`, `Duplicates`, `Conservative`.
+  - Configurable exclusion rules: `IgnoreSameLayer`, `IgnoreSameGroup`, `IgnoreSameFile`.
+- **Autodesk Navisworks Clash Report XML Exchange (`NwcXmlClashSerializer`)**:
+  - Full reading and writing of Autodesk Navisworks Clash Report XML files (`nw-clashreport-11.0.xsd`).
+  - Serializes `<batchtest>`, `<classtests>`, `<classtest>`, `<rules>`, `<summary>`, `<clashresults>`, `<clashresult>`, `<clashpoint>`, `<gridlocation>`, `<clashobjects>`, `<comments>`.
+- **buildingSMART BCF 2.1 Issue Management (`NwcClashBcfExporter`)**:
+  - Direct export of clash detection results to buildingSMART BCF 2.1 zip archives (`.bcfzip`) without external dependencies.
+  - Each clash result is mapped to a `BcfTopic` with perspective camera parameters, visual framing, and component selections referencing 22-character IFC GUIDs.
+  - Direct bridge between Navisworks clash results and open-standard BIM coordination tools (Revit, Solibri, Archicad, BIMcollab).
+- **Navisworks Federated Project Manifest (NWF) (`NwcNwfManifest`)**:
+  - Model coordination manifest representing federated NWF projects: external model links, saved viewpoints, selection/search sets, appearance profiler rules, and clash detective tests.
+  - `assembly.SaveNwf("project.nwf.xml")` and `NwcAssembly.ToNwfManifest()`.
+- **Document & Assembly API Integration**:
+  - `NwcDocument.RunClashDetection(test)` and `NwcAssembly.RunClashDetection(testName, tolerance)`.
+  - `NwcDocument.ExportClashReportXml(path)` and `NwcDocument.ExportClashBcf(path)`.
+  - `NwcDocument.LoadClashReportXml(path)`.
+  - `NwcDocument.FindSet(name)` and `NwcDocument.FindNodes(condition)`.
+  - `NwcDocumentBuilder.AddClashTest(test)`.
+- **CLI Enhancements (`nwcio`)**:
+  - Added `--clash-xml <report.xml>`: runs clash detection and exports Navisworks Clash Report XML.
+  - Added `--clash-bcf <issues.bcfzip>`: runs clash detection and exports buildingSMART BCF 2.1 archive.
+  - Added `--clash-tolerance <meters>`: sets clash detection tolerance (default: 0.001 m).
+  - Added `--nwf-xml <manifest.xml>`: exports federated coordination manifest in NWF XML format.
+
 ## [0.4.0] - 2026-11-10
 
 ### Major Additions & Capabilities

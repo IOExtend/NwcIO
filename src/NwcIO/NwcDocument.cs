@@ -77,6 +77,9 @@ public sealed class NwcDocument
     /// <summary>Navisworks Appearance Profiler color/transparency rules associated with the document.</summary>
     public Model.Appearance.NwcAppearanceProfiler? AppearanceProfiler { get; set; }
 
+    /// <summary>Configured Clash Detective tests and results for this document.</summary>
+    public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
+
     /// <summary>Gets the total 3D bounding box over all meshes in the document.</summary>
     public BoundingBox3d BoundingBox => SpatialIndex.Bounds;
 
@@ -296,6 +299,47 @@ public sealed class NwcDocument
     /// <summary>Exports the document selection sets and search sets to an XML stream.</summary>
     public void ExportSelectionSetsXml(Stream stream) => Model.Sets.NwcXmlSetSerializer.Write(SelectionSets, stream);
 
+    /// <summary>Finds a selection set or search set by name in the document sets hierarchy.</summary>
+    public Model.Sets.NwcSetItem? FindSet(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return FindSetRecursive(SelectionSets, name);
+    }
+
+    private static Model.Sets.NwcSetItem? FindSetRecursive(IEnumerable<Model.Sets.NwcSetItem> items, string name)
+    {
+        foreach (var item in items)
+        {
+            if (string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return item;
+            }
+            if (item is Model.Sets.NwcSelectionSetFolder folder)
+            {
+                var found = FindSetRecursive(folder.Children, name);
+                if (found is not null) return found;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Finds all scene graph nodes matching a search condition.</summary>
+    public List<NwcNode> FindNodes(Model.Sets.NwcSearchCondition condition)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
+        var result = new List<NwcNode>();
+        if (RootNode is null) return result;
+
+        void Walk(NwcNode node)
+        {
+            if (condition.Evaluate(node)) result.Add(node);
+            for (int i = 0; i < node.Children.Count; i++) Walk(node.Children[i]);
+        }
+
+        Walk(RootNode);
+        return result;
+    }
+
     /// <summary>Exports the 4D TimeLiner schedule to CSV format.</summary>
     public void ExportTimeLinerCsv(string path)
     {
@@ -308,6 +352,63 @@ public sealed class NwcDocument
     {
         if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
         Model.TimeLiner.NwcTimeLinerCsvSerializer.Write(TimeLiner, stream);
+    }
+
+    /// <summary>
+    /// Executes clash detection across the document using the specified or default test configuration.
+    /// </summary>
+    public Model.Clash.NwcClashTest RunClashDetection(Model.Clash.NwcClashTest? test = null)
+    {
+        test ??= new Model.Clash.NwcClashTest("Clash Test");
+        Model.Clash.NwcClashDetector.Run(this, test);
+        if (!ClashTests.Contains(test)) ClashTests.Add(test);
+        return test;
+    }
+
+    /// <summary>Exports detected clash results to Autodesk Navisworks Clash Report XML format.</summary>
+    public void ExportClashReportXml(string path, string? testName = null)
+    {
+        var tests = string.IsNullOrEmpty(testName)
+            ? ClashTests
+            : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase)).ToList();
+        Model.Clash.NwcXmlClashSerializer.Save(path, tests);
+    }
+
+    /// <summary>Exports detected clash results to an XML stream.</summary>
+    public void ExportClashReportXml(Stream stream, string? testName = null)
+    {
+        var tests = string.IsNullOrEmpty(testName)
+            ? ClashTests
+            : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase)).ToList();
+        Model.Clash.NwcXmlClashSerializer.Write(stream, tests);
+    }
+
+    /// <summary>Exports detected clash results to a buildingSMART BCF 2.1 zip archive (.bcfzip).</summary>
+    public void ExportClashBcf(string path, string? testName = null)
+    {
+        var tests = string.IsNullOrEmpty(testName)
+            ? ClashTests
+            : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
+        var clashes = tests.SelectMany(t => t.Results);
+        Model.Clash.NwcClashBcfExporter.Save(path, clashes, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+    }
+
+    /// <summary>Exports detected clash results to a BCF 2.1 stream.</summary>
+    public void ExportClashBcf(Stream stream, string? testName = null)
+    {
+        var tests = string.IsNullOrEmpty(testName)
+            ? ClashTests
+            : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
+        var clashes = tests.SelectMany(t => t.Results);
+        Model.Clash.NwcClashBcfExporter.Write(stream, clashes, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+    }
+
+    /// <summary>Loads clash detective tests and results from a Navisworks Clash Report XML file.</summary>
+    public List<Model.Clash.NwcClashTest> LoadClashReportXml(string path)
+    {
+        var tests = Model.Clash.NwcXmlClashSerializer.Open(path);
+        ClashTests.AddRange(tests);
+        return tests;
     }
 
     /// <summary>Saves the document to an Autodesk Navisworks (.nwc) file.</summary>

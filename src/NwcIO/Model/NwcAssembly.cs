@@ -278,6 +278,55 @@ public sealed class NwcAssembly
         return clashes;
     }
 
+    /// <summary>Configured Clash Detective tests and results for this federated assembly.</summary>
+    public List<Clash.NwcClashTest> ClashTests { get; } = [];
+
+    /// <summary>
+    /// Executes full mesh-level triangle collision detection across all contributing models of the assembly.
+    /// </summary>
+    public Clash.NwcClashTest RunClashDetection(string testName = "Federated Clash Test", double tolerance = 0.001)
+    {
+        var test = new Clash.NwcClashTest(testName, Clash.NwcClashTestType.Hard, tolerance);
+        Clash.NwcClashDetector.Run(this, test);
+        ClashTests.Add(test);
+        return test;
+    }
+
+    /// <summary>Exports detected clash results to Autodesk Navisworks Clash Report XML format.</summary>
+    public void ExportClashReportXml(string path)
+    {
+        Clash.NwcXmlClashSerializer.Save(path, ClashTests, Name);
+    }
+
+    /// <summary>Exports detected clash results to a buildingSMART BCF 2.1 zip archive (.bcfzip).</summary>
+    public void ExportClashBcf(string path)
+    {
+        Clash.NwcClashBcfExporter.Save(path, ClashTests.SelectMany(t => t.Results), Name);
+    }
+
+    /// <summary>Creates a Navisworks Federated Project Manifest (NWF) representation of this assembly.</summary>
+    public Clash.NwcNwfManifest ToNwfManifest()
+    {
+        var manifest = new Clash.NwcNwfManifest(Name);
+        for (int i = 0; i < Models.Count; i++)
+        {
+            var p = Models[i].FileInfo.SourcePath;
+            if (!string.IsNullOrEmpty(p))
+            {
+                manifest.ModelPaths.Add(p);
+            }
+        }
+        manifest.SavedViewpoints.AddRange(SavedViewpoints);
+        manifest.ClashTests.AddRange(ClashTests);
+        return manifest;
+    }
+
+    /// <summary>Saves the assembly coordination manifest as a Navisworks NWF coordination file (.nwf.xml).</summary>
+    public void SaveNwf(string path)
+    {
+        ToNwfManifest().Save(path);
+    }
+
     /// <summary>Exports the entire federated assembly to a binary glTF 2.0 file (.glb).</summary>
     public void SaveGlb(string path, bool worldCoordinates = true)
     {

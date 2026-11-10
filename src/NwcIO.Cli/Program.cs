@@ -30,6 +30,10 @@ internal static class Program
           --timeliner-simulate <date> Run 4D simulation at specified date (e.g. 2026-06-15)
           --profiler <file.xml> Apply Navisworks Appearance Profiler color/transparency rules (.xml)
           --export-profiler <file.xml> Export Appearance Profiler rules to Navisworks XML format (.xml)
+          --clash-xml <file.xml> Run clash detection and export Navisworks Clash Report XML (.xml)
+          --clash-bcf <file.bcfzip> Run clash detection and export buildingSMART BCF 2.1 archive (.bcfzip)
+          --clash-tolerance <m> Set clash detection tolerance in meters (default: 0.001)
+          --nwf-xml <file.xml> Export Navisworks federated coordination manifest (.nwf.xml)
           --ifc <file.ifc>   Export 3D geometry, materials, and properties to IFC (IFC2x3 / IFC4)
           --ifc-schema <schema> Target IFC schema: IFC2X3 (default) or IFC4 (Tessellation)
           --no-types         Exclude IFC type product definitions (IfcTypeProduct)
@@ -89,6 +93,10 @@ internal static class Program
         string? simulateDateStr = null;
         string? explicitProfilerPath = null;
         string? explicitExportProfilerPath = null;
+        string? explicitClashXmlPath = null;
+        string? explicitClashBcfPath = null;
+        string? explicitNwfXmlPath = null;
+        double clashTolerance = 0.001;
         string? explicitBcfPath = null;
         string? explicitViewpointsBcfPath = null;
         string? explicitClashHtmlPath = null;
@@ -191,6 +199,37 @@ internal static class Program
                         return 1;
                     }
                     explicitExportProfilerPath = args[++i];
+                    break;
+                case "--clash-xml":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --clash-xml.");
+                        return 1;
+                    }
+                    explicitClashXmlPath = args[++i];
+                    break;
+                case "--clash-bcf":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --clash-bcf.");
+                        return 1;
+                    }
+                    explicitClashBcfPath = args[++i];
+                    break;
+                case "--clash-tolerance":
+                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out clashTolerance))
+                    {
+                        Console.Error.WriteLine("Error: Invalid or missing argument for --clash-tolerance.");
+                        return 1;
+                    }
+                    break;
+                case "--nwf-xml":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --nwf-xml.");
+                        return 1;
+                    }
+                    explicitNwfXmlPath = args[++i];
                     break;
                 case "--ifc":
                     if (i + 1 >= args.Length)
@@ -331,7 +370,8 @@ internal static class Program
             return ProcessAssemblyDirectory(
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
                 explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath, explicitProfilerPath,
-                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw);
+                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance);
         }
 
         // Handle NWF assembly file
@@ -340,7 +380,8 @@ internal static class Program
             return ProcessNwfAssembly(
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
                 explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath, explicitProfilerPath,
-                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw);
+                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance);
         }
 
         // Single NWC/NWD document
@@ -523,6 +564,33 @@ internal static class Program
                 doc.ExportAppearanceProfilerXml(explicitExportProfilerPath);
             }
 
+            if (!string.IsNullOrEmpty(explicitClashXmlPath))
+            {
+                EnsureParentDirectory(explicitClashXmlPath);
+                var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
+                doc.RunClashDetection(test);
+                doc.ExportClashReportXml(explicitClashXmlPath);
+                if (printReport)
+                {
+                    Console.Error.WriteLine($"Clash detection finished: {test.TotalCount} clashes exported to '{explicitClashXmlPath}'.");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(explicitClashBcfPath))
+            {
+                EnsureParentDirectory(explicitClashBcfPath);
+                if (doc.ClashTests.Count == 0)
+                {
+                    var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
+                    doc.RunClashDetection(test);
+                }
+                doc.ExportClashBcf(explicitClashBcfPath);
+                if (printReport)
+                {
+                    Console.Error.WriteLine($"Clash BCF 2.1 exported to '{explicitClashBcfPath}'.");
+                }
+            }
+
             if (!string.IsNullOrEmpty(explicitTimeLinerCsvPath))
             {
                 EnsureParentDirectory(explicitTimeLinerCsvPath);
@@ -644,7 +712,11 @@ internal static class Program
         bool printReport,
         bool indent,
         NwcIfcExportOptions ifcOptions,
-        Stopwatch sw)
+        Stopwatch sw,
+        string? explicitClashXmlPath = null,
+        string? explicitClashBcfPath = null,
+        string? explicitNwfXmlPath = null,
+        double clashTolerance = 0.001)
     {
         outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
 
@@ -732,6 +804,26 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitBcfPath)) { EnsureParentDirectory(explicitBcfPath); assembly.SaveBcf(explicitBcfPath, clashes); }
         if (!string.IsNullOrEmpty(explicitViewpointsBcfPath)) { EnsureParentDirectory(explicitViewpointsBcfPath); assembly.SaveViewpointsBcf(explicitViewpointsBcfPath); }
         if (!string.IsNullOrEmpty(explicitClashHtmlPath)) { EnsureParentDirectory(explicitClashHtmlPath); assembly.SaveClashReportHtml(explicitClashHtmlPath, clashes); }
+        if (!string.IsNullOrEmpty(explicitClashXmlPath))
+        {
+            EnsureParentDirectory(explicitClashXmlPath);
+            assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            assembly.ExportClashReportXml(explicitClashXmlPath);
+        }
+        if (!string.IsNullOrEmpty(explicitClashBcfPath))
+        {
+            EnsureParentDirectory(explicitClashBcfPath);
+            if (assembly.ClashTests.Count == 0)
+            {
+                assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            }
+            assembly.ExportClashBcf(explicitClashBcfPath);
+        }
+        if (!string.IsNullOrEmpty(explicitNwfXmlPath))
+        {
+            EnsureParentDirectory(explicitNwfXmlPath);
+            assembly.SaveNwf(explicitNwfXmlPath);
+        }
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
@@ -794,7 +886,11 @@ internal static class Program
         bool printReport,
         bool indent,
         NwcIfcExportOptions ifcOptions,
-        Stopwatch sw)
+        Stopwatch sw,
+        string? explicitClashXmlPath = null,
+        string? explicitClashBcfPath = null,
+        string? explicitNwfXmlPath = null,
+        double clashTolerance = 0.001)
     {
         outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         var assembly = NwcAssembly.OpenNwf(nwfPath);
@@ -881,6 +977,26 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitBcfPath)) { EnsureParentDirectory(explicitBcfPath); assembly.SaveBcf(explicitBcfPath, clashes); }
         if (!string.IsNullOrEmpty(explicitViewpointsBcfPath)) { EnsureParentDirectory(explicitViewpointsBcfPath); assembly.SaveViewpointsBcf(explicitViewpointsBcfPath); }
         if (!string.IsNullOrEmpty(explicitClashHtmlPath)) { EnsureParentDirectory(explicitClashHtmlPath); assembly.SaveClashReportHtml(explicitClashHtmlPath, clashes); }
+        if (!string.IsNullOrEmpty(explicitClashXmlPath))
+        {
+            EnsureParentDirectory(explicitClashXmlPath);
+            assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            assembly.ExportClashReportXml(explicitClashXmlPath);
+        }
+        if (!string.IsNullOrEmpty(explicitClashBcfPath))
+        {
+            EnsureParentDirectory(explicitClashBcfPath);
+            if (assembly.ClashTests.Count == 0)
+            {
+                assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            }
+            assembly.ExportClashBcf(explicitClashBcfPath);
+        }
+        if (!string.IsNullOrEmpty(explicitNwfXmlPath))
+        {
+            EnsureParentDirectory(explicitNwfXmlPath);
+            assembly.SaveNwf(explicitNwfXmlPath);
+        }
 
         if (!string.IsNullOrEmpty(raycastArg))
         {

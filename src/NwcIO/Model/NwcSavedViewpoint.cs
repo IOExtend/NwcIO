@@ -14,6 +14,9 @@ public sealed record NwcSavedViewpoint
     /// <summary>Camera orientation and projection parameters.</summary>
     public required NwcCamera Camera { get; init; }
 
+    /// <summary>Convenience accessor for the 3D position of the camera.</summary>
+    public Vector3d? CameraPosition => Camera?.Position;
+
     /// <summary>Optional user comments or review notes associated with this viewpoint.</summary>
     public IReadOnlyList<string> Comments { get; init; } = Array.Empty<string>();
 

@@ -15,6 +15,7 @@ public sealed class NwcDocumentBuilder
     private readonly List<NwcPropertyRecord> _propertyRecords = [];
     private readonly List<NwcMaterial> _materials = [];
     private readonly List<Model.Sets.NwcSetItem> _selectionSets = [];
+    private readonly List<Model.Clash.NwcClashTest> _clashTests = [];
     private Model.TimeLiner.NwcTimeLinerSchedule? _timeLiner;
     private Model.Appearance.NwcAppearanceProfiler? _appearanceProfiler;
     private NwcNode? _rootNode;
@@ -140,11 +141,21 @@ public sealed class NwcDocumentBuilder
     }
 
     /// <summary>
+    /// Adds a Clash Detective test to the document.
+    /// </summary>
+    public NwcDocumentBuilder AddClashTest(Model.Clash.NwcClashTest test)
+    {
+        ArgumentNullException.ThrowIfNull(test);
+        _clashTests.Add(test);
+        return this;
+    }
+
+    /// <summary>
     /// Builds and returns the constructed <see cref="NwcDocument"/>.
     /// </summary>
     public NwcDocument Build()
     {
-        return NwcDocument.Create(
+        var doc = NwcDocument.Create(
             fileInfo: _fileInfo,
             meshes: _meshes,
             transforms: _transforms,
@@ -156,5 +167,7 @@ public sealed class NwcDocumentBuilder
             selectionSets: _selectionSets,
             timeLiner: _timeLiner,
             appearanceProfiler: _appearanceProfiler);
+        doc.ClashTests.AddRange(_clashTests);
+        return doc;
     }
 }
