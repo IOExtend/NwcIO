@@ -125,21 +125,21 @@ public sealed class NwcSearchCondition
         // 1. Built-in node properties
         if (Category.Equals("Item", StringComparison.OrdinalIgnoreCase))
         {
-            if (Property.Equals("Name", StringComparison.OrdinalIgnoreCase))
+            if (Property.Equals("Name", StringComparison.OrdinalIgnoreCase) && MatchString(node.Name, Value, Operator))
             {
-                return MatchString(node.Name, Value, Operator);
+                return true;
             }
-            if (Property.Equals("Class", StringComparison.OrdinalIgnoreCase) || Property.Equals("Type", StringComparison.OrdinalIgnoreCase))
+            if ((Property.Equals("Class", StringComparison.OrdinalIgnoreCase) || Property.Equals("Type", StringComparison.OrdinalIgnoreCase)) && MatchString(node.Class, Value, Operator))
             {
-                return MatchString(node.Class, Value, Operator);
+                return true;
             }
-            if (Property.Equals("Id", StringComparison.OrdinalIgnoreCase))
+            if (Property.Equals("Id", StringComparison.OrdinalIgnoreCase) && MatchNumeric(node.Id, Value, Operator))
             {
-                return MatchNumeric(node.Id, Value, Operator);
+                return true;
             }
-            if (Property.Equals("Guid", StringComparison.OrdinalIgnoreCase) && node.ElementGuid.HasValue)
+            if (Property.Equals("Guid", StringComparison.OrdinalIgnoreCase) && node.ElementGuid.HasValue && MatchString(node.ElementGuid.Value.ToString(), Value, Operator))
             {
-                return MatchString(node.ElementGuid.Value.ToString(), Value, Operator);
+                return true;
             }
         }
 
@@ -147,8 +147,11 @@ public sealed class NwcSearchCondition
         for (int i = 0; i < node.Properties.Count; i++)
         {
             var p = node.Properties[i];
-            if (p.Name.Equals(Property, StringComparison.OrdinalIgnoreCase) ||
-                p.Class.Contains(Category, StringComparison.OrdinalIgnoreCase))
+            bool categoryMatch = string.IsNullOrEmpty(Category) ||
+                                 Category.Equals("Item", StringComparison.OrdinalIgnoreCase) ||
+                                 p.Class.Contains(Category, StringComparison.OrdinalIgnoreCase);
+
+            if (categoryMatch && p.Name.Equals(Property, StringComparison.OrdinalIgnoreCase))
             {
                 if (p.Value is not null && MatchString(p.Value, Value, Operator))
                 {

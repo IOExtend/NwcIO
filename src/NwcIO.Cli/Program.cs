@@ -28,6 +28,8 @@ internal static class Program
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-simulate <date> Run 4D simulation at specified date (e.g. 2026-06-15)
+          --profiler <file.xml> Apply Navisworks Appearance Profiler color/transparency rules (.xml)
+          --export-profiler <file.xml> Export Appearance Profiler rules to Navisworks XML format (.xml)
           --ifc <file.ifc>   Export 3D geometry, materials, and properties to IFC (IFC2x3 / IFC4)
           --ifc-schema <schema> Target IFC schema: IFC2X3 (default) or IFC4 (Tessellation)
           --no-types         Exclude IFC type product definitions (IfcTypeProduct)
@@ -85,6 +87,8 @@ internal static class Program
         string? explicitSetsXmlPath = null;
         string? explicitTimeLinerCsvPath = null;
         string? simulateDateStr = null;
+        string? explicitProfilerPath = null;
+        string? explicitExportProfilerPath = null;
         string? explicitBcfPath = null;
         string? explicitViewpointsBcfPath = null;
         string? explicitClashHtmlPath = null;
@@ -171,6 +175,22 @@ internal static class Program
                         return 1;
                     }
                     simulateDateStr = args[++i];
+                    break;
+                case "--profiler":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --profiler.");
+                        return 1;
+                    }
+                    explicitProfilerPath = args[++i];
+                    break;
+                case "--export-profiler":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --export-profiler.");
+                        return 1;
+                    }
+                    explicitExportProfilerPath = args[++i];
                     break;
                 case "--ifc":
                     if (i + 1 >= args.Length)
@@ -310,7 +330,7 @@ internal static class Program
         {
             return ProcessAssemblyDirectory(
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
-                explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath,
+                explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw);
         }
 
@@ -319,7 +339,7 @@ internal static class Program
         {
             return ProcessNwfAssembly(
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
-                explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath,
+                explicitBcfPath, explicitViewpointsBcfPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw);
         }
 
@@ -362,6 +382,21 @@ internal static class Program
 
         NwcAssembly? singleAssembly = null;
         NwcAssembly GetSingleAssembly() => singleAssembly ??= NwcAssembly.Create(Path.GetFileNameWithoutExtension(inputPath), doc);
+
+        if (!string.IsNullOrEmpty(explicitProfilerPath))
+        {
+            if (!File.Exists(explicitProfilerPath))
+            {
+                Console.Error.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
+                return 2;
+            }
+            var profiler = Model.Appearance.NwcXmlAppearanceProfilerSerializer.Open(explicitProfilerPath);
+            int overridden = doc.ApplyAppearanceProfiler(profiler);
+            if (printReport)
+            {
+                Console.Error.WriteLine($"Appearance profiler applied: {overridden} elements overridden.");
+            }
+        }
 
         try
         {
@@ -477,6 +512,17 @@ internal static class Program
                 doc.ExportSelectionSetsXml(explicitSetsXmlPath);
             }
 
+            if (!string.IsNullOrEmpty(explicitExportProfilerPath))
+            {
+                if (doc.AppearanceProfiler is null)
+                {
+                    Console.Error.WriteLine("Error: Document has no Appearance Profiler rules to export.");
+                    return 1;
+                }
+                EnsureParentDirectory(explicitExportProfilerPath);
+                doc.ExportAppearanceProfilerXml(explicitExportProfilerPath);
+            }
+
             if (!string.IsNullOrEmpty(explicitTimeLinerCsvPath))
             {
                 EnsureParentDirectory(explicitTimeLinerCsvPath);
@@ -589,6 +635,7 @@ internal static class Program
         string? explicitBcfPath,
         string? explicitViewpointsBcfPath,
         string? explicitClashHtmlPath,
+        string? explicitProfilerPath,
         bool worldCoords,
         bool checkClashes,
         bool listViewpoints,
@@ -602,6 +649,21 @@ internal static class Program
         outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
 
         var assembly = NwcAssembly.LoadFromDirectory(dirPath);
+
+        if (!string.IsNullOrEmpty(explicitProfilerPath))
+        {
+            if (!File.Exists(explicitProfilerPath))
+            {
+                Console.Error.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
+                return 2;
+            }
+            var profiler = Model.Appearance.NwcXmlAppearanceProfilerSerializer.Open(explicitProfilerPath);
+            int overridden = assembly.ApplyAppearanceProfiler(profiler);
+            if (printReport)
+            {
+                Console.Error.WriteLine($"Appearance profiler applied to assembly: {overridden} elements overridden.");
+            }
+        }
 
         IReadOnlyList<NwcClash>? clashes = null;
         bool needClashes = checkClashes ||
@@ -723,6 +785,7 @@ internal static class Program
         string? explicitBcfPath,
         string? explicitViewpointsBcfPath,
         string? explicitClashHtmlPath,
+        string? explicitProfilerPath,
         bool worldCoords,
         bool checkClashes,
         bool listViewpoints,
@@ -735,6 +798,21 @@ internal static class Program
     {
         outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         var assembly = NwcAssembly.OpenNwf(nwfPath);
+
+        if (!string.IsNullOrEmpty(explicitProfilerPath))
+        {
+            if (!File.Exists(explicitProfilerPath))
+            {
+                Console.Error.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
+                return 2;
+            }
+            var profiler = Model.Appearance.NwcXmlAppearanceProfilerSerializer.Open(explicitProfilerPath);
+            int overridden = assembly.ApplyAppearanceProfiler(profiler);
+            if (printReport)
+            {
+                Console.Error.WriteLine($"Appearance profiler applied to assembly: {overridden} elements overridden.");
+            }
+        }
 
         IReadOnlyList<NwcClash>? clashes = null;
         bool needClashes = checkClashes ||

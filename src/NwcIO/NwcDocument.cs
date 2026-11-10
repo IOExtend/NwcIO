@@ -74,6 +74,9 @@ public sealed class NwcDocument
     /// <summary>4D TimeLiner construction simulation schedule.</summary>
     public Model.TimeLiner.NwcTimeLinerSchedule? TimeLiner { get; }
 
+    /// <summary>Navisworks Appearance Profiler color/transparency rules associated with the document.</summary>
+    public Model.Appearance.NwcAppearanceProfiler? AppearanceProfiler { get; set; }
+
     /// <summary>Gets the total 3D bounding box over all meshes in the document.</summary>
     public BoundingBox3d BoundingBox => SpatialIndex.Bounds;
 
@@ -234,7 +237,8 @@ public sealed class NwcDocument
         NwcXRefTable? xRefs = null,
         NwcDbCacheDirectory? dbCache = null,
         IEnumerable<Model.Sets.NwcSetItem>? selectionSets = null,
-        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null)
+        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null,
+        Model.Appearance.NwcAppearanceProfiler? appearanceProfiler = null)
     {
         var fi = fileInfo ?? new NwcFileInfo { SourcePath = "Model.rvt", LoaderPlugin = "LcOpRevitExport", SourceTimestampUtc = DateTime.UtcNow };
         var mList = meshes?.ToList() ?? [];
@@ -253,7 +257,37 @@ public sealed class NwcDocument
             TrailingGap = 0,
         };
 
-        return new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
+        var doc = new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
+        if (appearanceProfiler is not null)
+        {
+            doc.ApplyAppearanceProfiler(appearanceProfiler);
+        }
+        return doc;
+    }
+
+    /// <summary>Applies an appearance profiler to colorize the document based on property rules.</summary>
+    /// <returns>The total number of scene nodes and meshes whose appearance was overridden.</returns>
+    public int ApplyAppearanceProfiler(Model.Appearance.NwcAppearanceProfiler profiler)
+    {
+        ArgumentNullException.ThrowIfNull(profiler);
+        AppearanceProfiler = profiler;
+        return profiler.Apply(this);
+    }
+
+    /// <summary>Exports the document appearance profiler rules to a Navisworks XML format (.xml).</summary>
+    public void ExportAppearanceProfilerXml(string path)
+    {
+        if (AppearanceProfiler is null)
+            throw new InvalidOperationException("Document does not contain an Appearance Profiler.");
+        Model.Appearance.NwcXmlAppearanceProfilerSerializer.Save(AppearanceProfiler, path);
+    }
+
+    /// <summary>Exports the document appearance profiler rules to an XML stream.</summary>
+    public void ExportAppearanceProfilerXml(Stream stream)
+    {
+        if (AppearanceProfiler is null)
+            throw new InvalidOperationException("Document does not contain an Appearance Profiler.");
+        Model.Appearance.NwcXmlAppearanceProfilerSerializer.Write(AppearanceProfiler, stream);
     }
 
     /// <summary>Exports the document selection sets and search sets to Navisworks XML format.</summary>

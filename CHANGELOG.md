@@ -2,6 +2,24 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
+## [0.4.0] - 2026-11-10
+
+### Major Additions & Capabilities
+- **Autodesk Navisworks Appearance Profiler**:
+  - Strongly typed appearance rule and profiler model: `NwcAppearanceRule` and `NwcAppearanceProfiler`.
+  - Color overrides (RGB) and transparency levels (0.0 to 1.0) dynamically mapped to scene graph nodes and geometry meshes using `NwcSearchCondition` criteria.
+  - Scene traversal engine: `NwcAppearanceProfiler.Apply(NwcDocument)` applies rules across the full scene tree and geometry meshes, updating element materials.
+  - Multi-model assembly support: `NwcAssembly.ApplyAppearanceProfiler(NwcAppearanceProfiler)` applies rules across all contributing federated models.
+  - XML exchange: `NwcXmlAppearanceProfilerSerializer` reading and writing Autodesk Navisworks Appearance Profiler rule files (`.xml`) adhering to the official `nw-exchange-12.0.xsd` schema.
+- **Fluent Builder & Document Integration**:
+  - Added `NwcDocument.ApplyAppearanceProfiler(...)` and `NwcDocument.ExportAppearanceProfilerXml(...)`.
+  - Added `NwcDocumentBuilder.SetAppearanceProfiler(...)` and `NwcDocumentBuilder.AddAppearanceRule(...)`.
+- **CLI Enhancements (`nwcio`)**:
+  - Added `--profiler <rules.xml>`: loads appearance profiler XML rules and applies color/transparency overrides before exporting to GLB, IFC, OBJ, JSON, or NWC.
+  - Added `--export-profiler <rules.xml>`: exports the document's appearance profiler rules to an XML file.
+- **Cross-Ecosystem Interoperability (NwcIO &harr; IfcIO)**:
+  - Integration testing between NwcIO and IfcIO verifying end-to-end NWC &rarr; IFC STEP physical file generation &rarr; `IfcModel.Open` deserialization of meshes, vertices, triangles, and property sets.
+
 ## [0.3.0] - 2026-11-10
 
 ### Major Additions & Capabilities

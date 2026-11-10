@@ -143,6 +143,16 @@ nwcio model.nwc --timeliner-csv ./schedule.csv
 nwcio model.nwc --timeliner-simulate 2026-06-01 --report
 ```
 
+### Navisworks Appearance Profiler & Color Overrides
+
+```sh
+# Apply Appearance Profiler XML rules to recolor model before GLB/IFC export
+nwcio model.nwc model.glb --profiler rules.xml
+
+# Export Appearance Profiler rules from document to XML
+nwcio model.nwc --export-profiler rules.xml
+```
+
 ### Exit Codes
 - `0` — Success
 - `1` — Usage error (missing or invalid arguments)
@@ -349,6 +359,47 @@ if (doc.TimeLiner != null)
     // Export schedule to standard TimeLiner CSV
     doc.ExportTimeLinerCsv("construction_schedule.csv");
 }
+```
+
+### Autodesk Navisworks Appearance Profiler
+
+Systematically override colors and transparencies across disciplines (HVAC, piping, architecture, structural):
+
+```csharp
+using NwcIO.Model.Appearance;
+using NwcIO.Model.Sets;
+
+var profiler = new NwcAppearanceProfiler();
+
+// Add color overrides based on properties
+profiler.AddRule(
+    name: "Supply Air Blue",
+    category: "Mechanical",
+    property: "System",
+    op: NwcSearchOperator.Equals,
+    value: "Supply Air",
+    color: new RgbaColor(0.0f, 0.45f, 0.85f, 1.0f),
+    transparency: 0.1f);
+
+profiler.AddRule(
+    name: "Exhaust Air Magenta",
+    category: "Mechanical",
+    property: "System",
+    op: NwcSearchOperator.Equals,
+    value: "Exhaust",
+    color: new RgbaColor(0.85f, 0.1f, 0.6f, 1.0f),
+    transparency: 0.2f);
+
+// Apply rules to document scene graph and 3D meshes
+int overridden = doc.ApplyAppearanceProfiler(profiler);
+Console.WriteLine($"Overrode appearance of {overridden} elements.");
+
+// Export profiler rules to standard Autodesk Navisworks XML format (.xml)
+doc.ExportAppearanceProfilerXml("appearance_rules.xml");
+
+// Load external XML rules and apply to any model or assembly
+var externalRules = NwcXmlAppearanceProfilerSerializer.Open("external_rules.xml");
+assembly.ApplyAppearanceProfiler(externalRules);
 ```
 
 ---

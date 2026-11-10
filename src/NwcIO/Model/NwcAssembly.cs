@@ -197,6 +197,21 @@ public sealed class NwcAssembly
     }
 
     /// <summary>
+    /// Applies an appearance profiler across all contributing models in the federated assembly.
+    /// </summary>
+    /// <returns>The total number of scene nodes and meshes whose appearance was overridden.</returns>
+    public int ApplyAppearanceProfiler(Appearance.NwcAppearanceProfiler profiler)
+    {
+        ArgumentNullException.ThrowIfNull(profiler);
+        int total = 0;
+        for (int i = 0; i < Models.Count; i++)
+        {
+            total += Models[i].ApplyAppearanceProfiler(profiler);
+        }
+        return total;
+    }
+
+    /// <summary>
     /// Detects spatial geometric clashes (bounding box overlaps) between meshes belonging to different models.
     /// </summary>
     public IReadOnlyList<NwcClash> FindClashes(double tolerance = 0.0)
