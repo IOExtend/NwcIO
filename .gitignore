@@ -13,3 +13,7 @@ artifacts/
 *.tmp
 __pycache__/
 *.pyc
+
+# Documentation site (DocFX output and generated API pages)
+_site/
+docs/api/

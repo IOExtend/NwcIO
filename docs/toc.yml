@@ -1,0 +1,17 @@
+- name: Getting started
+  href: getting-started.md
+- name: Guides
+  href: public-api.md
+  items:
+    - name: Public API
+      href: public-api.md
+    - name: Binary Format Notes
+      href: format-notes.md
+    - name: Test Fixtures
+      href: test-fixtures.md
+- name: API reference
+  href: api/
+- name: GitHub
+  href: https://github.com/IOExtend/NwcIO
+- name: DeepWiki
+  href: https://deepwiki.com/IOExtend/NwcIO

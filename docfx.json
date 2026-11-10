@@ -1,0 +1,27 @@
+{
+  "metadata": [
+    {
+      "src": [
+        { "src": "src/NwcIO", "files": ["NwcIO.csproj"] }
+      ],
+      "dest": "docs/api",
+      "properties": { "TargetFramework": "net10.0" },
+      "outputFormat": "apiPage"
+    }
+  ],
+  "build": {
+    "content": [
+      { "src": "docs", "files": ["*.md", "toc.yml", "api/**/*.yml", "api/**/*.md"] }
+    ],
+    "resource": [
+      { "src": "docs", "files": ["images/**"] }
+    ],
+    "output": "_site",
+    "globalMetadata": {
+      "_appTitle": "NwcIO",
+      "_appFooter": "NwcIO is licensed under the MIT License. Not affiliated with Autodesk.",
+      "_enableSearch": true
+    },
+    "template": ["default", "modern"]
+  }
+}
