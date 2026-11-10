@@ -18,6 +18,10 @@ public sealed class NwcHtmlViewerOptions
     public bool IncludeSectioning { get; set; } = true;
     public bool IncludeMeasure { get; set; } = true;
     public bool IncludeGrids { get; set; } = true;
+    public bool IncludeTimeLiner { get; set; } = true;
+    public TimeLiner.NwcTimeLinerSchedule? TimeLiner { get; set; }
+    public bool IncludeSelectionSets { get; set; } = true;
+    public IReadOnlyList<Sets.NwcSetItem>? SelectionSets { get; set; }
     public Grids.NwcGridSystem? GridSystem { get; set; }
     public string Theme { get; set; } = "dark";
     public int MaxMeshVertices { get; set; } = 500000;
@@ -39,6 +43,8 @@ public static class NwcHtmlViewerExporter
 
         options ??= new NwcHtmlViewerOptions { Title = Path.GetFileNameWithoutExtension(path) };
         options.GridSystem ??= doc.GridSystem;
+        options.TimeLiner ??= doc.TimeLiner;
+        options.SelectionSets ??= doc.SelectionSets;
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
         Write(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options);
@@ -54,6 +60,8 @@ public static class NwcHtmlViewerExporter
 
         options ??= new NwcHtmlViewerOptions { Title = assembly.Name };
         options.GridSystem ??= assembly.GridSystem;
+        options.TimeLiner ??= assembly.TimeLiner;
+        options.SelectionSets ??= assembly.SelectionSets;
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
         Write(writer, assembly.AllMeshes, assembly.SavedViewpoints, assembly.ClashTests, assembly.BoundingBox, options);
@@ -136,6 +144,11 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 .measure-panel .title { font-weight: 600; color: #4dabf7; margin-bottom: 4px; display: flex; justify-content: space-between; }
 .measure-panel .row { display: flex; justify-content: space-between; margin: 2px 0; color: #ccc; }
 .measure-panel .val { font-weight: 600; color: #fff; }
+.timeliner-bar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(25,25,25,0.94); border: 1px solid #007acc; border-radius: 6px; padding: 8px 16px; display: flex; gap: 12px; align-items: center; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,0.5); min-width: 480px; }
+.timeliner-bar button { background: #2a2a2a; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+.timeliner-bar button:hover { background: #3a3a3a; }
+.timeliner-bar input[type=range] { flex: 1; accent-color: #007acc; cursor: pointer; }
+.timeliner-date { font-family: monospace; font-size: 12px; font-weight: 600; color: #4dabf7; min-width: 130px; text-align: center; }
 </style>
 """;
     }
@@ -146,6 +159,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 <header>
   <h1>{System.Net.WebUtility.HtmlEncode(title)}</h1>
   <div class="toolbar">
+    <button class="btn" id="btn-timeliner" style="display:none;">4D TimeLiner</button>
     <button class="btn" id="btn-measure">Measure</button>
     <button class="btn" id="btn-toggle-sec">Sectioning</button>
     <button class="btn" id="btn-wireframe">Wireframe</button>
@@ -159,10 +173,12 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       <button class="tab-btn active" data-tab="tab-vps">Viewpoints</button>
       <button class="tab-btn" data-tab="tab-clashes">Clashes</button>
       <button class="tab-btn" data-tab="tab-tree">Hierarchy</button>
+      <button class="tab-btn" id="tab-btn-sets" data-tab="tab-sets" style="display:none;">Sets</button>
     </div>
     <div class="panel-content" id="tab-vps"></div>
     <div class="panel-content" id="tab-clashes" style="display:none;"></div>
     <div class="panel-content" id="tab-tree" style="display:none;"></div>
+    <div class="panel-content" id="tab-sets" style="display:none;"></div>
   </div>
   <div id="viewport-container">
     <div class="hud-stats" id="hud-stats">Meshes: 0 | Vertices: 0</div>
@@ -177,6 +193,17 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         <div class="row"><span>dX / dY / dZ:</span><span class="val" id="m-deltas">0 / 0 / 0</span></div>
         <div class="row"><span>Pitch:</span><span class="val" id="m-pitch">0.0°</span></div>
       </div>
+    </div>
+    <div class="timeliner-bar" id="timeliner-bar" style="display:none;">
+      <button id="tl-play">▶ Play</button>
+      <input type="range" id="tl-slider" min="0" max="1000" value="0">
+      <span class="timeliner-date" id="tl-date">--/--/----</span>
+      <select id="tl-speed" style="background:#222;color:#ccc;border:1px solid #444;border-radius:3px;padding:3px;font-size:11px;">
+        <option value="1">1x</option>
+        <option value="5">5x</option>
+        <option value="15">15x</option>
+        <option value="60">60x</option>
+      </select>
     </div>
     <div class="section-panel" id="sec-controls" style="display:none;">
       <label><input type="checkbox" id="clip-x-en"> Cut X</label>
@@ -222,6 +249,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   let lastMouseX = 0;
   let lastMouseY = 0;
   let selectedMeshIndex = -1;
+  let selectedSetMeshIndices = new Set();
   let wireframeMode = false;
   let measureMode = false;
   let measureP1 = null;
@@ -438,6 +466,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     lastVMat = vMat;
 
     for (const gm of gpuMeshes) {
+      if (gm.hidden) continue;
+
       gl.bindBuffer(gl.ARRAY_BUFFER, gm.vbo);
       gl.vertexAttribPointer(loc.aPos, 3, gl.FLOAT, false, 0, 0);
       gl.enableVertexAttribArray(loc.aPos);
@@ -454,6 +484,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
       if (gm.index === selectedMeshIndex) {
         gl.uniform4f(loc.uHigh, 1.0, 0.75, 0.0, 0.7);
+      } else if (selectedSetMeshIndices.has(gm.index)) {
+        gl.uniform4f(loc.uHigh, 0.0, 0.7, 1.0, 0.7);
+      } else if (gm.simColor) {
+        gl.uniform4f(loc.uHigh, gm.simColor[0], gm.simColor[1], gm.simColor[2], gm.simColor[3]);
       } else {
         gl.uniform4f(loc.uHigh, 0, 0, 0, 0);
       }
@@ -785,6 +819,199 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     treeContainer.appendChild(item);
   });
 
+  // Sets Tab
+  const setsTabBtn = document.getElementById('tab-btn-sets');
+  const setsContainer = document.getElementById('tab-sets');
+  if (modelData.selectionSets && modelData.selectionSets.length > 0) {
+    if (setsTabBtn) setsTabBtn.style.display = 'inline-block';
+
+    function renderSetItems(items, container) {
+      items.forEach(item => {
+        if (item.type === 'folder') {
+          const folderDiv = document.createElement('div');
+          folderDiv.style.fontWeight = '600';
+          folderDiv.style.fontSize = '12px';
+          folderDiv.style.margin = '6px 0 2px 0';
+          folderDiv.textContent = '📁 ' + item.name;
+          container.appendChild(folderDiv);
+          if (item.children && item.children.length > 0) {
+            const subDiv = document.createElement('div');
+            subDiv.style.paddingLeft = '12px';
+            renderSetItems(item.children, subDiv);
+            container.appendChild(subDiv);
+          }
+        } else {
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'tree-item';
+          itemDiv.textContent = (item.type === 'search' ? '🔍 ' : '📌 ') + item.name;
+          itemDiv.addEventListener('click', () => {
+            selectedSetMeshIndices.clear();
+            if (item.nodeIds && item.nodeIds.length > 0) {
+              const idSet = new Set(item.nodeIds);
+              gpuMeshes.forEach(gm => {
+                if ((gm.raw.nodeId !== undefined && idSet.has(gm.raw.nodeId)) || idSet.has(gm.raw.id)) {
+                  selectedSetMeshIndices.add(gm.index);
+                }
+              });
+            }
+            requestAnimationFrame(render);
+          });
+          container.appendChild(itemDiv);
+        }
+      });
+    }
+
+    renderSetItems(modelData.selectionSets, setsContainer);
+  } else if (setsContainer) {
+    setsContainer.innerHTML = '<div style="color:#666;font-size:11px;padding:8px;">No selection sets.</div>';
+  }
+
+  // 4D TimeLiner Controls
+  const btnTl = document.getElementById('btn-timeliner');
+  const tlBar = document.getElementById('timeliner-bar');
+  const tlPlay = document.getElementById('tl-play');
+  const tlSlider = document.getElementById('tl-slider');
+  const tlDate = document.getElementById('tl-date');
+  const tlSpeed = document.getElementById('tl-speed');
+
+  if (modelData.timeliner && modelData.timeliner.tasks && modelData.timeliner.tasks.length > 0) {
+    btnTl.style.display = 'inline-block';
+    const tlStart = new Date(modelData.timeliner.start).getTime();
+    const tlEnd = new Date(modelData.timeliner.end).getTime();
+    const tlSpan = Math.max(1, tlEnd - tlStart);
+    let tlActive = false;
+    let tlPlaying = false;
+    let tlInterval = null;
+
+    btnTl.addEventListener('click', function() {
+      tlActive = !tlActive;
+      tlBar.style.display = tlActive ? 'flex' : 'none';
+      this.classList.toggle('active', tlActive);
+      if (!tlActive && tlPlaying) stopTlPlay();
+      updateTlSimulation();
+    });
+
+    function getSimDate(val) {
+      return new Date(tlStart + (val / 1000.0) * tlSpan);
+    }
+
+    function updateTlSimulation() {
+      const simDate = getSimDate(parseFloat(tlSlider.value));
+      tlDate.textContent = simDate.toISOString().slice(0, 10);
+
+      if (!tlActive) {
+        gpuMeshes.forEach(gm => { gm.hidden = false; gm.simColor = null; });
+        requestAnimationFrame(render);
+        return;
+      }
+
+      const simTime = simDate.getTime();
+      const nodeState = new Map();
+      modelData.timeliner.tasks.forEach(t => {
+        const tStart = new Date(t.start).getTime();
+        const tEnd = new Date(t.end).getTime();
+        let state = 'NotStarted';
+        if (simTime >= tEnd) state = 'Completed';
+        else if (simTime >= tStart) state = 'InProgress';
+
+        (t.nodeIds || []).forEach(nid => {
+          nodeState.set(nid, { type: t.taskType, state: state });
+        });
+      });
+
+      gpuMeshes.forEach(gm => {
+        const nid = gm.raw.nodeId !== undefined ? gm.raw.nodeId : gm.raw.id;
+        const st = nodeState.get(nid);
+        if (!st) {
+          gm.hidden = false;
+          gm.simColor = null;
+          return;
+        }
+
+        if (st.type === 'Construct') {
+          if (st.state === 'NotStarted') {
+            gm.hidden = true;
+            gm.simColor = null;
+          } else if (st.state === 'InProgress') {
+            gm.hidden = false;
+            gm.simColor = [0.2, 0.95, 0.2, 0.85];
+          } else {
+            gm.hidden = false;
+            gm.simColor = null;
+          }
+        } else if (st.type === 'Demolish') {
+          if (st.state === 'NotStarted') {
+            gm.hidden = false;
+            gm.simColor = null;
+          } else if (st.state === 'InProgress') {
+            gm.hidden = false;
+            gm.simColor = [0.95, 0.2, 0.2, 0.85];
+          } else {
+            gm.hidden = true;
+            gm.simColor = null;
+          }
+        } else if (st.type === 'Temporary') {
+          if (st.state === 'InProgress') {
+            gm.hidden = false;
+            gm.simColor = [0.95, 0.85, 0.2, 0.85];
+          } else {
+            gm.hidden = true;
+            gm.simColor = null;
+          }
+        }
+      });
+
+      requestAnimationFrame(render);
+    }
+
+    tlSlider.addEventListener('input', () => {
+      updateTlSimulation();
+    });
+
+    function startTlPlay() {
+      tlPlaying = true;
+      tlPlay.textContent = '⏸ Pause';
+      const speed = parseFloat(tlSpeed.value) || 1;
+      const step = 2 * speed;
+      tlInterval = setInterval(() => {
+        let val = parseFloat(tlSlider.value) + step;
+        if (val >= 1000) {
+          val = 1000;
+          tlSlider.value = val;
+          stopTlPlay();
+        } else {
+          tlSlider.value = val;
+        }
+        updateTlSimulation();
+      }, 50);
+    }
+
+    function stopTlPlay() {
+      tlPlaying = false;
+      tlPlay.textContent = '▶ Play';
+      if (tlInterval) {
+        clearInterval(tlInterval);
+        tlInterval = null;
+      }
+    }
+
+    tlPlay.addEventListener('click', () => {
+      if (tlPlaying) {
+        stopTlPlay();
+      } else {
+        if (parseFloat(tlSlider.value) >= 1000) tlSlider.value = 0;
+        startTlPlay();
+      }
+    });
+
+    tlSpeed.addEventListener('change', () => {
+      if (tlPlaying) {
+        stopTlPlay();
+        startTlPlay();
+      }
+    });
+  }
+
   // Tab Switching
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -894,6 +1121,11 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             if (totalVerts >= options.MaxMeshVertices) break;
 
             writer.WriteStartObject();
+            writer.WriteNumber("id", mesh.Id);
+            if (mesh.Node is not null)
+            {
+                writer.WriteNumber("nodeId", mesh.Node.Id);
+            }
             writer.WriteString("name", mesh.Name ?? $"Mesh {mesh.Id}");
             writer.WriteString("layer", mesh.Node?.Class ?? "Default");
 
@@ -1059,9 +1291,84 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteEndArray();
         }
 
+        // Selection Sets
+        if (options.IncludeSelectionSets && options.SelectionSets is not null && options.SelectionSets.Count > 0)
+        {
+            writer.WriteStartArray("selectionSets");
+            foreach (var item in options.SelectionSets)
+            {
+                WriteSetItem(writer, item);
+            }
+            writer.WriteEndArray();
+        }
+
+        // 4D TimeLiner
+        if (options.IncludeTimeLiner && options.TimeLiner is not null && options.TimeLiner.Tasks.Count > 0)
+        {
+            var start = options.TimeLiner.OverallStart;
+            var end = options.TimeLiner.OverallEnd;
+            if (start.HasValue && end.HasValue)
+            {
+                writer.WriteStartObject("timeliner");
+                writer.WriteString("start", start.Value.ToString("o", CultureInfo.InvariantCulture));
+                writer.WriteString("end", end.Value.ToString("o", CultureInfo.InvariantCulture));
+                writer.WriteStartArray("tasks");
+                foreach (var task in options.TimeLiner.FlattenTasks())
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("id", task.Id);
+                    writer.WriteString("name", task.Name);
+                    writer.WriteString("taskType", task.TaskType.ToString());
+                    writer.WriteString("start", task.PlannedStart.ToString("o", CultureInfo.InvariantCulture));
+                    writer.WriteString("end", task.PlannedEnd.ToString("o", CultureInfo.InvariantCulture));
+                    writer.WriteStartArray("nodeIds");
+                    foreach (var nodeId in task.AttachedNodeIds)
+                    {
+                        writer.WriteNumberValue(nodeId);
+                    }
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+        }
+
         writer.WriteEndObject();
         writer.Flush();
 
         return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void WriteSetItem(Utf8JsonWriter writer, Sets.NwcSetItem item)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("name", item.Name);
+        if (item is Sets.NwcSelectionSet sel)
+        {
+            writer.WriteString("type", "selection");
+            writer.WriteStartArray("nodeIds");
+            foreach (var id in sel.NodeIds)
+            {
+                writer.WriteNumberValue(id);
+            }
+            writer.WriteEndArray();
+        }
+        else if (item is Sets.NwcSelectionSetFolder folder)
+        {
+            writer.WriteString("type", "folder");
+            writer.WriteStartArray("children");
+            foreach (var child in folder.Children)
+            {
+                WriteSetItem(writer, child);
+            }
+            writer.WriteEndArray();
+        }
+        else if (item is Sets.NwcSearchSet search)
+        {
+            writer.WriteString("type", "search");
+            writer.WriteNumber("conditionCount", search.Conditions.Count);
+        }
+        writer.WriteEndObject();
     }
 }

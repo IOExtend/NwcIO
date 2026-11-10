@@ -89,6 +89,18 @@ public readonly record struct BoundingBox3d(Vector3d Min, Vector3d Max)
         Min.Y <= other.Max.Y && Max.Y >= other.Min.Y &&
         Min.Z <= other.Max.Z && Max.Z >= other.Min.Z;
 
+    /// <summary>
+    /// Computes the intersection of this bounding box with another.
+    /// Returns <see cref="Empty"/> if the boxes do not intersect.
+    /// </summary>
+    public BoundingBox3d Intersect(BoundingBox3d other)
+    {
+        if (!Intersects(other)) return Empty;
+        return new(
+            new(Math.Max(Min.X, other.Min.X), Math.Max(Min.Y, other.Min.Y), Math.Max(Min.Z, other.Min.Z)),
+            new(Math.Min(Max.X, other.Max.X), Math.Min(Max.Y, other.Max.Y), Math.Min(Max.Z, other.Max.Z)));
+    }
+
     public BoundingBox3d Union(BoundingBox3d other)
     {
         if (IsEmpty) return other;

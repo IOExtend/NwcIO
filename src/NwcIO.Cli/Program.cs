@@ -27,11 +27,16 @@ internal static class Program
           --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
+          --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
+          --link-timeliner   Auto-link schedule tasks to Selection Sets, Search Sets, or element names
           --timeliner-simulate <date> Run 4D simulation at specified date (e.g. 2026-06-15)
           --profiler <file.xml> Apply Navisworks Appearance Profiler color/transparency rules (.xml)
           --export-profiler <file.xml> Export Appearance Profiler rules to Navisworks XML format (.xml)
           --clash-xml <file.xml> Run clash detection and export Navisworks Clash Report XML (.xml)
           --clash-bcf <file.bcfzip> Run clash detection and export buildingSMART BCF 2.1 archive (.bcfzip)
+          --clash-matrix <file.json> Execute multi-discipline coordination matrix and export JSON report
+          --clash-matrix-md <file.md> Export clash matrix coordination report as Markdown table
+          --clash-matrix-bcf <file.bcfzip> Export clash matrix conflicts to buildingSMART BCF 2.1 zip
           --clash-group <mode> Group clashes: proximity, element, grid, layer
           --clash-radius <m>   Cluster radius in meters for proximity grouping (default: 1.0)
           --clash-tolerance <m> Set clash detection tolerance in meters (default: 0.001)
@@ -100,6 +105,11 @@ internal static class Program
         string? explicitNwcPath = null;
         string? explicitSetsXmlPath = null;
         string? explicitTimeLinerCsvPath = null;
+        string? explicitTimeLinerXmlPath = null;
+        bool linkTimeLiner = false;
+        string? explicitClashMatrixJsonPath = null;
+        string? explicitClashMatrixMdPath = null;
+        string? explicitClashMatrixBcfPath = null;
         string? simulateDateStr = null;
         string? explicitProfilerPath = null;
         string? explicitExportProfilerPath = null;
@@ -195,6 +205,41 @@ internal static class Program
                         return 1;
                     }
                     explicitTimeLinerCsvPath = args[++i];
+                    break;
+                case "--timeliner-xml":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --timeliner-xml.");
+                        return 1;
+                    }
+                    explicitTimeLinerXmlPath = args[++i];
+                    break;
+                case "--link-timeliner":
+                    linkTimeLiner = true;
+                    break;
+                case "--clash-matrix":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix.");
+                        return 1;
+                    }
+                    explicitClashMatrixJsonPath = args[++i];
+                    break;
+                case "--clash-matrix-md":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix-md.");
+                        return 1;
+                    }
+                    explicitClashMatrixMdPath = args[++i];
+                    break;
+                case "--clash-matrix-bcf":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix-bcf.");
+                        return 1;
+                    }
+                    explicitClashMatrixBcfPath = args[++i];
                     break;
                 case "--timeliner-simulate":
                     if (i + 1 >= args.Length)
@@ -470,7 +515,8 @@ internal static class Program
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
                 explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
-                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius);
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
+                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath);
         }
 
         // Handle NWF assembly file
@@ -480,7 +526,8 @@ internal static class Program
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
                 explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
-                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius);
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
+                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath);
         }
 
         // Single NWC/NWD document
@@ -775,6 +822,65 @@ internal static class Program
                 doc.ExportTimeLinerCsv(explicitTimeLinerCsvPath);
             }
 
+            if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
+            {
+                if (File.Exists(explicitTimeLinerXmlPath))
+                {
+                    doc.ImportTimeLinerXml(explicitTimeLinerXmlPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
+                    }
+                }
+                else
+                {
+                    EnsureParentDirectory(explicitTimeLinerXmlPath);
+                    doc.ExportTimeLinerXml(explicitTimeLinerXmlPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+                    }
+                }
+            }
+
+            if (linkTimeLiner && doc.TimeLiner is not null)
+            {
+                int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(doc.TimeLiner, doc.SelectionSets, doc);
+                if (linked == 0 && doc.RootNode is not null)
+                {
+                    linked = Model.TimeLiner.NwcTimeLinerLinker.LinkByNodeName(doc.TimeLiner, doc.RootNode);
+                }
+                Console.WriteLine($"Linked {linked} TimeLiner tasks to model elements.");
+            }
+
+            bool needDocClashMatrix = !string.IsNullOrEmpty(explicitClashMatrixJsonPath) ||
+                                      !string.IsNullOrEmpty(explicitClashMatrixMdPath) ||
+                                      !string.IsNullOrEmpty(explicitClashMatrixBcfPath);
+            if (needDocClashMatrix)
+            {
+                var singleAss = GetSingleAssembly();
+                singleAss.ClashMatrix ??= Model.Clash.NwcClashMatrix.CreateFromAssembly(singleAss);
+                singleAss.ClashMatrix.Execute(singleAss);
+
+                if (!string.IsNullOrEmpty(explicitClashMatrixJsonPath))
+                {
+                    EnsureParentDirectory(explicitClashMatrixJsonPath);
+                    singleAss.ExportClashMatrixJson(explicitClashMatrixJsonPath, indent);
+                }
+                if (!string.IsNullOrEmpty(explicitClashMatrixMdPath))
+                {
+                    EnsureParentDirectory(explicitClashMatrixMdPath);
+                    singleAss.ExportClashMatrixMarkdown(explicitClashMatrixMdPath);
+                }
+                if (!string.IsNullOrEmpty(explicitClashMatrixBcfPath))
+                {
+                    EnsureParentDirectory(explicitClashMatrixBcfPath);
+                    singleAss.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
+                }
+
+                Console.WriteLine(singleAss.ClashMatrix.ToMarkdownTable());
+            }
+
             if (!string.IsNullOrEmpty(simulateDateStr))
             {
                 if (doc.TimeLiner is null || doc.TimeLiner.Tasks.Count == 0)
@@ -898,11 +1004,37 @@ internal static class Program
         double clashTolerance = 0.001,
         string? explicitHtmlViewerPath = null,
         string? clashGroupMode = null,
-        double clashRadius = 1.0)
+        double clashRadius = 1.0,
+        string? explicitTimeLinerXmlPath = null,
+        bool linkTimeLiner = false,
+        string? explicitClashMatrixJsonPath = null,
+        string? explicitClashMatrixMdPath = null,
+        string? explicitClashMatrixBcfPath = null)
     {
         outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
 
         var assembly = NwcAssembly.LoadFromDirectory(dirPath);
+
+        if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
+        {
+            if (File.Exists(explicitTimeLinerXmlPath))
+            {
+                assembly.ImportTimeLinerXml(explicitTimeLinerXmlPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
+            }
+            else
+            {
+                EnsureParentDirectory(explicitTimeLinerXmlPath);
+                assembly.ExportTimeLinerXml(explicitTimeLinerXmlPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+            }
+        }
+
+        if (linkTimeLiner && assembly.TimeLiner is not null)
+        {
+            int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
+            Console.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+        }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
         {
@@ -1013,6 +1145,37 @@ internal static class Program
         {
             EnsureParentDirectory(explicitNwfXmlPath);
             assembly.SaveNwf(explicitNwfXmlPath);
+        }
+
+        bool needMatrix = !string.IsNullOrEmpty(explicitClashMatrixJsonPath) ||
+                          !string.IsNullOrEmpty(explicitClashMatrixMdPath) ||
+                          !string.IsNullOrEmpty(explicitClashMatrixBcfPath);
+
+        if (needMatrix)
+        {
+            assembly.ClashMatrix ??= Model.Clash.NwcClashMatrix.CreateFromAssembly(assembly);
+            assembly.ClashMatrix.Execute(assembly);
+
+            if (!string.IsNullOrEmpty(explicitClashMatrixJsonPath))
+            {
+                EnsureParentDirectory(explicitClashMatrixJsonPath);
+                assembly.ExportClashMatrixJson(explicitClashMatrixJsonPath, indent);
+                if (printReport) Console.Error.WriteLine($"Clash matrix exported to JSON: '{explicitClashMatrixJsonPath}'.");
+            }
+            if (!string.IsNullOrEmpty(explicitClashMatrixMdPath))
+            {
+                EnsureParentDirectory(explicitClashMatrixMdPath);
+                assembly.ExportClashMatrixMarkdown(explicitClashMatrixMdPath);
+                if (printReport) Console.Error.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
+            }
+            if (!string.IsNullOrEmpty(explicitClashMatrixBcfPath))
+            {
+                EnsureParentDirectory(explicitClashMatrixBcfPath);
+                assembly.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
+                if (printReport) Console.Error.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
+            }
+
+            Console.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
         }
 
         if (!string.IsNullOrEmpty(raycastArg))
@@ -1084,10 +1247,36 @@ internal static class Program
         double clashTolerance = 0.001,
         string? explicitHtmlViewerPath = null,
         string? clashGroupMode = null,
-        double clashRadius = 1.0)
+        double clashRadius = 1.0,
+        string? explicitTimeLinerXmlPath = null,
+        bool linkTimeLiner = false,
+        string? explicitClashMatrixJsonPath = null,
+        string? explicitClashMatrixMdPath = null,
+        string? explicitClashMatrixBcfPath = null)
     {
         outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         var assembly = NwcAssembly.OpenNwf(nwfPath);
+
+        if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
+        {
+            if (File.Exists(explicitTimeLinerXmlPath))
+            {
+                assembly.ImportTimeLinerXml(explicitTimeLinerXmlPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
+            }
+            else
+            {
+                EnsureParentDirectory(explicitTimeLinerXmlPath);
+                assembly.ExportTimeLinerXml(explicitTimeLinerXmlPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+            }
+        }
+
+        if (linkTimeLiner && assembly.TimeLiner is not null)
+        {
+            int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
+            Console.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+        }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
         {
@@ -1198,6 +1387,37 @@ internal static class Program
         {
             EnsureParentDirectory(explicitNwfXmlPath);
             assembly.SaveNwf(explicitNwfXmlPath);
+        }
+
+        bool needMatrix = !string.IsNullOrEmpty(explicitClashMatrixJsonPath) ||
+                          !string.IsNullOrEmpty(explicitClashMatrixMdPath) ||
+                          !string.IsNullOrEmpty(explicitClashMatrixBcfPath);
+
+        if (needMatrix)
+        {
+            assembly.ClashMatrix ??= Model.Clash.NwcClashMatrix.CreateFromAssembly(assembly);
+            assembly.ClashMatrix.Execute(assembly);
+
+            if (!string.IsNullOrEmpty(explicitClashMatrixJsonPath))
+            {
+                EnsureParentDirectory(explicitClashMatrixJsonPath);
+                assembly.ExportClashMatrixJson(explicitClashMatrixJsonPath, indent);
+                if (printReport) Console.Error.WriteLine($"Clash matrix exported to JSON: '{explicitClashMatrixJsonPath}'.");
+            }
+            if (!string.IsNullOrEmpty(explicitClashMatrixMdPath))
+            {
+                EnsureParentDirectory(explicitClashMatrixMdPath);
+                assembly.ExportClashMatrixMarkdown(explicitClashMatrixMdPath);
+                if (printReport) Console.Error.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
+            }
+            if (!string.IsNullOrEmpty(explicitClashMatrixBcfPath))
+            {
+                EnsureParentDirectory(explicitClashMatrixBcfPath);
+                assembly.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
+                if (printReport) Console.Error.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
+            }
+
+            Console.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
         }
 
         if (!string.IsNullOrEmpty(raycastArg))

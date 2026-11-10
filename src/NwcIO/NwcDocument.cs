@@ -72,7 +72,7 @@ public sealed class NwcDocument
     public IReadOnlyList<Model.Sets.NwcSetItem> SelectionSets { get; }
 
     /// <summary>4D TimeLiner construction simulation schedule.</summary>
-    public Model.TimeLiner.NwcTimeLinerSchedule? TimeLiner { get; }
+    public Model.TimeLiner.NwcTimeLinerSchedule? TimeLiner { get; set; }
 
     /// <summary>Navisworks Appearance Profiler color/transparency rules associated with the document.</summary>
     public Model.Appearance.NwcAppearanceProfiler? AppearanceProfiler { get; set; }
@@ -355,6 +355,26 @@ public sealed class NwcDocument
     {
         if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
         Model.TimeLiner.NwcTimeLinerCsvSerializer.Write(TimeLiner, stream);
+    }
+
+    /// <summary>Exports the 4D TimeLiner schedule to Navisworks XML exchange format (.xml).</summary>
+    public void ExportTimeLinerXml(string path)
+    {
+        if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
+        Model.TimeLiner.NwcTimeLinerXmlSerializer.Save(TimeLiner, path);
+    }
+
+    /// <summary>Exports the 4D TimeLiner schedule to a Navisworks XML exchange stream.</summary>
+    public void ExportTimeLinerXml(Stream stream)
+    {
+        if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
+        Model.TimeLiner.NwcTimeLinerXmlSerializer.Write(TimeLiner, stream);
+    }
+
+    /// <summary>Loads or imports a 4D TimeLiner schedule from Navisworks XML exchange format (.xml).</summary>
+    public void ImportTimeLinerXml(string path)
+    {
+        TimeLiner = Model.TimeLiner.NwcTimeLinerXmlSerializer.Open(path);
     }
 
     /// <summary>

@@ -6,12 +6,15 @@
 
 **NwcIO** is a fast, 100% managed .NET library and CLI tool that reads Autodesk Navisworks files (`.nwc`, `.nwd`, `.nwf`) directly from disk **without requiring Autodesk Navisworks or the Navisworks API to be installed**, and exports 3D geometry, materials, scene hierarchies, and properties to **Industry Foundation Classes (IFC2x3 Coordination View)**, **glTF 2.0 Binary (GLB)**, **Wavefront OBJ**, and **JSON**.
 
-Built clean-room following the architectural principles of [mahach666/RvtIO](https://github.com/mahach666/RvtIO): zero native dependencies, zero external libraries, strict typing, high performance, and cross-platform compatibility.
+Built clean-room following the architectural principles of [IOExtend/RvtIO](https://github.com/IOExtend/RvtIO): zero native dependencies, zero external libraries, strict typing, high performance, and cross-platform compatibility.
 
 ---
 
 ## What It Does
 
+- **Multi-Discipline Coordination Clash Matrix (`NwcClashMatrix`)**: Comprehensive $N \times M$ coordination clash matrix execution across BIM disciplines (Architecture, Structure, MEP, etc.) with automated matrix population from federated assemblies (`NwcClashMatrix.CreateFromAssembly`), spatial bounding box pruning, configurable ignore rules, formatted Markdown matrix generation (`ToMarkdownTable`), structured JSON reports, and buildingSMART BCF 2.1 zip package export (`SaveBcf`).
+- **4D TimeLiner XML Serialization & Automated Linking (`NwcTimeLinerXmlSerializer` / `NwcTimeLinerLinker`)**: Full roundtrip reading and writing of Autodesk Navisworks TimeLiner Exchange XML format (`<exchange>`), supporting WBS hierarchies, planned/actual dates, costs, and progress. Automated rule-based schedule linking (`AutoLink`, `LinkByNodeName`) binding tasks to model geometry via Selection Sets, Search Sets, or element names.
+- **Interactive 4D TimeLiner & Selection Sets HTML WebGL Viewer (`NwcHtmlViewerExporter`)**: Standalone, single-file interactive 3D WebGL viewer with built-in 4D TimeLiner playback controller (Play/Pause, scrub slider, date display, speed multiplier, color-coded construction/demolition highlights) and interactive Selection Sets sidebar tab with instant 3D model highlighting.
 - **Model Revision Comparison & Diff Engine (`NwcDiffEngine`)**: Compare revisions of Navisworks documents and federated assemblies to detect added, deleted, modified, and unchanged elements, 3D translation shifts beyond configurable tolerance, and property value additions, removals, and alterations. Export diff reports to structured JSON or buildingSMART BCF 2.1 zip archives with 3D camera viewpoints and highlighted components.
 - **Spatial Grid System & Axis Management (`NwcGridSystem`)**: Manage building grid lines and axes, calculate 2D/3D intersections, format human-readable grid location descriptors (e.g. `A (+0.50m) / 1 (-0.20m)`), and automatically assign grid locations to detected clashes.
 - **High-Precision 3D Measure Engine (`NwcMeasureEngine`)**: Double-precision point-to-point 3D distance and coordinate projections ($\Delta X, \Delta Y, \Delta Z$, horizontal/vertical distance, pitch/azimuth), point-to-mesh shortest distance with Christer Ericson's exact Voronoi-region closest point on triangle algorithm, mesh-to-mesh clearance, polyline path measurement, triangle normal/area, and mesh surface area/volume.
@@ -169,6 +172,13 @@ nwcio model.nwc --sets-xml ./selection_sets.xml
 # Export 4D TimeLiner schedule to CSV spreadsheet format
 nwcio model.nwc timeliner.csv
 nwcio model.nwc --timeliner-csv ./schedule.csv
+
+# Export or import 4D TimeLiner schedule exchange XML
+nwcio model.nwc --timeliner-xml ./schedule.xml
+nwcio model.nwc --timeliner-xml ./schedule.xml --link-timeliner
+
+# Execute multi-discipline coordination clash matrix across models
+nwcio federated_folder/ --clash-matrix matrix.json --clash-matrix-md matrix.md --clash-matrix-bcf matrix.bcfzip
 
 # Simulate 4D construction progress at a milestone date
 nwcio model.nwc --timeliner-simulate 2026-06-01 --report
@@ -660,6 +670,57 @@ Console.WriteLine($"Clearance: {pointMeas.Distance:F3} m to closest point {point
 // Mesh surface area and closed solid volume
 double area = NwcMeasureEngine.ComputeMeshSurfaceArea(mesh);
 double volume = NwcMeasureEngine.ComputeMeshVolume(mesh);
+```
+
+### Multi-Discipline Clash Coordination Matrix
+
+```csharp
+using NwcIO.Model;
+using NwcIO.Model.Clash;
+
+var assembly = NwcAssembly.LoadFromDirectory("campus_models/");
+
+// Create a coordination matrix across disciplines
+var matrix = NwcClashMatrix.CreateFromAssembly(assembly, defaultTolerance: 0.002);
+
+// Or customize disciplines with specific model or search filters
+matrix.AddDiscipline("Structure", "ST");
+matrix.AddDiscipline("HVAC", "MEP_Duct");
+matrix.AddDiscipline("Plumbing", "MEP_Pipe");
+matrix.PopulateStandardMatrix(defaultTolerance: 0.002);
+
+// Run all pairwise clash tests
+matrix.Execute(assembly);
+
+// Print Markdown summary matrix table
+Console.WriteLine(matrix.ToMarkdownTable());
+
+// Export structured JSON report and buildingSMART BCF 2.1 zip package
+matrix.SaveJson("matrix_report.json");
+matrix.SaveBcf("coordination_issues.bcfzip");
+```
+
+### 4D TimeLiner XML Serialization & Automated Linking
+
+```csharp
+using NwcIO;
+using NwcIO.Model.TimeLiner;
+
+var doc = NwcDocument.Open("hospital.nwc");
+
+// Load 4D TimeLiner schedule from Autodesk exchange XML (<exchange>)
+var schedule = NwcTimeLinerXmlSerializer.Open("schedule.xml");
+
+// Automatically link schedule tasks to scene elements using Selection Sets
+int linked = NwcTimeLinerLinker.AutoLink(schedule, doc.SelectionSets, doc);
+Console.WriteLine($"Linked {linked} tasks to model geometry.");
+
+// Attach schedule and export to interactive 4D WebGL viewer
+doc.TimeLiner = schedule;
+doc.SaveHtmlViewer("construction_simulation.html");
+
+// Export schedule to XML
+doc.ExportTimeLinerXml("updated_schedule.xml");
 ```
 
 ---

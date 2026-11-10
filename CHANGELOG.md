@@ -2,6 +2,37 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
+## [0.9.0] - 2026-11-11
+
+### Major Additions & Capabilities
+- **4D TimeLiner XML Serialization & Exchange (`NwcTimeLinerXmlSerializer`)**:
+  - Full reading and writing of Autodesk Navisworks TimeLiner Exchange XML format (`<exchange>` schema).
+  - WBS task hierarchies with nested subtasks, planned/actual dates, duration tracking, planned and actual costs, and percentage progress.
+  - Roundtrip persistence of attached Selection Set names and explicit attached node IDs.
+  - Direct integration into `NwcDocument` (`ExportTimeLinerXml`, `ImportTimeLinerXml`) and `NwcAssembly` (`ExportTimeLinerXml`, `ImportTimeLinerXml`).
+- **Automated Rule-Based Schedule Linking (`NwcTimeLinerLinker`)**:
+  - `AutoLink`: Automated binding of 4D TimeLiner tasks to model geometry using matching Selection Set or Search Set names (`task.AttachedSelectionSetName` or `task.Name`).
+  - Resolves explicit node IDs from `NwcSelectionSet` and evaluates dynamic condition queries from `NwcSearchSet`.
+  - `LinkByNodeName`: Direct fuzzy or exact name matching against scene graph elements.
+- **Multi-Discipline Coordination Clash Matrix (`NwcClashMatrix`, `NwcClashDiscipline`, `NwcClashMatrixCell`)**:
+  - Execution of comprehensive $N \times M$ BIM clash coordination matrices across discipline models (Architecture, Structure, MEP, etc.).
+  - Automated matrix population from federated assembly models (`NwcClashMatrix.CreateFromAssembly`).
+  - Spatial pruning and double-precision AABB intersection penetration calculation.
+  - Ignore rules evaluation (same layer, same file, tolerance thresholds).
+  - Formatted Markdown coordination summary table generation (`ToMarkdownTable`).
+  - Structured JSON report export (`SaveJson`, `ExportClashMatrixJson`).
+  - Unified buildingSMART BCF 2.1 zip archive export (`SaveBcf`, `ExportClashMatrixBcf`), creating issue topics with 3D camera viewpoints and highlighted IFC components for coordination in Revit, Solibri, and BIMcollab.
+- **Interactive 4D TimeLiner & Selection Sets HTML WebGL Viewer (`NwcHtmlViewerExporter`)**:
+  - Integrated 4D TimeLiner playback controller with Play/Pause button, timeline slider scrubber, dynamic date label, and speed multiplier (1x, 5x, 15x, 60x).
+  - Dynamic 3D simulation color coding: active construction glowing green (`[0.2, 0.95, 0.2]`), demolition highlighted red (`[0.95, 0.2, 0.2]`), temporary elements yellow, and unstarted elements hidden from the render loop.
+  - Interactive Selection Sets sidebar tab (`#tab-sets`) rendering hierarchical folder trees and selection items with instant 3D model highlighting on click.
+- **CLI Enhancements (`nwcio`)**:
+  - Added `--timeliner-xml <file.xml>`: Export or import 4D TimeLiner schedule exchange XML.
+  - Added `--link-timeliner`: Automatically links schedule tasks to Selection Sets, Search Sets, or element names.
+  - Added `--clash-matrix <file.json>`: Executes multi-discipline coordination matrix and exports JSON report.
+  - Added `--clash-matrix-md <file.md>`: Exports clash matrix coordination report as Markdown table.
+  - Added `--clash-matrix-bcf <file.bcfzip>`: Exports clash matrix conflicts to buildingSMART BCF 2.1 zip archive.
+
 ## [0.8.0] - 2026-11-11
 
 ### Major Additions & Capabilities

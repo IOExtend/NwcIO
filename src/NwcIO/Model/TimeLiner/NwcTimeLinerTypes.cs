@@ -81,12 +81,24 @@ public sealed class NwcTimeLinerTask
 /// </summary>
 public sealed class NwcTimeLinerSchedule
 {
+    public string Name { get; set; } = "TimeLiner Schedule";
     public List<NwcTimeLinerTask> Tasks { get; } = [];
 
     public NwcTimeLinerSchedule() { }
 
+    public NwcTimeLinerSchedule(string name)
+    {
+        Name = name;
+    }
+
     public NwcTimeLinerSchedule(IEnumerable<NwcTimeLinerTask> tasks)
     {
+        Tasks.AddRange(tasks);
+    }
+
+    public NwcTimeLinerSchedule(string name, IEnumerable<NwcTimeLinerTask> tasks)
+    {
+        Name = name;
         Tasks.AddRange(tasks);
     }
 

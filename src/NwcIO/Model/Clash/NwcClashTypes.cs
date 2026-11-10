@@ -36,6 +36,8 @@ public enum NwcClashRuleType
     IgnoreSameGroup,
     IgnoreSameFile,
     IgnoreSpecifiedSets,
+    IgnoreMinPenetration,
+    IgnoreSpecifiedProperty,
     Custom,
 }
 
@@ -49,6 +51,10 @@ public sealed class NwcClashRule
     public NwcClashRuleType RuleType { get; set; } = NwcClashRuleType.IgnoreSameLayer;
     public string? SetA { get; set; }
     public string? SetB { get; set; }
+    public double Threshold { get; set; } = 0.001;
+    public string? PropertyName { get; set; }
+    public string? PropertyValue { get; set; }
+    public Func<NwcClashResult, bool>? CustomPredicate { get; set; }
 
     public NwcClashRule() { }
 
@@ -70,6 +76,37 @@ public sealed class NwcClashRule
     /// <summary>Creates a rule that ignores clashes between elements in the same group or parent composite node.</summary>
     public static NwcClashRule SameGroup(bool enabled = true) =>
         new("Items in same group", NwcClashRuleType.IgnoreSameGroup, enabled);
+
+    /// <summary>Creates a rule that ignores clashes with penetration depth below a threshold.</summary>
+    public static NwcClashRule MinPenetration(double minPenetration, bool enabled = true) =>
+        new("Penetration below threshold", NwcClashRuleType.IgnoreMinPenetration, enabled) { Threshold = minPenetration };
+
+    /// <summary>
+    /// Evaluates whether a detected clash should be ignored according to this rule.
+    /// </summary>
+    public bool ShouldIgnore(NwcClashResult clash)
+    {
+        if (!Enabled) return false;
+
+        return RuleType switch
+        {
+            NwcClashRuleType.IgnoreSameLayer =>
+                !string.IsNullOrEmpty(clash.Item1.Layer) &&
+                string.Equals(clash.Item1.Layer, clash.Item2.Layer, StringComparison.OrdinalIgnoreCase),
+
+            NwcClashRuleType.IgnoreSameFile =>
+                !string.IsNullOrEmpty(clash.Item1.ModelName) &&
+                string.Equals(clash.Item1.ModelName, clash.Item2.ModelName, StringComparison.OrdinalIgnoreCase),
+
+            NwcClashRuleType.IgnoreMinPenetration =>
+                Math.Abs(clash.Distance) < Threshold,
+
+            NwcClashRuleType.Custom =>
+                CustomPredicate?.Invoke(clash) ?? false,
+
+            _ => false,
+        };
+    }
 }
 
 /// <summary>

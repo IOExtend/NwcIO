@@ -1,3 +1,4 @@
+using System.Text;
 using NwcIO.Internal.Export;
 using NwcIO.Internal.Json;
 using NwcIO.Model.Spatial;
@@ -25,6 +26,15 @@ public sealed class NwcAssembly
     /// <summary>Gets the primary/default viewpoint of the federated assembly.</summary>
     public NwcSavedViewpoint? DefaultViewpoint =>
         SavedViewpoints.Count > 0 ? SavedViewpoints[0] : (!BoundingBox.IsEmpty ? NwcSavedViewpoint.CreateDefault(BoundingBox, $"{Name} Overview") : null);
+
+    /// <summary>4D TimeLiner construction simulation schedule.</summary>
+    public TimeLiner.NwcTimeLinerSchedule? TimeLiner { get; set; }
+
+    /// <summary>Selection Sets and Search Sets defined in the federated assembly.</summary>
+    public List<Sets.NwcSetItem> SelectionSets { get; } = [];
+
+    /// <summary>Multi-discipline clash coordination matrix associated with the assembly.</summary>
+    public Clash.NwcClashMatrix? ClashMatrix { get; set; }
 
     /// <summary>
     /// Gets the spatial acceleration index (BVH) over all meshes across all contributing models.
@@ -328,6 +338,40 @@ public sealed class NwcAssembly
     public void SaveNwf(string path)
     {
         ToNwfManifest().Save(path);
+    }
+
+    /// <summary>Exports the 4D TimeLiner schedule to Navisworks XML exchange format (.xml).</summary>
+    public void ExportTimeLinerXml(string path)
+    {
+        if (TimeLiner is null) throw new InvalidOperationException("Assembly does not contain a TimeLiner schedule.");
+        Model.TimeLiner.NwcTimeLinerXmlSerializer.Save(TimeLiner, path);
+    }
+
+    /// <summary>Loads or imports a 4D TimeLiner schedule from Navisworks XML exchange format (.xml).</summary>
+    public void ImportTimeLinerXml(string path)
+    {
+        TimeLiner = Model.TimeLiner.NwcTimeLinerXmlSerializer.Open(path);
+    }
+
+    /// <summary>Exports the coordination clash matrix to JSON format.</summary>
+    public void ExportClashMatrixJson(string path, bool indent = true)
+    {
+        if (ClashMatrix is null) throw new InvalidOperationException("Assembly does not have a configured Clash Matrix.");
+        ClashMatrix.SaveJson(path, indent);
+    }
+
+    /// <summary>Exports the coordination clash matrix summary to a Markdown table.</summary>
+    public void ExportClashMatrixMarkdown(string path)
+    {
+        if (ClashMatrix is null) throw new InvalidOperationException("Assembly does not have a configured Clash Matrix.");
+        File.WriteAllText(path, ClashMatrix.ToMarkdownTable(), Encoding.UTF8);
+    }
+
+    /// <summary>Exports the coordination clash matrix conflicts to a buildingSMART BCF 2.1 zip archive.</summary>
+    public void ExportClashMatrixBcf(string path)
+    {
+        if (ClashMatrix is null) throw new InvalidOperationException("Assembly does not have a configured Clash Matrix.");
+        ClashMatrix.SaveBcf(path);
     }
 
     /// <summary>Exports the entire federated assembly to a binary glTF 2.0 file (.glb).</summary>
