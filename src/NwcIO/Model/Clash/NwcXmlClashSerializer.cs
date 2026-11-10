@@ -114,8 +114,12 @@ public static class NwcXmlClashSerializer
         xml.WriteAttributeString("resolved", test.ResolvedCount.ToString(CultureInfo.InvariantCulture));
         xml.WriteEndElement(); // summary
 
-        // Results
+        // Results and Groups
         xml.WriteStartElement("clashresults");
+        foreach (var group in test.Groups)
+        {
+            WriteClashGroup(xml, group);
+        }
         foreach (var result in test.Results)
         {
             WriteClashResult(xml, result);
@@ -123,6 +127,37 @@ public static class NwcXmlClashSerializer
         xml.WriteEndElement(); // clashresults
 
         xml.WriteEndElement(); // classtest
+    }
+
+    private static void WriteClashGroup(XmlWriter xml, NwcClashGroup group)
+    {
+        xml.WriteStartElement("clashgroup");
+        xml.WriteAttributeString("name", group.Name);
+        xml.WriteAttributeString("status", group.Status.ToString().ToLowerInvariant());
+        xml.WriteAttributeString("distance", group.Distance.ToString("0.######", CultureInfo.InvariantCulture));
+
+        if (!string.IsNullOrEmpty(group.Description))
+        {
+            xml.WriteElementString("description", group.Description);
+        }
+
+        var pt = group.ClashPoint;
+        xml.WriteStartElement("clashpoint");
+        xml.WriteStartElement("pos3f");
+        xml.WriteAttributeString("x", pt.X.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("y", pt.Y.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("z", pt.Z.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteEndElement(); // pos3f
+        xml.WriteEndElement(); // clashpoint
+
+        xml.WriteStartElement("clashresults");
+        foreach (var clash in group.Clashes)
+        {
+            WriteClashResult(xml, clash);
+        }
+        xml.WriteEndElement(); // clashresults
+
+        xml.WriteEndElement(); // clashgroup
     }
 
     private static void WriteClashResult(XmlWriter xml, NwcClashResult result)
@@ -299,16 +334,27 @@ public static class NwcXmlClashSerializer
                 }
             }
 
-            // Results
+            // Results and Groups
             var resultsElem = testElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("clashresults", StringComparison.OrdinalIgnoreCase));
             if (resultsElem is not null)
             {
-                foreach (var resElem in resultsElem.Elements().Where(e => e.Name.LocalName.Equals("clashresult", StringComparison.OrdinalIgnoreCase)))
+                foreach (var child in resultsElem.Elements())
                 {
-                    var result = ParseClashResult(resElem);
-                    if (result is not null)
+                    if (child.Name.LocalName.Equals("clashgroup", StringComparison.OrdinalIgnoreCase))
                     {
-                        test.AddResult(result);
+                        var group = ParseClashGroup(child);
+                        if (group is not null)
+                        {
+                            test.Groups.Add(group);
+                        }
+                    }
+                    else if (child.Name.LocalName.Equals("clashresult", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var result = ParseClashResult(child);
+                        if (result is not null)
+                        {
+                            test.AddResult(result);
+                        }
                     }
                 }
             }
@@ -317,6 +363,36 @@ public static class NwcXmlClashSerializer
         }
 
         return tests;
+    }
+
+    private static NwcClashGroup? ParseClashGroup(XElement grpElem)
+    {
+        string name = (string?)grpElem.Attribute("name") ?? "Group";
+        string statusStr = (string?)grpElem.Attribute("status") ?? "new";
+        _ = Enum.TryParse<NwcClashStatus>(statusStr, ignoreCase: true, out var status);
+
+        var group = new NwcClashGroup(name, status)
+        {
+            Description = (string?)grpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("description", StringComparison.OrdinalIgnoreCase)),
+            AssignedTo = (string?)grpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("assignedto", StringComparison.OrdinalIgnoreCase)),
+            ApprovedBy = (string?)grpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("approvedby", StringComparison.OrdinalIgnoreCase)),
+        };
+
+        var childResultsElem = grpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("clashresults", StringComparison.OrdinalIgnoreCase));
+        var resultElems = childResultsElem is not null
+            ? childResultsElem.Elements().Where(e => e.Name.LocalName.Equals("clashresult", StringComparison.OrdinalIgnoreCase))
+            : grpElem.Elements().Where(e => e.Name.LocalName.Equals("clashresult", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var rElem in resultElems)
+        {
+            var r = ParseClashResult(rElem);
+            if (r is not null)
+            {
+                group.AddClash(r);
+            }
+        }
+
+        return group;
     }
 
     private static NwcClashResult? ParseClashResult(XElement resElem)

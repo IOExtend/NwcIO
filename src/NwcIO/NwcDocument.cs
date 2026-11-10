@@ -518,4 +518,12 @@ public sealed class NwcDocument
         SaveJson(ms, options);
         return System.Text.Encoding.UTF8.GetString(ms.ToArray());
     }
+
+    /// <summary>
+    /// Exports the document to a standalone interactive 3D WebGL HTML viewer (.html) with zero external dependencies.
+    /// </summary>
+    public void SaveHtmlViewer(string path, Model.Viewer.NwcHtmlViewerOptions? options = null)
+    {
+        Model.Viewer.NwcHtmlViewerExporter.Save(path, this, options);
+    }
 }

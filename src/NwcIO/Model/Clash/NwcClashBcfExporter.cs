@@ -38,12 +38,83 @@ public static class NwcClashBcfExporter
     }
 
     /// <summary>
-    /// Exports a clash test to a BCF 2.1 archive file.
+    /// Exports a clash test, including both standalone results and grouped clashes, to a BCF 2.1 archive file.
     /// </summary>
     public static void Save(string path, NwcClashTest test, string? projectName = null)
     {
+        ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(test);
-        Save(path, test.Results, projectName ?? test.Name);
+
+        string? dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        using var fs = File.Create(path);
+        Write(fs, test, projectName ?? test.Name);
+    }
+
+    /// <summary>
+    /// Writes a clash test, including both standalone results and grouped clashes, to a BCF 2.1 zip stream.
+    /// </summary>
+    public static void Write(Stream stream, NwcClashTest test, string projectName = "Navisworks Clash Coordination")
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(test);
+
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
+
+        // 1. Root bcf.version
+        WriteBcfVersion(archive);
+
+        // 2. Export Clash Groups as unified topics
+        foreach (var group in test.Groups)
+        {
+            string topicFolder = group.GroupGuid.ToString("D");
+
+            var markupEntry = archive.CreateEntry($"{topicFolder}/markup.bcf", CompressionLevel.Optimal);
+            using (var s = markupEntry.Open())
+            using (var xml = XmlWriter.Create(s, Settings))
+            {
+                WriteGroupMarkupXml(xml, group, projectName);
+            }
+
+            var vpEntry = archive.CreateEntry($"{topicFolder}/viewpoint.bcfv", CompressionLevel.Optimal);
+            using (var s = vpEntry.Open())
+            using (var xml = XmlWriter.Create(s, Settings))
+            {
+                WriteGroupViewpointXml(xml, group);
+            }
+        }
+
+        // 3. Export standalone clash results
+        foreach (var clash in test.Results)
+        {
+            string topicFolder = clash.ResultGuid.ToString("D");
+
+            var markupEntry = archive.CreateEntry($"{topicFolder}/markup.bcf", CompressionLevel.Optimal);
+            using (var s = markupEntry.Open())
+            using (var xml = XmlWriter.Create(s, Settings))
+            {
+                WriteMarkupXml(xml, clash, projectName);
+            }
+
+            var vpEntry = archive.CreateEntry($"{topicFolder}/viewpoint.bcfv", CompressionLevel.Optimal);
+            using (var s = vpEntry.Open())
+            using (var xml = XmlWriter.Create(s, Settings))
+            {
+                WriteViewpointXml(xml, clash);
+            }
+        }
+    }
+
+    private static void WriteBcfVersion(ZipArchive archive)
+    {
+        var versionEntry = archive.CreateEntry("bcf.version", CompressionLevel.Optimal);
+        using var writer = new StreamWriter(versionEntry.Open(), new UTF8Encoding(false));
+        writer.WriteLine("""<?xml version="1.0" encoding="UTF-8"?>""");
+        writer.WriteLine("""<Version VersionId="2.1" DetailedVersion="2.1" />""");
     }
 
     /// <summary>
@@ -57,12 +128,7 @@ public static class NwcClashBcfExporter
         using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
 
         // 1. Root bcf.version
-        var versionEntry = archive.CreateEntry("bcf.version", CompressionLevel.Optimal);
-        using (var writer = new StreamWriter(versionEntry.Open(), new UTF8Encoding(false)))
-        {
-            writer.WriteLine("""<?xml version="1.0" encoding="UTF-8"?>""");
-            writer.WriteLine("""<Version VersionId="2.1" DetailedVersion="2.1" />""");
-        }
+        WriteBcfVersion(archive);
 
         // 2. Per-clash topic folders
         foreach (var clash in clashes)
@@ -197,6 +263,135 @@ public static class NwcClashBcfExporter
         var guids = new List<string>();
         if (!string.IsNullOrEmpty(clash.Item1.IfcGuid)) guids.Add(clash.Item1.IfcGuid);
         if (!string.IsNullOrEmpty(clash.Item2.IfcGuid)) guids.Add(clash.Item2.IfcGuid);
+
+        if (guids.Count > 0)
+        {
+            xml.WriteStartElement("Components");
+            xml.WriteStartElement("Selection");
+            foreach (var guid in guids)
+            {
+                xml.WriteStartElement("Component");
+                xml.WriteAttributeString("IfcGuid", guid);
+                xml.WriteEndElement();
+            }
+            xml.WriteEndElement(); // Selection
+            xml.WriteEndElement(); // Components
+        }
+
+        xml.WriteEndElement(); // VisualizationInfo
+        xml.WriteEndDocument();
+    }
+
+    private static void WriteGroupMarkupXml(XmlWriter xml, NwcClashGroup group, string projectName)
+    {
+        xml.WriteStartDocument();
+        xml.WriteStartElement("Markup", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteAttributeString("xmlns", "xsi", null, "http://www.w3.org/2001/XMLSchema-instance");
+
+        xml.WriteStartElement("Header");
+        xml.WriteStartElement("File");
+        xml.WriteElementString("Filename", projectName);
+        xml.WriteElementString("Date", group.CreatedDate.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+        xml.WriteEndElement(); // File
+        xml.WriteEndElement(); // Header
+
+        xml.WriteStartElement("Topic");
+        xml.WriteAttributeString("Guid", group.GroupGuid.ToString("D"));
+        xml.WriteAttributeString("TopicType", "ClashGroup");
+        xml.WriteAttributeString("TopicStatus", group.Status.ToString());
+
+        xml.WriteElementString("Title", $"[Group] {group.Name} ({group.Clashes.Count} items)");
+        xml.WriteElementString("CreationDate", group.CreatedDate.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+        xml.WriteElementString("CreationAuthor", "NwcClashGrouper");
+
+        var sb = new StringBuilder();
+        if (!string.IsNullOrEmpty(group.Description))
+        {
+            sb.AppendLine(group.Description);
+        }
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Clash Group: {group.Name} with {group.Clashes.Count} collisions.");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Worst Penetration: {group.Distance:F4} m");
+        sb.AppendLine("Participating Items:");
+        foreach (var c in group.Clashes.Take(20))
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture, $" - {c.Name}: {c.Item1.Name} vs {c.Item2.Name} (Distance: {c.Distance:F3}m)");
+        }
+        if (group.Clashes.Count > 20)
+        {
+            sb.AppendLine(CultureInfo.InvariantCulture, $" ... and {group.Clashes.Count - 20} more.");
+        }
+        xml.WriteElementString("Description", sb.ToString().TrimEnd());
+
+        xml.WriteStartElement("Viewpoints");
+        xml.WriteAttributeString("Guid", group.GroupGuid.ToString("D"));
+        xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
+        xml.WriteEndElement(); // Viewpoints
+
+        xml.WriteEndElement(); // Topic
+
+        // Comments
+        var allComments = group.Comments.Concat(group.Clashes.SelectMany(c => c.Comments)).ToList();
+        if (allComments.Count > 0)
+        {
+            xml.WriteStartElement("Comment");
+            foreach (var comment in allComments)
+            {
+                xml.WriteStartElement("Comment");
+                xml.WriteAttributeString("Guid", Guid.NewGuid().ToString("D"));
+                xml.WriteElementString("Date", comment.Date.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+                xml.WriteElementString("Author", comment.Author);
+                xml.WriteElementString("Comment", comment.Body);
+                xml.WriteEndElement(); // Comment
+            }
+            xml.WriteEndElement();
+        }
+
+        xml.WriteEndElement(); // Markup
+        xml.WriteEndDocument();
+    }
+
+    private static void WriteGroupViewpointXml(XmlWriter xml, NwcClashGroup group)
+    {
+        xml.WriteStartDocument();
+        xml.WriteStartElement("VisualizationInfo", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteAttributeString("Guid", group.GroupGuid.ToString("D"));
+
+        // Camera positioning
+        xml.WriteStartElement("PerspectiveCamera");
+
+        var target = group.ClashPoint;
+        var offset = new Vector3d(8.0, -8.0, 5.0);
+        var eye = target + offset;
+        var dir = (target - eye).Normalize();
+
+        xml.WriteStartElement("CameraViewPoint");
+        xml.WriteElementString("X", eye.X.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteElementString("Y", eye.Y.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteElementString("Z", eye.Z.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteEndElement();
+
+        xml.WriteStartElement("CameraDirection");
+        xml.WriteElementString("X", dir.X.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteElementString("Y", dir.Y.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteElementString("Z", dir.Z.ToString("0.######", CultureInfo.InvariantCulture));
+        xml.WriteEndElement();
+
+        xml.WriteStartElement("CameraUpVector");
+        xml.WriteElementString("X", "0");
+        xml.WriteElementString("Y", "0");
+        xml.WriteElementString("Z", "1");
+        xml.WriteEndElement();
+
+        xml.WriteElementString("FieldOfView", "60");
+        xml.WriteEndElement(); // PerspectiveCamera
+
+        // Components selection
+        var guids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var clash in group.Clashes)
+        {
+            if (!string.IsNullOrEmpty(clash.Item1.IfcGuid)) guids.Add(clash.Item1.IfcGuid);
+            if (!string.IsNullOrEmpty(clash.Item2.IfcGuid)) guids.Add(clash.Item2.IfcGuid);
+        }
 
         if (guids.Count > 0)
         {

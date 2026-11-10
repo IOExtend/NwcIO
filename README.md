@@ -23,6 +23,9 @@ Built clean-room following the architectural principles of [mahach666/RvtIO](htt
 - **Wavefront OBJ Exporter**: Streams 3D meshes to `.obj` with 1-based indexing in local or project world coordinates.
 - **Spatial Acceleration Index (BVH)**: Balanced Bounding Volume Hierarchy over all meshes for sub-millisecond range queries (`QueryBox`) and double-precision Möller–Trumbore raycasting (`Raycast`).
 - **Navisworks Clash Detective & 3D Triangle Collision**: Complete clean-room collision engine (`NwcClashDetector`) executing broad-phase BVH and narrow-phase Möller 3D triangle-to-triangle intersection tests. Status lifecycles (`New`, `Active`, `Reviewed`, `Approved`, `Resolved`), test types (`Hard`, `Clearance`), and exclusion rules (`IgnoreSameLayer`, `IgnoreSameGroup`, `IgnoreSameFile`).
+- **Intelligent Clash Grouping & Clustering (`NwcClashGrouper`)**: Automatically cluster thousands of raw collisions into manageable groups by spatial 3D proximity (Disjoint-Set algorithm), primary continuous MEP/structural element, structural grid line, or discipline layer. Full roundtrip `<clashgroup>` XML serialization and grouped BCF 2.1 issue export.
+- **Standalone 3D WebGL HTML Viewer (`NwcHtmlViewerExporter`)**: Export any Navisworks document or federated assembly to an interactive, self-contained single-file 3D HTML viewer (`.html`) with zero external scripts, CDNs, or server dependencies. Features orbit camera controls, real-time fragment-shader section clipping planes (Cut X, Cut Y, Cut Z), saved viewpoint transitions, an integrated Clash Navigator, and element Property Inspector.
+- **Quick Properties & Tooltips (`NwcQuickProperties`)**: Define and extract customizable element hover tooltips and quick properties with standard BIM presets and roundtrip Navisworks XML format exchange.
 - **Autodesk Navisworks Clash Report XML Exchange**: Full reading and writing of official Navisworks Clash Report XML documents (`nw-clashreport-11.0.xsd`) including batch tests, clash tests, clash results, clash points, grid locations, and comments (`NwcXmlClashSerializer`).
 - **Federated Multi-Model Assemblies (.nwf)**: Aggregates multiple discipline models into a unified coordination coordinate system, reads `.nwf` external references, and authors federated project manifests (`NwcNwfManifest`).
 - **Saved Viewpoints & Cameras**: Extracts user saved viewpoints and camera views (`NwcCamera`, `NwcSavedViewpoint`) from stream tag 517 (double-precision eye coordinates, unit rotation quaternions, viewing direction, up vector, focal distance, FOV, and aspect ratio). Automatically embeds viewpoints as standard `cameras` and `nodes` in glTF 2.0 (GLB), outputs them in JSON, and exports to buildingSMART BCF 2.1 zip archives (`SaveViewpointsBcf`).
@@ -126,6 +129,14 @@ nwcio ./BuildingK4/ --clash-xml ClashReport.xml --clash-tolerance 0.005
 
 # Run clash detection and export to buildingSMART BCF 2.1 zip archive
 nwcio ./BuildingK4/ --clash-bcf Clashes.bcfzip
+
+# Run clash detection with automated proximity grouping and export XML & BCF
+nwcio ./BuildingK4/ --clash-xml Clashes.xml --clash-group proximity --clash-radius 1.5
+nwcio ./BuildingK4/ --clash-bcf Clashes.bcfzip --clash-group element
+
+# Export to standalone, interactive 3D WebGL HTML viewer (.html) with zero dependencies
+nwcio model.nwc --html-viewer model_viewer.html
+nwcio ./BuildingK4/ --html-viewer assembly_viewer.html
 
 # Export federated coordination manifest (NWF XML)
 nwcio ./BuildingK4/ --nwf-xml Campus.nwf.xml
@@ -513,6 +524,62 @@ doc.ExportClashBcf("ClashIssues.bcfzip");
 
 // Export federated project coordination manifest (NWF XML)
 assembly.SaveNwf("CoordinationProject.nwf.xml");
+```
+
+### Intelligent Clash Grouping & Clustering
+
+```csharp
+using NwcIO.Model.Clash;
+
+// Run clash detection
+var test = assembly.RunClashDetection("Federated Test", tolerance: 0.002);
+
+// Automatically group raw clashes by spatial proximity (Union-Find clustering)
+int proximityGroups = NwcClashGrouper.GroupByProximity(test, clusterDistance: 1.5, minClusterSize: 2);
+Console.WriteLine($"Formed {proximityGroups} spatial clusters with auto-framed viewpoints.");
+
+// Or group by primary continuous MEP element (e.g. pipe or duct run)
+NwcClashGrouper.GroupByPrimaryElement(test);
+
+// Export grouped clashes to Autodesk XML (<clashgroup>) and buildingSMART BCF 2.1
+NwcXmlClashSerializer.Save("GroupedClashes.xml", [test]);
+NwcClashBcfExporter.Save("GroupedIssues.bcfzip", test);
+```
+
+### Standalone 3D WebGL HTML Viewer Export
+
+```csharp
+using NwcIO.Model.Viewer;
+
+// Export any model or federated assembly to an interactive, zero-dependency HTML viewer
+doc.SaveHtmlViewer("BuildingModel.html", new NwcHtmlViewerOptions
+{
+    Title = "Building 4 Coordination Model",
+    IncludeProperties = true,
+    IncludeViewpoints = true,
+    IncludeClashes = true,
+    IncludeSectioning = true,
+});
+
+// Or export a multi-discipline assembly
+assembly.SaveHtmlViewer("CampusFederated.html");
+```
+
+### Quick Properties & Smart Tooltips
+
+```csharp
+using NwcIO.Model.Sets;
+
+// Configure quick property definitions
+var qp = NwcQuickProperties.CreateDefault();
+qp.Add("Revit", "Comments", "User Notes");
+
+// Extract properties from any scene node
+var tooltipData = qp.Extract(node);
+
+// Save definitions to standard Navisworks XML format
+string xml = qp.ToXml();
+File.WriteAllText("quickproperties.xml", xml);
 ```
 
 ---

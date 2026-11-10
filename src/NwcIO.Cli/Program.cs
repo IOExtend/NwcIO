@@ -32,6 +32,8 @@ internal static class Program
           --export-profiler <file.xml> Export Appearance Profiler rules to Navisworks XML format (.xml)
           --clash-xml <file.xml> Run clash detection and export Navisworks Clash Report XML (.xml)
           --clash-bcf <file.bcfzip> Run clash detection and export buildingSMART BCF 2.1 archive (.bcfzip)
+          --clash-group <mode> Group clashes: proximity, element, grid, layer
+          --clash-radius <m>   Cluster radius in meters for proximity grouping (default: 1.0)
           --clash-tolerance <m> Set clash detection tolerance in meters (default: 0.001)
           --nwf-xml <file.xml> Export Navisworks federated coordination manifest (.nwf.xml)
           --ifc <file.ifc>   Export 3D geometry, materials, and properties to IFC (IFC2x3 / IFC4)
@@ -43,6 +45,7 @@ internal static class Program
           --viewpoints-bcf <file.bcfzip> Export saved viewpoints to buildingSMART BCF 2.1 zip archive
           --viewpoints-xml <file.xml>    Export saved viewpoints and redlines to Navisworks XML format
           --viewpoints       List saved viewpoints and cameras to standard output
+          --html-viewer <file.html> Export standalone interactive 3D WebGL viewer (.html)
           --clash-html <file.html> Export interactive HTML clash detection report with matrix
           --local-coords     Export geometry in local coordinate space (default: world coordinates)
           --no-meshes        Disable 3D mesh geometry extraction
@@ -102,6 +105,9 @@ internal static class Program
         string? explicitViewpointsBcfPath = null;
         string? explicitViewpointsXmlPath = null;
         string? explicitClashHtmlPath = null;
+        string? explicitHtmlViewerPath = null;
+        string? clashGroupMode = null;
+        double clashRadius = 1.0;
         string? raycastArg = null;
         NwcIfcSchemaVersion ifcSchema = NwcIfcSchemaVersion.Ifc2x3;
         bool exportIfcTypes = true;
@@ -217,6 +223,30 @@ internal static class Program
                         return 1;
                     }
                     explicitClashBcfPath = args[++i];
+                    break;
+                case "--clash-group":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --clash-group.");
+                        return 1;
+                    }
+                    clashGroupMode = args[++i];
+                    break;
+                case "--clash-radius":
+                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out clashRadius))
+                    {
+                        Console.Error.WriteLine("Error: Invalid or missing argument for --clash-radius.");
+                        return 1;
+                    }
+                    break;
+                case "--html-viewer":
+                case "--viewer":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --html-viewer.");
+                        return 1;
+                    }
+                    explicitHtmlViewerPath = args[++i];
                     break;
                 case "--clash-tolerance":
                     if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out clashTolerance))
@@ -381,7 +411,7 @@ internal static class Program
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
                 explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
-                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance);
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius);
         }
 
         // Handle NWF assembly file
@@ -391,7 +421,7 @@ internal static class Program
                 inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
                 explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
-                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance);
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius);
         }
 
         // Single NWC/NWD document
@@ -585,10 +615,11 @@ internal static class Program
                 EnsureParentDirectory(explicitClashXmlPath);
                 var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                 doc.RunClashDetection(test);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
                 doc.ExportClashReportXml(explicitClashXmlPath);
                 if (printReport)
                 {
-                    Console.Error.WriteLine($"Clash detection finished: {test.TotalCount} clashes exported to '{explicitClashXmlPath}'.");
+                    Console.Error.WriteLine($"Clash detection finished: {test.TotalClashCount} clashes ({test.Groups.Count} groups) exported to '{explicitClashXmlPath}'.");
                 }
             }
 
@@ -599,12 +630,19 @@ internal static class Program
                 {
                     var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                     doc.RunClashDetection(test);
+                    ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
                 }
                 doc.ExportClashBcf(explicitClashBcfPath);
                 if (printReport)
                 {
                     Console.Error.WriteLine($"Clash BCF 2.1 exported to '{explicitClashBcfPath}'.");
                 }
+            }
+
+            if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
+            {
+                EnsureParentDirectory(explicitHtmlViewerPath);
+                doc.SaveHtmlViewer(explicitHtmlViewerPath);
             }
 
             if (!string.IsNullOrEmpty(explicitTimeLinerCsvPath))
@@ -733,7 +771,10 @@ internal static class Program
         string? explicitClashXmlPath = null,
         string? explicitClashBcfPath = null,
         string? explicitNwfXmlPath = null,
-        double clashTolerance = 0.001)
+        double clashTolerance = 0.001,
+        string? explicitHtmlViewerPath = null,
+        string? clashGroupMode = null,
+        double clashRadius = 1.0)
     {
         outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
 
@@ -825,7 +866,8 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitClashXmlPath))
         {
             EnsureParentDirectory(explicitClashXmlPath);
-            assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -833,9 +875,15 @@ internal static class Program
             EnsureParentDirectory(explicitClashBcfPath);
             if (assembly.ClashTests.Count == 0)
             {
-                assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+                var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
+        }
+        if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
+        {
+            EnsureParentDirectory(explicitHtmlViewerPath);
+            assembly.SaveHtmlViewer(explicitHtmlViewerPath);
         }
         if (!string.IsNullOrEmpty(explicitNwfXmlPath))
         {
@@ -909,7 +957,10 @@ internal static class Program
         string? explicitClashXmlPath = null,
         string? explicitClashBcfPath = null,
         string? explicitNwfXmlPath = null,
-        double clashTolerance = 0.001)
+        double clashTolerance = 0.001,
+        string? explicitHtmlViewerPath = null,
+        string? clashGroupMode = null,
+        double clashRadius = 1.0)
     {
         outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         var assembly = NwcAssembly.OpenNwf(nwfPath);
@@ -1000,7 +1051,8 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitClashXmlPath))
         {
             EnsureParentDirectory(explicitClashXmlPath);
-            assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -1008,9 +1060,15 @@ internal static class Program
             EnsureParentDirectory(explicitClashBcfPath);
             if (assembly.ClashTests.Count == 0)
             {
-                assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+                var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
+        }
+        if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
+        {
+            EnsureParentDirectory(explicitHtmlViewerPath);
+            assembly.SaveHtmlViewer(explicitHtmlViewerPath);
         }
         if (!string.IsNullOrEmpty(explicitNwfXmlPath))
         {
@@ -1102,6 +1160,32 @@ internal static class Program
         else
         {
             Console.WriteLine("Raycast MISS: no intersecting surface found along the ray.");
+        }
+    }
+
+    private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport)
+    {
+        if (string.IsNullOrEmpty(mode)) return;
+        int grps = 0;
+        if (mode.Equals("proximity", StringComparison.OrdinalIgnoreCase))
+        {
+            grps = Model.Clash.NwcClashGrouper.GroupByProximity(test, radius);
+        }
+        else if (mode.Equals("element", StringComparison.OrdinalIgnoreCase))
+        {
+            grps = Model.Clash.NwcClashGrouper.GroupByPrimaryElement(test);
+        }
+        else if (mode.Equals("grid", StringComparison.OrdinalIgnoreCase))
+        {
+            grps = Model.Clash.NwcClashGrouper.GroupByGrid(test);
+        }
+        else if (mode.Equals("layer", StringComparison.OrdinalIgnoreCase))
+        {
+            grps = Model.Clash.NwcClashGrouper.GroupByLayer(test);
+        }
+        if (printReport && grps > 0)
+        {
+            Console.Error.WriteLine($"Grouped clashes into {grps} groups using mode '{mode}'.");
         }
     }
 

@@ -429,6 +429,14 @@ public sealed class NwcAssembly
         HtmlClashReportExporter.Write(clashes, writer, Name, Models.Count, AllMeshes.Count);
     }
 
+    /// <summary>
+    /// Exports the federated assembly to a standalone interactive 3D WebGL HTML viewer (.html) with zero external dependencies.
+    /// </summary>
+    public void SaveHtmlViewer(string path, Viewer.NwcHtmlViewerOptions? options = null)
+    {
+        Viewer.NwcHtmlViewerExporter.Save(path, this, options);
+    }
+
     /// <summary>Exports a structured summary of the federated assembly to a JSON file.</summary>
     public void SaveJson(string path, NwcJsonExportOptions? options = null)
     {

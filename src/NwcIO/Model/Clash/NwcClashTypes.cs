@@ -205,6 +205,47 @@ public sealed class NwcClashResult
 }
 
 /// <summary>
+/// A logical group of related clashes in Navisworks Clash Detective (e.g. grouped by element, proximity, or level).
+/// Conforms to &lt;clashgroup&gt; in the Navisworks Clash Report XML schema.
+/// </summary>
+public sealed class NwcClashGroup
+{
+    public string Name { get; set; } = "Group 1";
+    public Guid GroupGuid { get; set; } = Guid.NewGuid();
+    public NwcClashStatus Status { get; set; } = NwcClashStatus.New;
+    public string? Description { get; set; }
+    public string? AssignedTo { get; set; }
+    public string? ApprovedBy { get; set; }
+    public DateTimeOffset CreatedDate { get; set; } = DateTimeOffset.UtcNow;
+    public List<NwcClashResult> Clashes { get; } = [];
+    public List<NwcClashComment> Comments { get; } = [];
+    public NwcSavedViewpoint? Viewpoint { get; set; }
+
+    public Vector3d ClashPoint => Clashes.Count == 0 ? Vector3d.Zero :
+        new Vector3d(
+            Clashes.Average(c => c.ClashPoint.X),
+            Clashes.Average(c => c.ClashPoint.Y),
+            Clashes.Average(c => c.ClashPoint.Z));
+
+    public double Distance => Clashes.Count == 0 ? 0.0 : Clashes.Min(c => c.Distance);
+
+    public NwcClashGroup() { }
+
+    public NwcClashGroup(string name, NwcClashStatus status = NwcClashStatus.New)
+    {
+        Name = name;
+        Status = status;
+        CreatedDate = DateTimeOffset.UtcNow;
+    }
+
+    public void AddClash(NwcClashResult clash)
+    {
+        ArgumentNullException.ThrowIfNull(clash);
+        Clashes.Add(clash);
+    }
+}
+
+/// <summary>
 /// Represents a configured Navisworks Clash Detective test containing rules, selection sets, and results.
 /// </summary>
 public sealed class NwcClashTest
@@ -218,13 +259,18 @@ public sealed class NwcClashTest
     public NwcClashSelection SelectionB { get; set; } = NwcClashSelection.All();
     public List<NwcClashRule> Rules { get; } = [];
     public List<NwcClashResult> Results { get; } = [];
+    public List<NwcClashGroup> Groups { get; } = [];
 
-    public int TotalCount => Results.Count;
-    public int NewCount => Results.Count(r => r.Status == NwcClashStatus.New);
-    public int ActiveCount => Results.Count(r => r.Status == NwcClashStatus.Active);
-    public int ReviewedCount => Results.Count(r => r.Status == NwcClashStatus.Reviewed);
-    public int ApprovedCount => Results.Count(r => r.Status == NwcClashStatus.Approved);
-    public int ResolvedCount => Results.Count(r => r.Status == NwcClashStatus.Resolved);
+    public IEnumerable<NwcClashResult> AllClashes =>
+        Results.Concat(Groups.SelectMany(g => g.Clashes));
+
+    public int TotalClashCount => Results.Count + Groups.Sum(g => g.Clashes.Count);
+    public int TotalCount => Results.Count + Groups.Count;
+    public int NewCount => Results.Count(r => r.Status == NwcClashStatus.New) + Groups.Count(g => g.Status == NwcClashStatus.New);
+    public int ActiveCount => Results.Count(r => r.Status == NwcClashStatus.Active) + Groups.Count(g => g.Status == NwcClashStatus.Active);
+    public int ReviewedCount => Results.Count(r => r.Status == NwcClashStatus.Reviewed) + Groups.Count(g => g.Status == NwcClashStatus.Reviewed);
+    public int ApprovedCount => Results.Count(r => r.Status == NwcClashStatus.Approved) + Groups.Count(g => g.Status == NwcClashStatus.Approved);
+    public int ResolvedCount => Results.Count(r => r.Status == NwcClashStatus.Resolved) + Groups.Count(g => g.Status == NwcClashStatus.Resolved);
 
     public NwcClashTest() { }
 

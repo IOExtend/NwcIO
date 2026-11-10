@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Version>0.6.0</Version>
+    <Version>0.7.0</Version>
     <Authors>mahach666</Authors>
     <Copyright>Copyright (c) 2026 IOExtend</Copyright>
     <Product>NwcIO</Product>
@@ -24,7 +24,7 @@
     <PackageProjectUrl>https://github.com/IOExtend/NwcIO</PackageProjectUrl>
     <RepositoryUrl>https://github.com/IOExtend/NwcIO</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageTags>navisworks;nwc;nwd;nwf;writer;serializer;ifc;bcf;bcfzip;clash-detection;bim;glb;gltf;obj;mesh;spatial-index;bvh</PackageTags>
+    <PackageTags>navisworks;nwc;nwd;nwf;writer;serializer;ifc;bcf;bcfzip;clash-detection;clash-grouping;html-viewer;webgl;bim;glb;gltf;obj;mesh;spatial-index;bvh</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>

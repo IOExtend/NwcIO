@@ -2,6 +2,34 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
+## [0.7.0] - 2026-11-10
+
+### Major Additions & Capabilities
+- **Intelligent Clash Grouping & Clustering Engine (`NwcClashGrouper`)**:
+  - Spatial 3D proximity clustering (`GroupByProximity`) using Disjoint-Set (Union-Find) algorithm, grouping thousands of raw collisions into manageable spatial clusters with auto-calculated cluster centroids and optimal framing viewpoints.
+  - Element-based grouping (`GroupByPrimaryElement`) bundling all collisions involving the same continuous MEP run (pipe, duct, cable tray) or structural beam into a single issue.
+  - Structural grid grouping (`GroupByGrid`) clustering collisions by architectural and structural grid intersections.
+  - Discipline & layer grouping (`GroupByLayer`) bundling clashes by layer or discipline pairs.
+  - Reversible grouping lifecycle (`UngroupAll`) dissolving groups back into individual results when needed.
+  - Full reading and writing of `<clashgroup>` elements in Autodesk Navisworks Clash Report XML (`NwcXmlClashSerializer`).
+  - Grouped buildingSMART BCF 2.1 export (`NwcClashBcfExporter`), exporting clash groups as unified topics with consolidated viewpoints, descriptions, and participating IFC component GUID selections.
+- **Standalone 3D WebGL HTML Viewer Export (`NwcHtmlViewerExporter`)**:
+  - Direct export of Navisworks documents and federated assemblies to self-contained, interactive single-file 3D HTML viewers (`.html`) with zero external script, CDN, or server dependencies.
+  - High-performance WebGL rendering with smooth orbit controls (rotate, pan, zoom), mesh instancing, material colors, and HUD scene statistics.
+  - Dynamic multi-axis section clipping planes (Cut X, Cut Y, Cut Z sliders) running directly in WebGL fragment shaders.
+  - Embedded saved viewpoints palette with instant camera fly-to transitions.
+  - Integrated Clash Navigator allowing review of clash groups and collision points in interactive 3D.
+  - Property Inspector panel displaying full hierarchical BIM properties of selected elements.
+  - Added `NwcDocument.SaveHtmlViewer(...)` and `NwcAssembly.SaveHtmlViewer(...)`.
+- **Quick Properties & Tooltip Rules (`NwcQuickProperties`)**:
+  - Strongly typed object model for configuring Navisworks Quick Properties tooltips (`NwcQuickProperties`, `NwcQuickPropertyDefinition`).
+  - Built-in standard BIM presets for element names, types, materials, layers, areas, and volumes.
+  - Smart node extraction and full roundtrip Navisworks XML serialization (`ToXml` / `FromXml`).
+- **CLI Enhancements (`nwcio`)**:
+  - Added `--html-viewer <file.html>` / `--viewer <file.html>`: Exports models and assemblies to self-contained 3D WebGL HTML viewers.
+  - Added `--clash-group <proximity|element|grid|layer>`: Automatically clusters raw clashes before exporting XML reports or BCF archives.
+  - Added `--clash-radius <meters>`: Configurable spatial radius for proximity clustering (default: 1.0 m).
+
 ## [0.6.0] - 2026-11-10
 
 ### Major Additions & Capabilities
