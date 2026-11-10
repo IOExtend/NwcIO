@@ -2,7 +2,7 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw
 
-# 6x9 pixel grid for each character:
+# 6x9 pixel grid for each character (w is 8 cells wide, so that its three strokes fit):
 # 3: Highlight, 2: Bright tone, 1: Mid tone, ' ': Empty
 
 N = [
@@ -18,15 +18,15 @@ N = [
 ]
 
 W = [
-    '      ',
-    '      ',
-    '      ',
-    '22  22',
-    '222222',
-    '122212',
-    '111111',
-    '11  11',
-    ' 1  1 '
+    '        ',
+    '        ',
+    '        ',
+    '22    22',
+    '22    22',
+    '12 21 12',
+    '11 11 11',
+    '11111111',
+    ' 11  11 '
 ]
 
 C = [
@@ -97,10 +97,10 @@ def build_svg(width, height, rx, block_size, base_xs, start_y, shadow_offset, le
                 oy = start_y + step * shadow_offset
                 for r in range(9):
                     c = 0
-                    while c < 6:
+                    while c < len(grid[r]):
                         if grid[r][c] != ' ':
                             start_c = c
-                            while c < 6 and grid[r][c] != ' ':
+                            while c < len(grid[r]) and grid[r][c] != ' ':
                                 c += 1
                             span_w = (c - start_c) * block_size
                             x = ox + start_c * block_size
@@ -124,10 +124,10 @@ def build_svg(width, height, rx, block_size, base_xs, start_y, shadow_offset, le
                 oy = start_y
                 for r in range(9):
                     c = 0
-                    while c < 6:
+                    while c < len(grid[r]):
                         if grid[r][c] == str(color_val):
                             start_c = c
-                            while c < 6 and grid[r][c] == str(color_val):
+                            while c < len(grid[r]) and grid[r][c] == str(color_val):
                                 c += 1
                             span_w = (c - start_c) * block_size
                             x = ox + start_c * block_size
@@ -167,7 +167,7 @@ def render_png(width, height, rx, block_size, base_xs, start_y, shadow_offset, l
                 ox = (base_x + step * shadow_offset) * scale
                 oy = (start_y + step * shadow_offset) * scale
                 for r in range(9):
-                    for c in range(6):
+                    for c in range(len(grid[r])):
                         if grid[r][c] != ' ':
                             x1 = int(ox + c * block_size * scale)
                             y1 = int(oy + r * block_size * scale)
@@ -183,7 +183,7 @@ def render_png(width, height, rx, block_size, base_xs, start_y, shadow_offset, l
             ox = base_x * scale
             oy = start_y * scale
             for r in range(9):
-                for c in range(6):
+                for c in range(len(grid[r])):
                     val = grid[r][c]
                     if val != ' ':
                         color = pal[int(val)]
@@ -273,25 +273,25 @@ def main():
     os.makedirs(docs_images, exist_ok=True)
     letters = [N, W, C, I, O]
 
-    # 1. nwcio-logo.svg (590x214, rx=18, block=14, base_xs=[23, 135, 247, 359, 471], start_y=38, shadow=2)
-    logo_svg = build_svg(590, 214, 18, 14, [23, 135, 247, 359, 471], 38, 2, letters, "NwcIO")
+    # 1. nwcio-logo.svg (618x214, rx=18, block=14, base_xs=[23, 135, 275, 387, 499], start_y=38, shadow=2)
+    logo_svg = build_svg(618, 214, 18, 14, [23, 135, 275, 387, 499], 38, 2, letters, "NwcIO")
     with open(os.path.join(docs_images, 'nwcio-logo.svg'), 'w', encoding='utf-8') as f:
         f.write(logo_svg)
     print("Wrote docs/images/nwcio-logo.svg")
 
-    # 2. nwcio-logo.png (1180x428 2x scale RGBA)
-    logo_png = render_png(590, 214, 18, 14, [23, 135, 247, 359, 471], 38, 2, letters, scale=2, alpha_bg=True)
+    # 2. nwcio-logo.png (1236x428 2x scale RGBA)
+    logo_png = render_png(618, 214, 18, 14, [23, 135, 275, 387, 499], 38, 2, letters, scale=2, alpha_bg=True)
     logo_png.save(os.path.join(docs_images, 'nwcio-logo.png'))
     print("Wrote docs/images/nwcio-logo.png")
 
-    # 3. nwcio-banner.svg (1280x320, rx=0, block=24, base_xs=[178, 370, 562, 754, 946], start_y=46, shadow=3.4)
-    banner_svg = build_svg(1280, 320, 0, 24, [178, 370, 562, 754, 946], 46, 3.4, letters, "NwcIO")
+    # 3. nwcio-banner.svg (1280x320, rx=0, block=24, base_xs=[154, 346, 586, 778, 970], start_y=46, shadow=3.4)
+    banner_svg = build_svg(1280, 320, 0, 24, [154, 346, 586, 778, 970], 46, 3.4, letters, "NwcIO")
     with open(os.path.join(docs_images, 'nwcio-banner.svg'), 'w', encoding='utf-8') as f:
         f.write(banner_svg)
     print("Wrote docs/images/nwcio-banner.svg")
 
     # 4. nwcio-banner.png (1280x320 RGB)
-    banner_png = render_png(1280, 320, 0, 24, [178, 370, 562, 754, 946], 46, 3.4, letters, scale=1, alpha_bg=False)
+    banner_png = render_png(1280, 320, 0, 24, [154, 346, 586, 778, 970], 46, 3.4, letters, scale=1, alpha_bg=False)
     banner_png.save(os.path.join(docs_images, 'nwcio-banner.png'))
     print("Wrote docs/images/nwcio-banner.png")
 
