@@ -8,14 +8,18 @@ namespace NwcIO.Tests;
 
 public class DbCacheParserTests
 {
-    [Fact]
-    public void Parse_SyntheticDbCache_DecodesEntriesCorrectly()
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(100)]
+    [InlineData(5)]
+    public void Parse_SyntheticDbCache_DecodesEntriesCorrectly(int magic)
     {
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
 
-        // Header: magic -1, entryCount 2, name "LcOpDBCache" (len 11)
-        writer.Write(-1);
+        // Header: magic, entryCount 2, name "LcOpDBCache" (len 11)
+        writer.Write(magic);
         writer.Write(2); // 2 entries
         byte[] nameBytes = Encoding.ASCII.GetBytes("LcOpDBCache");
         writer.Write(nameBytes.Length);
