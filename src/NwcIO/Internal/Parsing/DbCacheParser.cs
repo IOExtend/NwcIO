@@ -29,10 +29,9 @@ public static class DbCacheParser
         {
             // Try scanning for "LcOpDBCache" within the first 64 bytes
             int sigIndex = IndexOfAscii(data, 0, Math.Min(data.Length, 64), "LcOpDBCache");
-            if (sigIndex >= 8)
+            if (sigIndex >= 12)
             {
                 pos = sigIndex - 8;
-                pos += 4; // skip magic
             }
             else
             {
