@@ -162,6 +162,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     <button class="btn" id="btn-timeliner" style="display:none;">4D TimeLiner</button>
     <button class="btn" id="btn-measure">Measure</button>
     <button class="btn" id="btn-toggle-sec">Sectioning</button>
+    <button class="btn" id="btn-turntable">Turntable</button>
     <button class="btn" id="btn-wireframe">Wireframe</button>
     <button class="btn" id="btn-reset-cam">Reset View</button>
     <button class="btn" id="btn-fullscreen">Fullscreen</button>
@@ -175,7 +176,12 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       <button class="tab-btn" data-tab="tab-tree">Hierarchy</button>
       <button class="tab-btn" id="tab-btn-sets" data-tab="tab-sets" style="display:none;">Sets</button>
     </div>
-    <div class="panel-content" id="tab-vps"></div>
+    <div class="panel-content" id="tab-vps">
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button class="btn" id="btn-play-tour" style="flex:1;">▶ Play Tour</button>
+      </div>
+      <div id="vps-list"></div>
+    </div>
     <div class="panel-content" id="tab-clashes" style="display:none;"></div>
     <div class="panel-content" id="tab-tree" style="display:none;"></div>
     <div class="panel-content" id="tab-sets" style="display:none;"></div>
@@ -206,12 +212,25 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       </select>
     </div>
     <div class="section-panel" id="sec-controls" style="display:none;">
-      <label><input type="checkbox" id="clip-x-en"> Cut X</label>
-      <input type="range" id="clip-x-val" min="-100" max="100" value="0">
-      <label><input type="checkbox" id="clip-y-en"> Cut Y</label>
-      <input type="range" id="clip-y-val" min="-100" max="100" value="0">
-      <label><input type="checkbox" id="clip-z-en"> Cut Z</label>
-      <input type="range" id="clip-z-val" min="-100" max="100" value="0">
+      <div style="display:flex;gap:8px;align-items:center;border-right:1px solid #444;padding-right:10px;margin-right:4px;">
+        <label><input type="radio" name="sec-mode" id="sec-mode-planes" value="planes" checked> Planes</label>
+        <label><input type="radio" name="sec-mode" id="sec-mode-box" value="box"> Box</label>
+      </div>
+      <div id="sec-planes-ui" style="display:flex;gap:10px;align-items:center;">
+        <label><input type="checkbox" id="clip-x-en"> Cut X</label>
+        <input type="range" id="clip-x-val" min="-100" max="100" value="0">
+        <label><input type="checkbox" id="clip-y-en"> Cut Y</label>
+        <input type="range" id="clip-y-val" min="-100" max="100" value="0">
+        <label><input type="checkbox" id="clip-z-en"> Cut Z</label>
+        <input type="range" id="clip-z-val" min="-100" max="100" value="0">
+      </div>
+      <div id="sec-box-ui" style="display:none;gap:10px;align-items:center;">
+        <label><input type="checkbox" id="clip-box-en"> Enable Box</label>
+        <label><input type="checkbox" id="clip-box-invert"> Invert</label>
+        <button class="btn" id="btn-fit-box" style="padding:2px 8px;font-size:11px;">Fit Selection</button>
+        <button class="btn" id="btn-reset-box" style="padding:2px 8px;font-size:11px;">Reset Box</button>
+        <label>Scale <input type="range" id="clip-box-scale" min="10" max="150" value="100" style="width:70px;"></label>
+      </div>
     </div>
   </div>
   <div class="sidebar">
@@ -265,7 +284,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   };
 
   // Compute Model Bounds & Center
-  const bbox = modelData.boundingBox;
+  const bbox = modelData.boundingBox || { min: [-10, -10, -10], max: [10, 10, 10] };
   if (bbox && bbox.min && bbox.max) {
     camTarget = [
       (bbox.min[0] + bbox.max[0]) * 0.5,
@@ -277,6 +296,20 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     const dz = bbox.max[2] - bbox.min[2];
     camRadius = Math.max(Math.sqrt(dx*dx + dy*dy + dz*dz) * 1.2, 5.0);
   }
+
+  // 6-Sided Section Box State
+  const clipBox = {
+    en: false,
+    invert: false,
+    min: [bbox.min[0], bbox.min[1], bbox.min[2]],
+    max: [bbox.max[0], bbox.max[1], bbox.max[2]]
+  };
+
+  let turntableActive = false;
+  let tourActive = false;
+  let tourIndex = 0;
+  let tourTimer = null;
+  let currentCamAnim = null;
 
   // Update HUD
   const totalVerts = modelData.meshes.reduce((acc, m) => acc + (m.vertices.length / 3), 0);
@@ -312,10 +345,23 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     uniform vec4 uClipX;
     uniform vec4 uClipY;
     uniform vec4 uClipZ;
+    uniform vec4 uClipBoxMin;
+    uniform vec4 uClipBoxMax;
     void main() {
       if (uClipX.w > 0.5 && vFragPos.x > uClipX.x) discard;
       if (uClipY.w > 0.5 && vFragPos.y > uClipY.y) discard;
       if (uClipZ.w > 0.5 && vFragPos.z > uClipZ.z) discard;
+
+      if (uClipBoxMin.w > 0.5) {
+        bool inside = (vFragPos.x >= uClipBoxMin.x && vFragPos.x <= uClipBoxMax.x &&
+                       vFragPos.y >= uClipBoxMin.y && vFragPos.y <= uClipBoxMax.y &&
+                       vFragPos.z >= uClipBoxMin.z && vFragPos.z <= uClipBoxMax.z);
+        if (uClipBoxMax.w > 0.5) {
+          if (inside) discard;
+        } else {
+          if (!inside) discard;
+        }
+      }
 
       vec3 norm = normalize(vNormal);
       vec3 light = normalize(uLightDir);
@@ -353,7 +399,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     uHigh: gl.getUniformLocation(prog, 'uHighlightColor'),
     uClipX: gl.getUniformLocation(prog, 'uClipX'),
     uClipY: gl.getUniformLocation(prog, 'uClipY'),
-    uClipZ: gl.getUniformLocation(prog, 'uClipZ')
+    uClipZ: gl.getUniformLocation(prog, 'uClipZ'),
+    uClipBoxMin: gl.getUniformLocation(prog, 'uClipBoxMin'),
+    uClipBoxMax: gl.getUniformLocation(prog, 'uClipBoxMax')
   };
 
   // Upload Meshes to GPU
@@ -391,7 +439,17 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(m.indices), gl.STATIC_DRAW);
 
-    return { vbo, nbo, cbo, ibo, count: m.indices.length, raw: m, index: idx };
+    let mbMin = [Infinity, Infinity, Infinity];
+    let mbMax = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < m.vertices.length; i += 3) {
+      const vx = m.vertices[i], vy = m.vertices[i+1], vz = m.vertices[i+2];
+      if (vx < mbMin[0]) mbMin[0] = vx; if (vx > mbMax[0]) mbMax[0] = vx;
+      if (vy < mbMin[1]) mbMin[1] = vy; if (vy > mbMax[1]) mbMax[1] = vy;
+      if (vz < mbMin[2]) mbMin[2] = vz; if (vz > mbMax[2]) mbMax[2] = vz;
+    }
+    const meshBounds = (mbMin[0] <= mbMax[0]) ? { min: mbMin, max: mbMax } : null;
+
+    return { vbo, nbo, cbo, ibo, count: m.indices.length, raw: m, index: idx, bounds: meshBounds };
   });
 
   // Matrix Math
@@ -461,6 +519,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     gl.uniform4f(loc.uClipX, clipPlanes.xVal, 0, 0, clipPlanes.xEn ? 1.0 : 0.0);
     gl.uniform4f(loc.uClipY, 0, clipPlanes.yVal, 0, clipPlanes.yEn ? 1.0 : 0.0);
     gl.uniform4f(loc.uClipZ, 0, 0, clipPlanes.zVal, clipPlanes.zEn ? 1.0 : 0.0);
+    gl.uniform4f(loc.uClipBoxMin, clipBox.min[0], clipBox.min[1], clipBox.min[2], clipBox.en ? 1.0 : 0.0);
+    gl.uniform4f(loc.uClipBoxMax, clipBox.max[0], clipBox.max[1], clipBox.max[2], clipBox.invert ? 1.0 : 0.0);
 
     lastPMat = pMat;
     lastVMat = vMat;
@@ -623,6 +683,142 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         ctx.fillText(text, midX, midY);
       }
     }
+
+    if (clipBox.en) {
+      const bMin = clipBox.min;
+      const bMax = clipBox.max;
+      const corners = [
+        [bMin[0], bMin[1], bMin[2]],
+        [bMax[0], bMin[1], bMin[2]],
+        [bMax[0], bMax[1], bMin[2]],
+        [bMin[0], bMax[1], bMin[2]],
+        [bMin[0], bMin[1], bMax[2]],
+        [bMax[0], bMin[1], bMax[2]],
+        [bMax[0], bMax[1], bMax[2]],
+        [bMin[0], bMax[1], bMax[2]]
+      ];
+      const sc = corners.map(c => worldToScreen(c, pMat, vMat));
+      const edges = [
+        [0, 1], [1, 2], [2, 3], [3, 0],
+        [4, 5], [5, 6], [6, 7], [7, 4],
+        [0, 4], [1, 5], [2, 6], [3, 7]
+      ];
+      ctx.save();
+      ctx.strokeStyle = clipBox.invert ? '#ff6b6b' : '#339af0';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      for (const [i0, i1] of edges) {
+        if (sc[i0] && sc[i1]) {
+          ctx.moveTo(sc[i0][0], sc[i0][1]);
+          ctx.lineTo(sc[i1][0], sc[i1][1]);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function animateCameraTo(newTarget, newRadius, newTheta, newPhi, durationMs = 800, onComplete = null) {
+    if (currentCamAnim) cancelAnimationFrame(currentCamAnim);
+
+    const startTarget = [...camTarget];
+    const startRadius = camRadius;
+    const startTheta = camTheta;
+    const startPhi = camPhi;
+    const startTime = performance.now();
+
+    function step(now) {
+      const elapsed = now - startTime;
+      const progress = Math.min(1.0, elapsed / durationMs);
+      const ease = easeInOutCubic(progress);
+
+      camTarget = [
+        startTarget[0] + (newTarget[0] - startTarget[0]) * ease,
+        startTarget[1] + (newTarget[1] - startTarget[1]) * ease,
+        startTarget[2] + (newTarget[2] - startTarget[2]) * ease
+      ];
+      camRadius = startRadius + (newRadius - startRadius) * ease;
+      camTheta = startTheta + (newTheta - startTheta) * ease;
+      camPhi = startPhi + (newPhi - startPhi) * ease;
+
+      render();
+
+      if (progress < 1.0) {
+        currentCamAnim = requestAnimationFrame(step);
+      } else {
+        currentCamAnim = null;
+        if (onComplete) onComplete();
+      }
+    }
+
+    currentCamAnim = requestAnimationFrame(step);
+  }
+
+  function toggleTurntable() {
+    turntableActive = !turntableActive;
+    const btn = document.getElementById('btn-turntable');
+    if (btn) btn.classList.toggle('active', turntableActive);
+    if (turntableActive) {
+      if (tourActive) stopTour();
+      animateTurntable();
+    }
+  }
+
+  function animateTurntable() {
+    if (!turntableActive) return;
+    camPhi += 0.006;
+    render();
+    requestAnimationFrame(animateTurntable);
+  }
+
+  function startTour() {
+    if (!modelData.viewpoints || modelData.viewpoints.length === 0) return;
+    tourActive = true;
+    const btn = document.getElementById('btn-play-tour');
+    if (btn) {
+      btn.textContent = '⏸ Pause Tour';
+      btn.classList.add('active');
+    }
+    if (turntableActive) toggleTurntable();
+    playNextTourStop();
+  }
+
+  function stopTour() {
+    tourActive = false;
+    if (tourTimer) clearTimeout(tourTimer);
+    const btn = document.getElementById('btn-play-tour');
+    if (btn) {
+      btn.textContent = '▶ Play Tour';
+      btn.classList.remove('active');
+    }
+  }
+
+  function playNextTourStop() {
+    if (!tourActive || !modelData.viewpoints || modelData.viewpoints.length === 0) return;
+    const vp = modelData.viewpoints[tourIndex];
+    if (vp && vp.camera && vp.camera.position && vp.camera.target) {
+      const newTarget = [...vp.camera.target];
+      const ex = vp.camera.position[0] - newTarget[0];
+      const ey = vp.camera.position[1] - newTarget[1];
+      const ez = vp.camera.position[2] - newTarget[2];
+      const newRadius = Math.hypot(ex, ey, ez) || 10;
+      const newTheta = Math.acos(ez / newRadius);
+      const newPhi = Math.atan2(ey, ex);
+
+      animateCameraTo(newTarget, newRadius, newTheta, newPhi, 1200, () => {
+        if (!tourActive) return;
+        tourIndex = (tourIndex + 1) % modelData.viewpoints.length;
+        tourTimer = setTimeout(playNextTourStop, 2000);
+      });
+    } else {
+      tourIndex = (tourIndex + 1) % modelData.viewpoints.length;
+      tourTimer = setTimeout(playNextTourStop, 1000);
+    }
   }
 
   function pickPoint(clientX, clientY) {
@@ -752,7 +948,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   }
 
   // Populate Viewpoints Tab
-  const vpsContainer = document.getElementById('tab-vps');
+  const vpsContainer = document.getElementById('vps-list') || document.getElementById('tab-vps');
   if (modelData.viewpoints && modelData.viewpoints.length > 0) {
     modelData.viewpoints.forEach(vp => {
       const item = document.createElement('div');
@@ -760,14 +956,14 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       item.textContent = vp.name;
       item.addEventListener('click', () => {
         if (vp.camera && vp.camera.position && vp.camera.target) {
-          camTarget = [...vp.camera.target];
-          const ex = vp.camera.position[0]-camTarget[0];
-          const ey = vp.camera.position[1]-camTarget[1];
-          const ez = vp.camera.position[2]-camTarget[2];
-          camRadius = Math.hypot(ex, ey, ez) || 10;
-          camTheta = Math.acos(ez / camRadius);
-          camPhi = Math.atan2(ey, ex);
-          requestAnimationFrame(render);
+          const newTarget = [...vp.camera.target];
+          const ex = vp.camera.position[0]-newTarget[0];
+          const ey = vp.camera.position[1]-newTarget[1];
+          const ez = vp.camera.position[2]-newTarget[2];
+          const newRadius = Math.hypot(ex, ey, ez) || 10;
+          const newTheta = Math.acos(ez / newRadius);
+          const newPhi = Math.atan2(ey, ex);
+          animateCameraTo(newTarget, newRadius, newTheta, newPhi);
         }
       });
       vpsContainer.appendChild(item);
@@ -793,9 +989,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         cItem.textContent = `${clash.name}: ${clash.item1?.name || 'A'} vs ${clash.item2?.name || 'B'}`;
         cItem.addEventListener('click', () => {
           if (clash.point) {
-            camTarget = [...clash.point];
-            camRadius = 4.0;
-            requestAnimationFrame(render);
+            animateCameraTo([...clash.point], 4.0, camTheta, camPhi);
           }
         });
         clashesContainer.appendChild(cItem);
@@ -1024,15 +1218,27 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
   // Toolbar Actions
   document.getElementById('btn-reset-cam').addEventListener('click', () => {
-    camTarget = [
+    const resetTarget = [
       (bbox.min[0] + bbox.max[0]) * 0.5,
       (bbox.min[1] + bbox.max[1]) * 0.5,
       (bbox.min[2] + bbox.max[2]) * 0.5
     ];
-    camRadius = Math.max(Math.hypot(bbox.max[0]-bbox.min[0], bbox.max[1]-bbox.min[1], bbox.max[2]-bbox.min[2]) * 1.2, 5.0);
-    camTheta = 0.8; camPhi = 0.5;
-    requestAnimationFrame(render);
+    const resetRadius = Math.max(Math.hypot(bbox.max[0]-bbox.min[0], bbox.max[1]-bbox.min[1], bbox.max[2]-bbox.min[2]) * 1.2, 5.0);
+    animateCameraTo(resetTarget, resetRadius, 0.8, 0.5);
   });
+
+  const btnTurntable = document.getElementById('btn-turntable');
+  if (btnTurntable) {
+    btnTurntable.addEventListener('click', toggleTurntable);
+  }
+
+  const btnTour = document.getElementById('btn-play-tour');
+  if (btnTour) {
+    btnTour.addEventListener('click', () => {
+      if (tourActive) stopTour();
+      else startTour();
+    });
+  }
 
   document.getElementById('btn-wireframe').addEventListener('click', function() {
     wireframeMode = !wireframeMode;
@@ -1066,6 +1272,24 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     this.classList.toggle('active', !isVis);
   });
 
+  // Sectioning: Planes vs Box Mode
+  const secPlanesUi = document.getElementById('sec-planes-ui');
+  const secBoxUi = document.getElementById('sec-box-ui');
+  const secModePlanes = document.getElementById('sec-mode-planes');
+  const secModeBox = document.getElementById('sec-mode-box');
+  if (secModePlanes && secModeBox) {
+    secModePlanes.addEventListener('change', () => {
+      if (secPlanesUi) secPlanesUi.style.display = 'flex';
+      if (secBoxUi) secBoxUi.style.display = 'none';
+      requestAnimationFrame(render);
+    });
+    secModeBox.addEventListener('change', () => {
+      if (secPlanesUi) secPlanesUi.style.display = 'none';
+      if (secBoxUi) secBoxUi.style.display = 'flex';
+      requestAnimationFrame(render);
+    });
+  }
+
   document.getElementById('clip-x-en').addEventListener('change', e => { clipPlanes.xEn = e.target.checked; requestAnimationFrame(render); });
   document.getElementById('clip-y-en').addEventListener('change', e => { clipPlanes.yEn = e.target.checked; requestAnimationFrame(render); });
   document.getElementById('clip-z-en').addEventListener('change', e => { clipPlanes.zEn = e.target.checked; requestAnimationFrame(render); });
@@ -1073,6 +1297,73 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   document.getElementById('clip-x-val').addEventListener('input', e => { clipPlanes.xVal = (e.target.value/100)*(bbox.max[0]-bbox.min[0]) + camTarget[0]; requestAnimationFrame(render); });
   document.getElementById('clip-y-val').addEventListener('input', e => { clipPlanes.yVal = (e.target.value/100)*(bbox.max[1]-bbox.min[1]) + camTarget[1]; requestAnimationFrame(render); });
   document.getElementById('clip-z-val').addEventListener('input', e => { clipPlanes.zVal = (e.target.value/100)*(bbox.max[2]-bbox.min[2]) + camTarget[2]; requestAnimationFrame(render); });
+
+  // Section Box Controls
+  const clipBoxEn = document.getElementById('clip-box-en');
+  if (clipBoxEn) {
+    clipBoxEn.addEventListener('change', e => {
+      clipBox.en = e.target.checked;
+      requestAnimationFrame(render);
+    });
+  }
+
+  const clipBoxInvert = document.getElementById('clip-box-invert');
+  if (clipBoxInvert) {
+    clipBoxInvert.addEventListener('change', e => {
+      clipBox.invert = e.target.checked;
+      requestAnimationFrame(render);
+    });
+  }
+
+  function resetSectionBox() {
+    clipBox.min = [bbox.min[0], bbox.min[1], bbox.min[2]];
+    clipBox.max = [bbox.max[0], bbox.max[1], bbox.max[2]];
+    const scaleSlider = document.getElementById('clip-box-scale');
+    if (scaleSlider) scaleSlider.value = '100';
+    requestAnimationFrame(render);
+  }
+
+  const btnResetBox = document.getElementById('btn-reset-box');
+  if (btnResetBox) {
+    btnResetBox.addEventListener('click', resetSectionBox);
+  }
+
+  const btnFitBox = document.getElementById('btn-fit-box');
+  if (btnFitBox) {
+    btnFitBox.addEventListener('click', () => {
+      if (selectedMeshIndex >= 0 && selectedMeshIndex < gpuMeshes.length) {
+        const gm = gpuMeshes[selectedMeshIndex];
+        const b = gm.bounds;
+        if (b && b.min && b.max) {
+          clipBox.min = [...b.min];
+          clipBox.max = [...b.max];
+          const scaleSlider = document.getElementById('clip-box-scale');
+          if (scaleSlider) scaleSlider.value = '100';
+          if (clipBoxEn) clipBoxEn.checked = true;
+          clipBox.en = true;
+          requestAnimationFrame(render);
+          return;
+        }
+      }
+      resetSectionBox();
+    });
+  }
+
+  const clipBoxScale = document.getElementById('clip-box-scale');
+  if (clipBoxScale) {
+    clipBoxScale.addEventListener('input', e => {
+      const scale = parseFloat(e.target.value) / 100.0;
+      const cx = (bbox.min[0] + bbox.max[0]) * 0.5;
+      const cy = (bbox.min[1] + bbox.max[1]) * 0.5;
+      const cz = (bbox.min[2] + bbox.max[2]) * 0.5;
+      const hx = (bbox.max[0] - bbox.min[0]) * 0.5 * scale;
+      const hy = (bbox.max[1] - bbox.min[1]) * 0.5 * scale;
+      const hz = (bbox.max[2] - bbox.min[2]) * 0.5 * scale;
+      clipBox.min = [cx - hx, cy - hy, cz - hz];
+      clipBox.max = [cx + hx, cy + hy, cz + hz];
+      requestAnimationFrame(render);
+    });
+  }
 
   document.getElementById('btn-fullscreen').addEventListener('click', () => {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen();

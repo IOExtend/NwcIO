@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Version>0.9.0</Version>
+    <Version>0.10.0</Version>
     <Authors>mahach666</Authors>
     <Copyright>Copyright (c) 2026 IOExtend</Copyright>
     <Product>NwcIO</Product>

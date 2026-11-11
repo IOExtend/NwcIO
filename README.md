@@ -20,8 +20,8 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization 
 - Exports to standard Industry Foundation Classes (IFC2X3 & compact IFC4), binary glTF 2.0 (`.glb`), Wavefront OBJ, and structured JSON.
 - Coordinates multi-model federated assemblies with 3D geometric clash detection, proximity clustering, and clash matrix execution.
 - Manages saved viewpoints, dynamic section planes, redlines, selection sets, and search sets with Navisworks XML and buildingSMART BCF 2.1 exchange.
-- Supports 4D TimeLiner construction simulation, appearance profiling, spatial grids, 3D measurement, and revision comparison.
-- Generates standalone, zero-dependency interactive 3D WebGL HTML viewers (`.html`).
+- Supports 4D TimeLiner construction simulation with Microsoft Project XML (`.xml`) and Primavera P6 (`.xer`) exchange, appearance profiling, spatial grids, 3D measurement, and revision comparison.
+- Generates standalone, zero-dependency interactive 3D WebGL HTML viewers (`.html`) with 6-sided section box, turntable orbit, and viewpoint walkthrough tours.
 
 ## Install
 
@@ -143,9 +143,9 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 
 ## Limitations
 
-- Version 0.4.0 is a preview. The API can evolve before 1.0.
+- Version 0.10.0 is a preview. The API can evolve before 1.0.
 - Geometry extraction supports triangle meshes, line sets, cylinders, and point clouds; proprietary custom parametric solids are tessellated.
-- Writing native `.nwd` or `.nwc` files is not supported (export targets open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
+- Writing native `.nwd` files is not supported (export targets native `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
 
 ## Build from source and tests
 

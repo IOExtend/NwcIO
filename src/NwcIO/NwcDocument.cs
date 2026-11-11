@@ -377,6 +377,46 @@ public sealed class NwcDocument
         TimeLiner = Model.TimeLiner.NwcTimeLinerXmlSerializer.Open(path);
     }
 
+    /// <summary>Exports the 4D TimeLiner schedule to Microsoft Project XML format (.xml).</summary>
+    public void ExportTimeLinerMsProject(string path)
+    {
+        if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
+        Model.TimeLiner.NwcTimeLinerMsProjectXmlSerializer.Save(TimeLiner, path);
+    }
+
+    /// <summary>Exports the 4D TimeLiner schedule to a Microsoft Project XML stream.</summary>
+    public void ExportTimeLinerMsProject(Stream stream)
+    {
+        if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
+        Model.TimeLiner.NwcTimeLinerMsProjectXmlSerializer.Write(TimeLiner, stream);
+    }
+
+    /// <summary>Loads or imports a 4D TimeLiner schedule from Microsoft Project XML format (.xml).</summary>
+    public void ImportTimeLinerMsProject(string path)
+    {
+        TimeLiner = Model.TimeLiner.NwcTimeLinerMsProjectXmlSerializer.Open(path);
+    }
+
+    /// <summary>Exports the 4D TimeLiner schedule to Primavera P6 XER format (.xer).</summary>
+    public void ExportTimeLinerPrimavera(string path)
+    {
+        if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
+        Model.TimeLiner.NwcTimeLinerPrimaveraXerSerializer.Save(TimeLiner, path);
+    }
+
+    /// <summary>Exports the 4D TimeLiner schedule to a Primavera P6 XER stream.</summary>
+    public void ExportTimeLinerPrimavera(Stream stream)
+    {
+        if (TimeLiner is null) throw new InvalidOperationException("Document does not contain a TimeLiner schedule.");
+        Model.TimeLiner.NwcTimeLinerPrimaveraXerSerializer.Write(TimeLiner, stream);
+    }
+
+    /// <summary>Loads or imports a 4D TimeLiner schedule from Primavera P6 XER format (.xer).</summary>
+    public void ImportTimeLinerPrimavera(string path)
+    {
+        TimeLiner = Model.TimeLiner.NwcTimeLinerPrimaveraXerSerializer.Open(path);
+    }
+
     /// <summary>
     /// Executes clash detection across the document using the specified or default test configuration.
     /// </summary>

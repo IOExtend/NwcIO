@@ -28,6 +28,8 @@ internal static class Program
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
+          --timeliner-msproject <file.xml> Export or import 4D TimeLiner schedule in Microsoft Project XML (.xml)
+          --timeliner-primavera <file.xer> Export or import 4D TimeLiner schedule in Primavera P6 XER (.xer)
           --link-timeliner   Auto-link schedule tasks to Selection Sets, Search Sets, or element names
           --timeliner-simulate <date> Run 4D simulation at specified date (e.g. 2026-06-15)
           --profiler <file.xml> Apply Navisworks Appearance Profiler color/transparency rules (.xml)
@@ -106,6 +108,8 @@ internal static class Program
         string? explicitSetsXmlPath = null;
         string? explicitTimeLinerCsvPath = null;
         string? explicitTimeLinerXmlPath = null;
+        string? explicitTimeLinerMsProjectPath = null;
+        string? explicitTimeLinerPrimaveraPath = null;
         bool linkTimeLiner = false;
         string? explicitClashMatrixJsonPath = null;
         string? explicitClashMatrixMdPath = null;
@@ -213,6 +217,26 @@ internal static class Program
                         return 1;
                     }
                     explicitTimeLinerXmlPath = args[++i];
+                    break;
+                case "--timeliner-msproject":
+                case "--timeliner-msp":
+                case "--export-msproject":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --timeliner-msproject.");
+                        return 1;
+                    }
+                    explicitTimeLinerMsProjectPath = args[++i];
+                    break;
+                case "--timeliner-primavera":
+                case "--timeliner-p6":
+                case "--export-primavera":
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Error: Missing argument for --timeliner-primavera.");
+                        return 1;
+                    }
+                    explicitTimeLinerPrimaveraPath = args[++i];
                     break;
                 case "--link-timeliner":
                     linkTimeLiner = true;
@@ -516,7 +540,8 @@ internal static class Program
                 explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                 explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
-                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath);
+                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
+                explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
         }
 
         // Handle NWF assembly file
@@ -527,7 +552,8 @@ internal static class Program
                 explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
                 worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                 explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
-                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath);
+                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
+                explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
         }
 
         // Single NWC/NWD document
@@ -843,6 +869,48 @@ internal static class Program
                 }
             }
 
+            if (!string.IsNullOrEmpty(explicitTimeLinerMsProjectPath))
+            {
+                if (File.Exists(explicitTimeLinerMsProjectPath))
+                {
+                    doc.ImportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                    }
+                }
+                else
+                {
+                    EnsureParentDirectory(explicitTimeLinerMsProjectPath);
+                    doc.ExportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(explicitTimeLinerPrimaveraPath))
+            {
+                if (File.Exists(explicitTimeLinerPrimaveraPath))
+                {
+                    doc.ImportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                    }
+                }
+                else
+                {
+                    EnsureParentDirectory(explicitTimeLinerPrimaveraPath);
+                    doc.ExportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
+                    if (printReport)
+                    {
+                        Console.Error.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                    }
+                }
+            }
+
             if (linkTimeLiner && doc.TimeLiner is not null)
             {
                 int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(doc.TimeLiner, doc.SelectionSets, doc);
@@ -1009,7 +1077,9 @@ internal static class Program
         bool linkTimeLiner = false,
         string? explicitClashMatrixJsonPath = null,
         string? explicitClashMatrixMdPath = null,
-        string? explicitClashMatrixBcfPath = null)
+        string? explicitClashMatrixBcfPath = null,
+        string? explicitTimeLinerMsProjectPath = null,
+        string? explicitTimeLinerPrimaveraPath = null)
     {
         outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
 
@@ -1027,6 +1097,36 @@ internal static class Program
                 EnsureParentDirectory(explicitTimeLinerXmlPath);
                 assembly.ExportTimeLinerXml(explicitTimeLinerXmlPath);
                 if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(explicitTimeLinerMsProjectPath))
+        {
+            if (File.Exists(explicitTimeLinerMsProjectPath))
+            {
+                assembly.ImportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+            }
+            else
+            {
+                EnsureParentDirectory(explicitTimeLinerMsProjectPath);
+                assembly.ExportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(explicitTimeLinerPrimaveraPath))
+        {
+            if (File.Exists(explicitTimeLinerPrimaveraPath))
+            {
+                assembly.ImportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+            }
+            else
+            {
+                EnsureParentDirectory(explicitTimeLinerPrimaveraPath);
+                assembly.ExportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
             }
         }
 
@@ -1252,7 +1352,9 @@ internal static class Program
         bool linkTimeLiner = false,
         string? explicitClashMatrixJsonPath = null,
         string? explicitClashMatrixMdPath = null,
-        string? explicitClashMatrixBcfPath = null)
+        string? explicitClashMatrixBcfPath = null,
+        string? explicitTimeLinerMsProjectPath = null,
+        string? explicitTimeLinerPrimaveraPath = null)
     {
         outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         var assembly = NwcAssembly.OpenNwf(nwfPath);
@@ -1269,6 +1371,36 @@ internal static class Program
                 EnsureParentDirectory(explicitTimeLinerXmlPath);
                 assembly.ExportTimeLinerXml(explicitTimeLinerXmlPath);
                 if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(explicitTimeLinerMsProjectPath))
+        {
+            if (File.Exists(explicitTimeLinerMsProjectPath))
+            {
+                assembly.ImportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+            }
+            else
+            {
+                EnsureParentDirectory(explicitTimeLinerMsProjectPath);
+                assembly.ExportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(explicitTimeLinerPrimaveraPath))
+        {
+            if (File.Exists(explicitTimeLinerPrimaveraPath))
+            {
+                assembly.ImportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+            }
+            else
+            {
+                EnsureParentDirectory(explicitTimeLinerPrimaveraPath);
+                assembly.ExportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
+                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
             }
         }
 

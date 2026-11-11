@@ -2,6 +2,27 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
+## [0.10.0] - 2026-11-11
+
+### Major Additions & Capabilities
+- **Microsoft Project XML 4D Schedule Serialization (`NwcTimeLinerMsProjectXmlSerializer`)**:
+  - Full reading and writing of Microsoft Project XML schedule schema (`http://schemas.microsoft.com/project`).
+  - Preserves hierarchical WBS outlines (`OutlineLevel`, `OutlineNumber`, `WBS`), planned and actual dates, ISO 8601 duration (`PT#H0M0S`), percent complete, and costs.
+  - Roundtrips attached Selection Set names and `TaskType` through task `Notes`.
+  - Direct integration into `NwcDocument` and `NwcAssembly` via `ExportTimeLinerMsProject` and `ImportTimeLinerMsProject`.
+- **Primavera P6 XER 4D Schedule Serialization (`NwcTimeLinerPrimaveraXerSerializer`)**:
+  - Full reading and writing of Primavera P6 tab-delimited XER exchange format (`ERMHDR`, `%T PROJECT`, `%T PROJWBS`, `%T TASK`).
+  - Serializes task codes, activity names, target and actual start/finish timestamps, durations in hours, physical completion percentages, and planned/actual costs.
+  - Direct integration into `NwcDocument` and `NwcAssembly` via `ExportTimeLinerPrimavera` and `ImportTimeLinerPrimavera`.
+- **Interactive 3D WebGL Viewer Enhancements (`NwcHtmlViewerExporter`)**:
+  - **6-Sided Section Box Volume**: Switchable sectioning mode between 3-axis cutting planes and a 6-sided clipping box. Includes interactive box scaling, invert mode (inside vs outside clipping volume), visual 3D wireframe bounding box overlay projection, and instant "Fit Selection" bounding box fitting.
+  - **Smooth Camera Animations**: Cubic ease-in-out animated camera transitions when focusing saved viewpoints or clash detection conflict items.
+  - **Turntable Presentation Mode**: 360° continuous turntable orbit animation for interactive model review and project presentations.
+  - **Saved Viewpoints Walkthrough Tour**: Automated tour player (`Play Tour` / `Pause Tour`) cycling through all saved viewpoints with smooth camera transitions and pauses.
+- **CLI Commands (`nwcio`)**:
+  - Added `--timeliner-msproject <file.xml>`: Export or import 4D TimeLiner schedule in Microsoft Project XML format.
+  - Added `--timeliner-primavera <file.xer>`: Export or import 4D TimeLiner schedule in Primavera P6 XER format.
+
 ## [0.9.0] - 2026-11-11
 
 ### Major Additions & Capabilities
