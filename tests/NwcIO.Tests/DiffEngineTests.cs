@@ -244,4 +244,72 @@ public sealed class DiffEngineTests
         Assert.Equal("MeshNew", report.Added[0].Name);
         Assert.Single(report.Unchanged);
     }
+
+    private static NwcDocument CreateSharedGuidDocument(Guid guid, int count)
+    {
+        var root = new NwcNode { Id = 1, Name = "Root", Class = "Root" };
+        for (int i = 0; i < count; i++)
+        {
+            root.Children.Add(new NwcNode { Id = 2 + i, Name = "Part", Class = "LcRevitData_Element", ElementGuid = guid });
+        }
+
+        return NwcDocument.Create(rootNode: root);
+    }
+
+    [Fact]
+    public void Compare_DuplicateGuidsInDocument_MatchesEachElementOnce()
+    {
+        var guid = Guid.NewGuid();
+
+        var report = CreateSharedGuidDocument(guid, 3).Compare(CreateSharedGuidDocument(guid, 3));
+
+        Assert.Empty(report.Added);
+        Assert.Empty(report.Deleted);
+        Assert.Empty(report.Modified);
+        Assert.Equal(3, report.Unchanged.Count);
+        Assert.Equal([2, 3, 4], report.Unchanged.Select(d => d.BaselineNode!.Id).Order());
+    }
+
+    [Fact]
+    public void Compare_DuplicateGuidRemovedFromRevision_ReportsOneDeletion()
+    {
+        var guid = Guid.NewGuid();
+
+        var report = CreateSharedGuidDocument(guid, 3).Compare(CreateSharedGuidDocument(guid, 2));
+
+        Assert.Empty(report.Added);
+        Assert.Single(report.Deleted);
+        Assert.Equal(2, report.Unchanged.Count);
+    }
+
+    [Fact]
+    public void Compare_GuidSharedAcrossAssemblyModels_MatchesEachElementOnce()
+    {
+        var guid = Guid.NewGuid();
+        var baseline = NwcAssembly.Create("A", CreateSharedGuidDocument(guid, 1), CreateSharedGuidDocument(guid, 1));
+        var revision = NwcAssembly.Create("B", CreateSharedGuidDocument(guid, 1), CreateSharedGuidDocument(guid, 1));
+
+        var report = baseline.Compare(revision);
+
+        Assert.Empty(report.Added);
+        Assert.Empty(report.Deleted);
+        Assert.Equal(2, report.Unchanged.Count);
+    }
+
+    [Fact]
+    public void Compare_SameMeshNameAcrossAssemblyModels_MatchesEachElementOnce()
+    {
+        var baseline = NwcAssembly.Create("A",
+            NwcDocument.Create(meshes: [CreateBoxMesh(1, "Wall", new Vector3d(0, 0, 0))]),
+            NwcDocument.Create(meshes: [CreateBoxMesh(1, "Wall", new Vector3d(0, 0, 0))]));
+        var revision = NwcAssembly.Create("B",
+            NwcDocument.Create(meshes: [CreateBoxMesh(1, "Wall", new Vector3d(0, 0, 0))]),
+            NwcDocument.Create(meshes: [CreateBoxMesh(1, "Wall", new Vector3d(0, 0, 0))]));
+
+        var report = baseline.Compare(revision);
+
+        Assert.Empty(report.Added);
+        Assert.Empty(report.Deleted);
+        Assert.Equal(2, report.Unchanged.Count);
+    }
 }

@@ -68,19 +68,21 @@ public static class NwcDiffEngine
         List<DiffItem> revItems,
         NwcDiffOptions options)
     {
-        // 1. Build lookup tables: by Guid first, then by composite MatchKey
-        var baseByGuid = new Dictionary<Guid, DiffItem>();
-        var baseByKey = new Dictionary<string, DiffItem>(StringComparer.OrdinalIgnoreCase);
+        // 1. Build lookup tables: by Guid first, then by composite MatchKey. Several baseline items can share a GUID
+        // (or, across the models of an assembly, a key), so each entry queues them in order and a match takes the
+        // first one: every baseline item is matched at most once.
+        var baseByGuid = new Dictionary<Guid, Queue<DiffItem>>();
+        var baseByKey = new Dictionary<string, Queue<DiffItem>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in baseItems)
         {
             if (item.ElementGuid.HasValue && item.ElementGuid.Value != Guid.Empty)
             {
-                baseByGuid[item.ElementGuid.Value] = item;
+                Enqueue(baseByGuid, item.ElementGuid.Value, item);
             }
             else
             {
-                baseByKey[item.MatchKey] = item;
+                Enqueue(baseByKey, item.MatchKey, item);
             }
         }
 
@@ -97,11 +99,11 @@ public static class NwcDiffEngine
             DiffItem? baseItem = null;
             if (rev.ElementGuid.HasValue && rev.ElementGuid.Value != Guid.Empty)
             {
-                baseByGuid.TryGetValue(rev.ElementGuid.Value, out baseItem);
+                baseItem = Dequeue(baseByGuid, rev.ElementGuid.Value);
             }
             if (baseItem is null && !string.IsNullOrEmpty(rev.MatchKey))
             {
-                baseByKey.TryGetValue(rev.MatchKey, out baseItem);
+                baseItem = Dequeue(baseByKey, rev.MatchKey);
             }
 
             if (baseItem is null)
@@ -220,6 +222,22 @@ public static class NwcDiffEngine
             }
         }
     }
+
+    private static void Enqueue<TKey>(Dictionary<TKey, Queue<DiffItem>> lookup, TKey key, DiffItem item)
+        where TKey : notnull
+    {
+        if (!lookup.TryGetValue(key, out var queue))
+        {
+            queue = new Queue<DiffItem>();
+            lookup[key] = queue;
+        }
+
+        queue.Enqueue(item);
+    }
+
+    private static DiffItem? Dequeue<TKey>(Dictionary<TKey, Queue<DiffItem>> lookup, TKey key)
+        where TKey : notnull =>
+        lookup.TryGetValue(key, out var queue) && queue.TryDequeue(out var item) ? item : null;
 
     private static bool PassesFilter(DiffItem item, string? filter)
     {
