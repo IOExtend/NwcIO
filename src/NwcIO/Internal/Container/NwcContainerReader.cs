@@ -11,9 +11,6 @@ public static class NwcContainerReader
 {
     private const string SectionMarker = "#LcUStream";
 
-    /// <summary>Largest run of unrecognized non-zlib bytes tolerated while re-syncing between streams.</summary>
-    private const int MaxResyncGap = 4096;
-
     public static NwcContainer Read(byte[] data)
     {
         if (data.Length < 16 || !StartsWithAscii(data, 0, SectionMarker))
@@ -57,9 +54,8 @@ public static class NwcContainerReader
             // Non-zlib bytes: framing blocks (hash + size words), section padding, tail.
             // Scan forward to the next zlib signature or section header.
             int scan = pos + 1;
-            int limit = Math.Min(data.Length, pos + MaxResyncGap);
             int gapEnd = -1;
-            while (scan < limit)
+            while (scan < data.Length)
             {
                 if (IsZlibSignature(data, scan) || StartsWithAscii(data, scan, SectionMarker))
                 {
