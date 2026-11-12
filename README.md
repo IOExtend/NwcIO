@@ -149,7 +149,7 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 
 ## Build from source and tests
 
-Use the .NET SDK selected by `global.json`, which specifies 10.0.100 with `latestFeature` roll-forward.
+Use the .NET SDK selected by `global.json` (currently 10.0.401, with `latestFeature` roll-forward within the `10.0.x` band).
 
 From the repository root:
 
@@ -160,7 +160,7 @@ dotnet test
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Release changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Release changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## Security
 
