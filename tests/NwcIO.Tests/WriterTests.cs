@@ -135,6 +135,28 @@ public class WriterTests
         Assert.Equal(10.0, opened.SavedViewpoints[0].Camera!.Position.Z);
     }
 
+    [Theory]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Utc)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public void DocumentBuilder_SourceTimestamp_RoundtripsAsUtc(DateTimeKind kind)
+    {
+        var timestamp = new DateTime(2026, 5, 1, 12, 30, 45, kind);
+        var expectedUtc = kind == DateTimeKind.Local
+            ? timestamp.ToUniversalTime()
+            : DateTime.SpecifyKind(timestamp, DateTimeKind.Utc);
+
+        var doc = new NwcDocumentBuilder()
+            .SetFileInfo("Model.rvt", timestampUtc: timestamp)
+            .Build();
+
+        using var ms = new MemoryStream(doc.ToByteArray());
+        var opened = NwcDocument.Open(ms);
+
+        Assert.NotNull(opened.FileInfo.SourceTimestampUtc);
+        Assert.Equal(expectedUtc, opened.FileInfo.SourceTimestampUtc.Value.ToUniversalTime());
+    }
+
     [Fact]
     public void Document_SaveToFileAndReopen_WorksCorrectly()
     {
