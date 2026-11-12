@@ -67,7 +67,9 @@ doc.SaveObj("output.obj");
 ### Multi-Discipline Clash Matrix
 
 ```csharp
+using System.Linq;
 using NwcIO;
+using NwcIO.Model;
 using NwcIO.Model.Clash;
 
 // Federate every model of the site folder into one assembly
@@ -80,9 +82,10 @@ matrix.AddDiscipline("Structure", "STRUCT");
 matrix.AddDiscipline("MEP", "MEP");
 matrix.PopulateStandardMatrix(defaultTolerance: 0.002);
 
-// Configure tolerance per cell (in meters): Architecture–Structure 5mm, Structure–MEP 10mm
-matrix.Cells[0].Tolerance = 0.005;
-matrix.Cells[1].Tolerance = 0.010;
+// Configure tolerance per cell (in meters); PopulateStandardMatrix fills cells in
+// discipline order: [0]=Architecture–Structure, [1]=Architecture–MEP, [2]=Structure–MEP
+matrix.Cells.Single(c => c.DisciplineA == "Architecture" && c.DisciplineB == "Structure").Tolerance = 0.005; // 5mm
+matrix.Cells.Single(c => c.DisciplineA == "Structure" && c.DisciplineB == "MEP").Tolerance = 0.010;          // 10mm
 
 // Execute the entire coordination matrix
 matrix.Execute(assembly);

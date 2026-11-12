@@ -118,15 +118,24 @@ Run 3D geometric clash detection between documents:
 
 ```csharp
 using NwcIO;
+using NwcIO.Model;
 using NwcIO.Model.Clash;
+using NwcIO.Model.Sets;
 
 var archDoc = NwcDocument.Open("Architecture.nwc");
 var mepDoc = NwcDocument.Open("MEP.nwc");
 
 // Federate the models, then run a hard clash test with broad-phase AABB
-// and narrow-phase triangle intersection
+// and narrow-phase triangle intersection. Limit each side with a selection —
+// the default All selection would also report pairs inside a single model.
 var assembly = NwcAssembly.Create("Federated Model", archDoc, mepDoc);
-var test = new NwcClashTest("Architecture vs MEP", NwcClashTestType.Hard, tolerance: 0.01);
+var test = new NwcClashTest("Walls vs MEP Ducts", NwcClashTestType.Hard, tolerance: 0.01)
+{
+    SelectionA = NwcClashSelection.FromCondition("Walls",
+        new NwcSearchCondition("Item", "Category", NwcSearchOperator.Equals, "Walls")),
+    SelectionB = NwcClashSelection.FromCondition("Ducts",
+        new NwcSearchCondition("Item", "Category", NwcSearchOperator.Equals, "Ducts")),
+};
 NwcClashDetector.Run(assembly, test);
 
 Console.WriteLine($"{test.TotalClashCount} clashes detected");
