@@ -25,6 +25,46 @@ public class Geometry3dTests
     }
 
     [Fact]
+    public void Normalized_LargeFiniteComponents_DoNotOverflowToZero()
+    {
+        // x*x + w*w overflows to Infinity for components near 1e154; the naive
+        // normalization would return (0,0,0,0) and lose the rotation entirely.
+        var q = new Quaterniond(1e154, 0, 0, 1e154);
+
+        var normalized = q.Normalized();
+
+        Assert.True(normalized.IsNormalized());
+        Assert.Equal(Math.Sqrt(0.5), normalized.X, 12);
+        Assert.Equal(0.0, normalized.Y, 12);
+        Assert.Equal(0.0, normalized.Z, 12);
+        Assert.Equal(Math.Sqrt(0.5), normalized.W, 12);
+    }
+
+    [Fact]
+    public void Normalized_NonFiniteComponent_ReturnsIdentity()
+    {
+        Assert.Equal(Quaterniond.Identity, new Quaterniond(double.PositiveInfinity, 0, 0, 1).Normalized());
+        Assert.Equal(Quaterniond.Identity, new Quaterniond(0, double.NegativeInfinity, 0, 1).Normalized());
+        Assert.Equal(Quaterniond.Identity, new Quaterniond(0, 0, double.NaN, 1).Normalized());
+    }
+
+    [Fact]
+    public void Camera_LargeRotation_PreservesOrientation()
+    {
+        // A 180-degree rotation about X scaled by 1e160 must keep flipping the view
+        // direction instead of collapsing to the identity rotation via overflow.
+        var huge = new NwcCamera { Rotation = new Quaterniond(1e160, 0, 0, 0) };
+        var unit = new NwcCamera { Rotation = new Quaterniond(1, 0, 0, 0) };
+
+        Assert.Equal(unit.Direction.X, huge.Direction.X, 10);
+        Assert.Equal(unit.Direction.Y, huge.Direction.Y, 10);
+        Assert.Equal(unit.Direction.Z, huge.Direction.Z, 10);
+        Assert.Equal(unit.Up.X, huge.Up.X, 10);
+        Assert.Equal(unit.Up.Y, huge.Up.Y, 10);
+        Assert.Equal(unit.Up.Z, huge.Up.Z, 10);
+    }
+
+    [Fact]
     public void ToMatrix4x4_NonUnitRotation_ProducesOrthonormalRows()
     {
         var transform = new NwcTransform { Id = 1, Rotation = new Quaterniond(0.5, 0, 0, 1.5) };

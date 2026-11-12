@@ -61,12 +61,24 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
         Math.Abs((X * X + Y * Y + Z * Z + W * W) - 1.0) < epsilon;
 
     /// <summary>
-    /// Returns this quaternion scaled to unit length, or <see cref="Identity"/> when its length is approximately zero.
+    /// Returns this quaternion scaled to unit length, or <see cref="Identity"/> when its
+    /// length is approximately zero or a component is not finite. Squaring is done after
+    /// dividing by the largest component, so large finite inputs cannot overflow the norm.
     /// </summary>
     public Quaterniond Normalized()
     {
-        double norm = Math.Sqrt(X * X + Y * Y + Z * Z + W * W);
-        return norm > 1e-9 ? new(X / norm, Y / norm, Z / norm, W / norm) : Identity;
+        double max = Math.Max(Math.Max(Math.Abs(X), Math.Abs(Y)), Math.Max(Math.Abs(Z), Math.Abs(W)));
+        if (!double.IsFinite(max) || max <= 1e-9)
+        {
+            return Identity;
+        }
+
+        double sx = X / max;
+        double sy = Y / max;
+        double sz = Z / max;
+        double sw = W / max;
+        double norm = Math.Sqrt(sx * sx + sy * sy + sz * sz + sw * sw); // in [1, 2]
+        return new(sx / norm, sy / norm, sz / norm, sw / norm);
     }
 
     public override string ToString() =>
