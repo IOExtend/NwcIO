@@ -76,6 +76,26 @@ public class XRefTableParserTests
         Assert.Equal("A.nwc", Assert.Single(table.References).OriginalPath);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Parse_PrefixContainingOpeningBrace_NestedType_PreservesRoot(bool formatted)
+    {
+        string json = formatted
+            ? """{ "Version" : 1, "Type" : "XRefTable", "Table" : [ { "Type" : "Model", "OriginalPath" : "A.nwc", "RemappedPath" : "" } ], "SavedFilename" : "fed.nwf" }"""
+            : """{"Version":1,"Type":"XRefTable","Table":[{"Type":"Model","OriginalPath":"A.nwc","RemappedPath":""}],"SavedFilename":"fed.nwf"}""";
+        byte[] data = new byte[4 + Encoding.UTF8.GetByteCount(json)];
+        BitConverter.GetBytes(0x0000007B).CopyTo(data, 0);
+        Encoding.UTF8.GetBytes(json, 0, json.Length, data, 4);
+
+        var table = XRefTableParser.Parse(data);
+
+        Assert.NotNull(table);
+        Assert.Equal("XRefTable", table.Type);
+        Assert.Equal("fed.nwf", table.SavedFilename);
+        Assert.Equal("A.nwc", Assert.Single(table.References).OriginalPath);
+    }
+
     [Fact]
     public void Parse_WithoutTypeSignature_ReturnsXRefTable()
     {

@@ -43,21 +43,25 @@ public static class XRefTableParser
         try
         {
             var memory = data.AsMemory(start, length);
-            JsonDocument document;
-            try
+            JsonDocument? document = null;
+            while (document is null)
             {
-                document = JsonDocument.Parse(memory);
-            }
-            catch (JsonException)
-            {
-                // Retry past a binary-prefix brace only after the root JSON fails to parse.
-                int fallback = memory.Span.IndexOf("{\"Type\":"u8);
-                if (fallback <= 0)
+                try
                 {
-                    return null;
+                    document = JsonDocument.Parse(memory);
                 }
+                catch (JsonException)
+                {
+                    // The binary prefix can hold a '{' byte: retry from the next one. A nested object is never
+                    // complete JSON on its own, as the rest of the root follows it, so the root is still the one found.
+                    int next = memory.Span[1..].IndexOf((byte)'{');
+                    if (next < 0)
+                    {
+                        return null;
+                    }
 
-                document = JsonDocument.Parse(memory[fallback..]);
+                    memory = memory[(next + 1)..];
+                }
             }
 
             using var doc = document;
