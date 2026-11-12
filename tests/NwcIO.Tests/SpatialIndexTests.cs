@@ -123,6 +123,56 @@ public class SpatialIndexTests
         Assert.Equal(10.0, hits[1].Distance, precision: 4);
     }
 
+    [Fact]
+    public void Raycast_OriginInsideRoot_FindsHitWithinMaxDistance()
+    {
+        var index = new NwcSpatialIndex(
+        [
+            Tri(1, new(-10, -10, -10), new(10, 10, 10), new(10, -10, 10)),
+            Tri(2, new(0.5, -1, -1), new(0.5, -1, 1), new(0.5, 2, 0)),
+        ]);
+
+        bool hasHit = index.Raycast(new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), out var hit, maxDistance: 5);
+
+        Assert.True(hasHit);
+        Assert.Equal(2, hit.Mesh.Id);
+        Assert.Equal(0.5, hit.Distance, precision: 6);
+    }
+
+    [Fact]
+    public void Raycast_OriginInsideFartherExitingChild_ReturnsClosestHit()
+    {
+        // Split on Y into two leaves of four. The upper leaf holds the hit at x = 1 and a wide triangle off the ray,
+        // so the origin lies inside it and it exits at x = 40; the lower leaf holds the hit at x = 5.
+        var meshes = new List<NwcMesh>
+        {
+            Tri(1, new(1, -1, -1), new(1, -1, 1), new(1, 3, 0)),
+            Tri(2, new(-5, 2, 0), new(40, 2, 0), new(10, 20, 0)),
+            Tri(3, new(0, 40, 0), new(1, 40, 0), new(0, 41, 0)),
+            Tri(4, new(0, 50, 0), new(1, 50, 0), new(0, 51, 0)),
+            Tri(5, new(5, -3, -1), new(5, -3, 1), new(5, 1, 0)),
+            Tri(6, new(10, -20, 0), new(11, -20, 0), new(10, -19, 0)),
+            Tri(7, new(10, -40, 0), new(11, -40, 0), new(10, -39, 0)),
+            Tri(8, new(10, -50, 0), new(11, -50, 0), new(10, -49, 0)),
+        };
+        var index = new NwcSpatialIndex(meshes);
+        Assert.Equal(2, index.LeafCount);
+
+        bool hasHit = index.Raycast(new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), out var hit);
+
+        Assert.True(hasHit);
+        Assert.Equal(1, hit.Mesh.Id);
+        Assert.Equal(1.0, hit.Distance, precision: 6);
+    }
+
+    private static NwcMesh Tri(int id, Vector3d a, Vector3d b, Vector3d c) => new()
+    {
+        Id = id,
+        Vertices = [a, b, c],
+        Indices = [0, 1, 2],
+        BoundingBox = new BoundingBox3d(a, a).Union(b).Union(c),
+    };
+
     private static List<NwcMesh> CreateTestMeshes(int count)
     {
         var list = new List<NwcMesh>(count);
