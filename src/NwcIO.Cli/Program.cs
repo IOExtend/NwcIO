@@ -532,28 +532,38 @@ internal static class Program
             ExportMaterials = readMaterials,
         };
 
-        // Handle multi-model directory assembly
-        if (isDirectory)
+        // Handle multi-model directory assembly and NWF assembly files with the same
+        // exit-code mapping as the single-file path: a missing folder or a folder with
+        // no models is a level-2 error, anything thrown while reading model data is a
+        // data format error (3) — never an unhandled exception with a stack trace.
+        try
         {
-            return ProcessAssemblyDirectory(
-                inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
-                explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
-                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
-                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
-                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
-        }
+            if (isDirectory)
+            {
+                return ProcessAssemblyDirectory(
+                    inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
+                    explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
+                    worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
+                    explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
+                    explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
+            }
 
-        // Handle NWF assembly file
-        if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
+            if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
+            {
+                return ProcessNwfAssembly(
+                    inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
+                    explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
+                    worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
+                    explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
+                    explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
+            }
+        }
+        catch (Exception ex)
         {
-            return ProcessNwfAssembly(
-                inputPath, outputPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
-                explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
-                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
-                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
-                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
         }
 
         // Single NWC/NWD document
@@ -603,11 +613,21 @@ internal static class Program
                 Console.Error.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
                 return 2;
             }
-            var profiler = Model.Appearance.NwcXmlAppearanceProfilerSerializer.Open(explicitProfilerPath);
-            int overridden = doc.ApplyAppearanceProfiler(profiler);
-            if (printReport)
+
+            try
             {
-                Console.Error.WriteLine($"Appearance profiler applied: {overridden} elements overridden.");
+                var profiler = Model.Appearance.NwcXmlAppearanceProfilerSerializer.Open(explicitProfilerPath);
+                int overridden = doc.ApplyAppearanceProfiler(profiler);
+                if (printReport)
+                {
+                    Console.Error.WriteLine($"Appearance profiler applied: {overridden} elements overridden.");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Malformed profiler XML (XmlException) or unknown operators (FormatException).
+                Console.Error.WriteLine($"Error: Invalid appearance profiler file '{explicitProfilerPath}': {ex.Message}");
+                return 3;
             }
         }
 
