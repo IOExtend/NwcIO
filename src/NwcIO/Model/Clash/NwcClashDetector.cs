@@ -12,10 +12,12 @@ public static class NwcClashDetector
     /// <summary>
     /// Executes clash detection across an individual Navisworks document according to the specified test configuration.
     /// </summary>
+    /// <exception cref="ArgumentException">A selection names a set that the document doesn't contain.</exception>
     public static NwcClashTest Run(NwcDocument document, NwcClashTest test)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(test);
+        ThrowIfSetIsMissing([document], test);
 
         var meshesA = ResolveSelection(document, test.SelectionA);
         var meshesB = ResolveSelection(document, test.SelectionB);
@@ -27,10 +29,12 @@ public static class NwcClashDetector
     /// <summary>
     /// Executes clash detection across all contributing models of a federated Navisworks assembly.
     /// </summary>
+    /// <exception cref="ArgumentException">A selection names a set that none of the models contains.</exception>
     public static NwcClashTest Run(NwcAssembly assembly, NwcClashTest test)
     {
         ArgumentNullException.ThrowIfNull(assembly);
         ArgumentNullException.ThrowIfNull(test);
+        ThrowIfSetIsMissing(assembly.Models, test);
 
         var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
         var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
@@ -350,9 +354,29 @@ public static class NwcClashDetector
                     matchedMeshes.AddRange(document.Meshes.Where(m => m.Node is not null && nodeSet.Contains(m.Node)));
                 }
             }
-            if (matchedMeshes.Count > 0) return matchedMeshes;
+            // Only the named sets, even when they match nothing: a model without them adds no meshes
+            return matchedMeshes;
         }
 
         return document.Meshes;
+    }
+
+    /// <summary>
+    /// Throws when a set named by a selection is in none of the models, so a misspelled name can't run against
+    /// nothing without notice. A set that exists in only some models of an assembly is fine.
+    /// </summary>
+    private static void ThrowIfSetIsMissing(IReadOnlyList<NwcDocument> documents, NwcClashTest test)
+    {
+        foreach (var selection in new[] { test.SelectionA, test.SelectionB })
+        {
+            foreach (string name in selection.SetNames)
+            {
+                if (!documents.Any(d => d.FindSet(name) is not null))
+                {
+                    throw new ArgumentException(
+                        $"Clash test '{test.Name}' selects the set '{name}', which no model contains.", nameof(test));
+                }
+            }
+        }
     }
 }
