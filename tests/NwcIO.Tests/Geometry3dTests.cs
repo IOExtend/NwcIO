@@ -25,6 +25,27 @@ public class Geometry3dTests
     }
 
     [Fact]
+    public void Normalized_SmallQuaternionWithNormAboveThreshold_Normalizes()
+    {
+        // Full norm is 7.5e-10 * sqrt(2) ≈ 1.06e-9 > 1e-9, so this must normalize
+        // even though the largest component alone is below the threshold.
+        var q = new Quaterniond(7.5e-10, 0, 0, 7.5e-10);
+
+        var normalized = q.Normalized();
+
+        Assert.True(normalized.IsNormalized());
+        Assert.Equal(Math.Sqrt(0.5), normalized.X, 12);
+        Assert.Equal(Math.Sqrt(0.5), normalized.W, 12);
+    }
+
+    [Fact]
+    public void Normalized_SmallQuaternionWithNormBelowThreshold_ReturnsIdentity()
+    {
+        // Norm is 0.5e-9 < 1e-9: effectively zero, so fall back to Identity.
+        Assert.Equal(Quaterniond.Identity, new Quaterniond(0.5e-9, 0, 0, 0).Normalized());
+    }
+
+    [Fact]
     public void Normalized_LargeFiniteComponents_DoNotOverflowToZero()
     {
         // x*x + w*w overflows to Infinity for components near 1e154; the naive

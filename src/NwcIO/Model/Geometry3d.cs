@@ -68,7 +68,7 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
     public Quaterniond Normalized()
     {
         double max = Math.Max(Math.Max(Math.Abs(X), Math.Abs(Y)), Math.Max(Math.Abs(Z), Math.Abs(W)));
-        if (!double.IsFinite(max) || max <= 1e-9)
+        if (!double.IsFinite(max) || max <= 0)
         {
             return Identity;
         }
@@ -77,8 +77,17 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
         double sy = Y / max;
         double sz = Z / max;
         double sw = W / max;
-        double norm = Math.Sqrt(sx * sx + sy * sy + sz * sz + sw * sw); // in [1, 2]
-        return new(sx / norm, sy / norm, sz / norm, sw / norm);
+        double scaledNorm = Math.Sqrt(sx * sx + sy * sy + sz * sz + sw * sw); // in [1, 2]
+
+        // Keep the near-zero cut-off on the full norm (scaledNorm * max is the true
+        // norm, within rounding): a small-but-valid quaternion such as
+        // (7.5e-10, 0, 0, 7.5e-10) has norm > 1e-9 and must still normalize.
+        if (!(scaledNorm * max > 1e-9))
+        {
+            return Identity;
+        }
+
+        return new(sx / scaledNorm, sy / scaledNorm, sz / scaledNorm, sw / scaledNorm);
     }
 
     public override string ToString() =>
