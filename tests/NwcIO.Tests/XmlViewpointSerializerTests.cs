@@ -87,6 +87,38 @@ public class XmlViewpointSerializerTests
     }
 
     [Fact]
+    public void Serialize_SectionBoxAndPlane_RoundTripsUnchanged()
+    {
+        var bounds = new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(1, 2, 3));
+        var top = NwcSectionPlane.CreateTop(4.5, 7);
+        var list = new List<NwcSavedViewpoint>
+        {
+            new()
+            {
+                Name = "v",
+                Camera = new NwcCamera(),
+                SectionPlanes = [top],
+                SectionBox = new NwcSectionBox(bounds, true),
+            },
+        };
+
+        for (int round = 0; round < 3; round++)
+        {
+            list = NwcXmlViewpointSerializer.Deserialize(NwcXmlViewpointSerializer.Serialize(list)).ToList();
+
+            var vp = Assert.Single(list);
+            var plane = Assert.Single(vp.SectionPlanes);
+            Assert.Equal(7, plane.PlaneIndex);
+            Assert.Equal(top.Normal, plane.Normal);
+            Assert.Equal(top.Distance, plane.Distance);
+            Assert.Equal(NwcSectionAlignment.Top, plane.Alignment);
+            Assert.NotNull(vp.SectionBox);
+            Assert.True(vp.SectionBox.IsEnabled);
+            Assert.Equal(bounds, vp.SectionBox.Bounds);
+        }
+    }
+
+    [Fact]
     public void Serialize_EmptyList_ReturnsValidRootElement()
     {
         string xml = NwcXmlViewpointSerializer.Serialize(Array.Empty<NwcSavedViewpoint>());

@@ -99,17 +99,12 @@ public static class NwcXmlViewpointSerializer
             new XAttribute("guid", vp.Id.ToString()),
             camElem);
 
-        // Section planes
-        var allPlanes = new List<NwcSectionPlane>(vp.SectionPlanes);
-        if (vp.SectionBox is not null && vp.SectionBox.IsEnabled)
-        {
-            allPlanes.AddRange(vp.SectionBox.ToSectionPlanes());
-        }
-
-        if (allPlanes.Count > 0)
+        // Section planes: only the viewpoint's own. The section box is written once, as <section_box> below; its
+        // planes here would be read back as section planes, adding six more on every round trip.
+        if (vp.SectionPlanes.Count > 0)
         {
             var planesElem = new XElement("clip_planes");
-            foreach (var plane in allPlanes)
+            foreach (var plane in vp.SectionPlanes)
             {
                 planesElem.Add(new XElement("clip_plane",
                     new XAttribute("index", plane.PlaneIndex),
