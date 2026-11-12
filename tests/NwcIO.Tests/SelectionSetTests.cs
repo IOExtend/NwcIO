@@ -128,4 +128,60 @@ public class SelectionSetTests
         Assert.Single(s2.Conditions);
         Assert.Equal("Beam", s2.Conditions[0].Value);
     }
+
+    [Fact]
+    public void SearchSet_EveryOperatorRoundtripsThroughNavisworksXml()
+    {
+        foreach (var op in Enum.GetValues<NwcSearchOperator>())
+        {
+            var searchSet = new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", op, "Duct*")]);
+
+            using var ms = new MemoryStream();
+            NwcXmlSetSerializer.Write([searchSet], ms);
+            ms.Position = 0;
+
+            var loaded = Assert.IsType<NwcSearchSet>(Assert.Single(NwcXmlSetSerializer.Read(ms)));
+            var back = Assert.Single(loaded.Conditions).Operator;
+            Assert.Equal(op, back);
+        }
+    }
+
+    [Fact]
+    public void SearchSet_ReadsProfilerStyleInclusiveOperatorSpelling()
+    {
+        var searchSet = new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", NwcSearchOperator.LessThanOrEqual, "5")]);
+
+        using var ms = new MemoryStream();
+        NwcXmlSetSerializer.Write([searchSet], ms);
+        ms.Position = 0;
+        string xml;
+        using (var reader = new StreamReader(ms))
+        {
+            xml = reader.ReadToEnd();
+        }
+
+        // The appearance profiler serializer writes "less_equal"; both spellings must be accepted.
+        Assert.Contains("less_or_equal", xml);
+        using var alternate = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("less_or_equal", "less_equal")));
+        var loaded = Assert.IsType<NwcSearchSet>(Assert.Single(NwcXmlSetSerializer.Read(alternate)));
+        Assert.Equal(NwcSearchOperator.LessThanOrEqual, Assert.Single(loaded.Conditions).Operator);
+    }
+
+    [Fact]
+    public void SearchSet_UnknownOperator_ThrowsInsteadOfFallingBackToEquals()
+    {
+        var searchSet = new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "x")]);
+
+        using var ms = new MemoryStream();
+        NwcXmlSetSerializer.Write([searchSet], ms);
+        ms.Position = 0;
+        string xml;
+        using (var reader = new StreamReader(ms))
+        {
+            xml = reader.ReadToEnd();
+        }
+
+        using var invalid = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("equals", "regex")));
+        Assert.Throws<FormatException>(() => NwcXmlSetSerializer.Read(invalid));
+    }
 }

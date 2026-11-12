@@ -119,20 +119,7 @@ public static class NwcXmlSetSerializer
             var conditions = new XElement("conditions");
             foreach (var c in searchSet.Conditions)
             {
-                string testOp = c.Operator switch
-                {
-                    NwcSearchOperator.Equals => "equals",
-                    NwcSearchOperator.NotEquals => "not_equals",
-                    NwcSearchOperator.Contains => "contains",
-                    NwcSearchOperator.StartsWith => "starts_with",
-                    NwcSearchOperator.EndsWith => "ends_with",
-                    NwcSearchOperator.Wildcard => "wildcard",
-                    NwcSearchOperator.GreaterThan => "greater_than",
-                    NwcSearchOperator.LessThan => "less_than",
-                    NwcSearchOperator.GreaterThanOrEqual => "greater_or_equal",
-                    NwcSearchOperator.LessThanOrEqual => "less_or_equal",
-                    _ => "equals",
-                };
+                string testOp = NwcSearchOperatorFormat.Format(c.Operator);
 
                 var condElem = new XElement("condition",
                     new XAttribute("test", testOp),
@@ -229,24 +216,11 @@ public static class NwcXmlSetSerializer
                 {
                     foreach (var cElem in conditionsElem.Elements("condition"))
                     {
-                        string test = cElem.Attribute("test")?.Value ?? "equals";
                         string category = cElem.Element("category")?.Element("name")?.Value ?? "Item";
                         string property = cElem.Element("property")?.Element("name")?.Value ?? "Name";
                         string val = cElem.Element("value")?.Element("data")?.Value ?? string.Empty;
 
-                        var op = test.ToLowerInvariant() switch
-                        {
-                            "not_equals" => NwcSearchOperator.NotEquals,
-                            "contains" => NwcSearchOperator.Contains,
-                            "starts_with" => NwcSearchOperator.StartsWith,
-                            "ends_with" => NwcSearchOperator.EndsWith,
-                            "wildcard" => NwcSearchOperator.Wildcard,
-                            "greater_than" => NwcSearchOperator.GreaterThan,
-                            "less_than" => NwcSearchOperator.LessThan,
-                            "greater_or_equal" => NwcSearchOperator.GreaterThanOrEqual,
-                            "less_or_equal" => NwcSearchOperator.LessThanOrEqual,
-                            _ => NwcSearchOperator.Equals,
-                        };
+                        var op = NwcSearchOperatorFormat.Parse(cElem.Attribute("test")?.Value);
 
                         searchSet.Conditions.Add(new NwcSearchCondition(category, property, op, val));
                     }

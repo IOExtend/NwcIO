@@ -60,7 +60,7 @@ public static class NwcXmlAppearanceProfilerSerializer
             var condElem = new XElement("condition",
                 new XAttribute("category", cond.Category),
                 new XAttribute("property", cond.Property),
-                new XAttribute("operator", OperatorToString(cond.Operator)),
+                new XAttribute("operator", NwcSearchOperatorFormat.Format(cond.Operator)),
                 new XAttribute("value", cond.Value));
 
             ruleElem.Add(new XElement("conditions", condElem));
@@ -124,7 +124,7 @@ public static class NwcXmlAppearanceProfilerSerializer
             {
                 condition.Category = (string?)condElem.Attribute("category") ?? "Item";
                 condition.Property = (string?)condElem.Attribute("property") ?? "Name";
-                condition.Operator = ParseOperator((string?)condElem.Attribute("operator"));
+                condition.Operator = NwcSearchOperatorFormat.Parse((string?)condElem.Attribute("operator"));
                 condition.Value = (string?)condElem.Attribute("value") ?? string.Empty;
             }
 
@@ -140,31 +140,4 @@ public static class NwcXmlAppearanceProfilerSerializer
 
         return profiler;
     }
-
-    private static string OperatorToString(NwcSearchOperator op) => op switch
-    {
-        NwcSearchOperator.Equals => "equals",
-        NwcSearchOperator.NotEquals => "not_equals",
-        NwcSearchOperator.Contains => "contains",
-        NwcSearchOperator.StartsWith => "starts_with",
-        NwcSearchOperator.EndsWith => "ends_with",
-        NwcSearchOperator.GreaterThan => "greater_than",
-        NwcSearchOperator.LessThan => "less_than",
-        NwcSearchOperator.GreaterThanOrEqual => "greater_equal",
-        NwcSearchOperator.LessThanOrEqual => "less_equal",
-        _ => "equals",
-    };
-
-    private static NwcSearchOperator ParseOperator(string? opStr) => opStr?.ToLowerInvariant() switch
-    {
-        "contains" => NwcSearchOperator.Contains,
-        "not_equals" or "notequals" or "!=" => NwcSearchOperator.NotEquals,
-        "starts_with" or "startswith" => NwcSearchOperator.StartsWith,
-        "ends_with" or "endswith" => NwcSearchOperator.EndsWith,
-        "greater_than" or "greaterthan" or ">" => NwcSearchOperator.GreaterThan,
-        "less_than" or "lessthan" or "<" => NwcSearchOperator.LessThan,
-        "greater_equal" or ">=" => NwcSearchOperator.GreaterThanOrEqual,
-        "less_equal" or "<=" => NwcSearchOperator.LessThanOrEqual,
-        _ => NwcSearchOperator.Equals,
-    };
 }
