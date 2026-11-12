@@ -155,6 +155,49 @@ public class SectioningTests
         Assert.Equal(mesh.Indices.Count, clipped.Indices.Count);
     }
 
+    [Fact]
+    public void NwcMeshClipper_Clip_TranslatedMesh_CutsInWorldSpace()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 1, Translation = new Vector3d(0, 0, 100) },
+        };
+
+        var above = NwcMeshClipper.Clip(mesh, [NwcSectionPlane.CreateBottom(50)]);
+        var below = NwcMeshClipper.Clip(mesh, [NwcSectionPlane.CreateTop(50)]);
+
+        Assert.Equal(1, above.TriangleCount);
+        Assert.Same(mesh.Transform, above.Transform);
+        Assert.All(above.GetWorldVertices(), v => Assert.Equal(100, v.Z, 9));
+        Assert.Equal(0, below.TriangleCount);
+    }
+
+    [Fact]
+    public void NwcMeshClipper_Clip_RotatedMesh_CutsInWorldSpace()
+    {
+        // A quarter turn about Z maps local X onto world Y: the triangle spans world Y 2..4
+        double s = Math.Sqrt(0.5);
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(2, 0, 0), new(4, 0, 0), new(4, 0, 1)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 1, Translation = new Vector3d(10, 0, 0), Rotation = new Quaterniond(0, 0, s, s) },
+        };
+
+        var clipped = NwcMeshClipper.Clip(mesh, [NwcSectionPlane.CreateFront(3)]);
+
+        Assert.True(clipped.TriangleCount > 0);
+        var world = clipped.GetWorldVertices();
+        Assert.All(world, v => Assert.True(v.Y >= 3 - 1e-9, $"Y = {v.Y}"));
+        Assert.Contains(world, v => Math.Abs(v.Y - 4) < 1e-9);
+        Assert.Contains(world, v => Math.Abs(v.Y - 3) < 1e-9);
+        Assert.All(world, v => Assert.Equal(10, v.X, 9));
+    }
+
     [Theory]
     [InlineData(0, true)]
     [InlineData(1, true)]

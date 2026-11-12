@@ -17,8 +17,6 @@ public sealed class NwcGridSystem
 
     public List<NwcGridLine> Lines { get; } = [];
 
-    private List<NwcGridIntersection>? _cachedIntersections;
-
     public NwcGridSystem() { }
 
     public NwcGridSystem(string name)
@@ -33,7 +31,6 @@ public sealed class NwcGridSystem
     {
         ArgumentNullException.ThrowIfNull(line);
         Lines.Add(line);
-        _cachedIntersections = null;
         return line;
     }
 
@@ -51,11 +48,6 @@ public sealed class NwcGridSystem
     /// </summary>
     public IReadOnlyList<NwcGridIntersection> GetIntersections()
     {
-        if (_cachedIntersections is not null)
-        {
-            return _cachedIntersections;
-        }
-
         var result = new List<NwcGridIntersection>();
 
         for (int i = 0; i < Lines.Count; i++)
@@ -78,7 +70,6 @@ public sealed class NwcGridSystem
             }
         }
 
-        _cachedIntersections = result;
         return result;
     }
 

@@ -8,6 +8,56 @@ namespace NwcIO.Tests;
 
 public class MeshParserTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Mesh_GetWorldBoundingBox_AfterTransformAssignment_UsesCurrentTransform(bool initiallyTransformed)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 2, 3)],
+            Indices = [],
+            BoundingBox = new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(1, 2, 3)),
+            Transform = initiallyTransformed
+                ? new NwcTransform { Id = 1, Translation = new Vector3d(10, 20, 30) }
+                : null,
+        };
+
+        Assert.Equal(initiallyTransformed ? 10.0 : 0.0, mesh.GetWorldBoundingBox().Min.X);
+
+        mesh.Transform = new NwcTransform { Id = 2, Translation = new Vector3d(100, 200, 300) };
+
+        var bounds = mesh.GetWorldBoundingBox();
+        var vertices = mesh.GetWorldVertices();
+        Assert.Equal(new Vector3d(100, 200, 300), bounds.Min);
+        Assert.Equal(new Vector3d(101, 202, 303), bounds.Max);
+        Assert.Equal(vertices[0], bounds.Min);
+        Assert.Equal(vertices[1], bounds.Max);
+    }
+
+    [Fact]
+    public void Mesh_GetWorldBoundingBox_AfterTransformRemoval_UsesLocalBounds()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 2, 3)],
+            Indices = [],
+            BoundingBox = new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(1, 2, 3)),
+            Transform = new NwcTransform { Id = 1, Translation = new Vector3d(100, 200, 300) },
+        };
+
+        Assert.Equal(100.0, mesh.GetWorldBoundingBox().Min.X);
+
+        mesh.Transform = null;
+
+        var bounds = mesh.GetWorldBoundingBox();
+        Assert.Equal(mesh.BoundingBox.Value, bounds);
+        Assert.Equal(mesh.GetWorldVertices()[0], bounds.Min);
+        Assert.Equal(mesh.GetWorldVertices()[1], bounds.Max);
+    }
+
     [Fact]
     public void Mesh_TriangleCountAndIndices_AreCalculatedCorrectly()
     {

@@ -1,3 +1,5 @@
+using System.Text;
+using NwcIO.Internal.Container;
 using NwcIO.Model.TimeLiner;
 using Xunit;
 
@@ -5,6 +7,86 @@ namespace NwcIO.Tests;
 
 public class TimeLinerTests
 {
+    [Fact]
+    public void TimeLinerSchedule_NwcRoundtrip_PreservesTaskTreeAndMetadata()
+    {
+        var start = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        var parent = new NwcTimeLinerTask("P", "Phase 1", start, start.AddDays(30))
+        {
+            Progress = 0.5,
+        };
+        parent.AttachedNodeIds.AddRange([7, 8]);
+        var child = new NwcTimeLinerTask("C", "Child", start, start.AddDays(10))
+        {
+            Progress = 1.0,
+        };
+        child.AttachedNodeIds.Add(9);
+        parent.Children.Add(child);
+        var multiline = new NwcTimeLinerTask("M", "Line1\nLine2\r\nLine3", start, start.AddDays(5));
+        var schedule = new NwcTimeLinerSchedule("My Schedule", [parent, multiline]);
+        var doc = new NwcDocumentBuilder()
+            .SetFileInfo("ScheduleModel.nwc")
+            .SetTimeLiner(schedule)
+            .Build();
+
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        ms.Position = 0;
+
+        var loaded = NwcDocument.Open(ms).TimeLiner;
+        Assert.NotNull(loaded);
+        Assert.Equal(schedule.Name, loaded.Name);
+        Assert.Equal(2, loaded.Tasks.Count);
+        Assert.Equal(3, loaded.FlattenTasks().Count());
+        var loadedParent = loaded.Tasks[0];
+        Assert.Equal(parent.Id, loadedParent.Id);
+        Assert.Equal(parent.Name, loadedParent.Name);
+        Assert.Equal(parent.Progress, loadedParent.Progress);
+        Assert.Equal(parent.AttachedNodeIds, loadedParent.AttachedNodeIds);
+        var loadedChild = Assert.Single(loadedParent.Children);
+        Assert.Equal(child.Id, loadedChild.Id);
+        Assert.Equal(child.Name, loadedChild.Name);
+        Assert.Equal(child.Progress, loadedChild.Progress);
+        Assert.Equal(child.AttachedNodeIds, loadedChild.AttachedNodeIds);
+        Assert.Empty(loadedChild.Children);
+        Assert.Equal(multiline.Id, loaded.Tasks[1].Id);
+        Assert.Equal(multiline.Name, loaded.Tasks[1].Name);
+    }
+
+    [Fact]
+    public void TimeLinerSchedule_OpensLegacyEmbeddedCsv()
+    {
+        // Construct the old binary payload independently of the current writer.
+        var csv = "\uFEFFTask ID,Task Name,Task Type,Planned Start,Planned End,Actual Start,Actual End,Planned Cost,ActualCost,Attached Set,Progress\r\n"
+            + "A1,Groundworks,Construct,2026-09-01 00:00:00,2026-09-15 00:00:00,,,75000.00,,Groundwork Elements,50 %\r\n";
+        var csvBytes = Encoding.UTF8.GetBytes(csv);
+        using var payload = new MemoryStream();
+        using (var writer = new BinaryWriter(payload, Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write(100);
+            writer.Write(106);
+            writer.Write(1);
+            writer.Write(csvBytes.Length);
+            writer.Write(csvBytes);
+        }
+
+        using var ms = new MemoryStream();
+        NwcContainerWriter.Write(ms, [payload.ToArray()]);
+        ms.Position = 0;
+
+        var loaded = NwcDocument.Open(ms).TimeLiner;
+        Assert.NotNull(loaded);
+        Assert.Equal("TimeLiner Schedule", loaded.Name);
+        var task = Assert.Single(loaded.Tasks);
+        Assert.Equal("A1", task.Id);
+        Assert.Equal("Groundworks", task.Name);
+        Assert.Equal(NwcTimeLinerTaskType.Construct, task.TaskType);
+        Assert.Equal(new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero), task.PlannedStart);
+        Assert.Equal(task.PlannedStart.AddDays(14), task.PlannedEnd);
+        Assert.Equal(75000m, task.PlannedCost);
+        Assert.Equal("Groundwork Elements", task.AttachedSelectionSetName);
+    }
+
     [Fact]
     public void TimeLinerSchedule_ComputesDatesAndProgress()
     {

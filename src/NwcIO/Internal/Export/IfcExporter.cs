@@ -210,7 +210,7 @@ internal static class IfcExporter
             // Export properties if requested
             if (options.ExportProperties)
             {
-                WriteMeshProperties(w, elemId, mesh, ownerHistoryId);
+                WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale);
             }
         }
 
@@ -437,7 +437,7 @@ internal static class IfcExporter
 
                 if (options.ExportProperties)
                 {
-                    WriteMeshProperties(w, elemId, mesh, ownerHistoryId);
+                    WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale);
                 }
             }
 
@@ -587,7 +587,13 @@ internal static class IfcExporter
         };
     }
 
-    private static void WriteMeshProperties(StepWriter w, int elementId, NwcMesh mesh, int ownerHistoryId)
+    private static void WriteMeshProperties(
+        StepWriter w,
+        int elementId,
+        NwcMesh mesh,
+        int ownerHistoryId,
+        IReadOnlyList<Vector3d> vertices,
+        double scale)
     {
         var propIds = new List<int>();
 
@@ -610,14 +616,21 @@ internal static class IfcExporter
             propIds.Add(pMat);
         }
 
-        if (mesh.BoundingBox is { } bbox && !bbox.IsEmpty)
+        var bounds = BoundingBox3d.Empty;
+        foreach (var vertex in vertices)
         {
-            int pDimX = w.Add("IFCPROPERTYSINGLEVALUE",
-                $"'Length_X',$,IFCREAL({StepWriter.Real(bbox.Size.X)}),$");
-            int pDimY = w.Add("IFCPROPERTYSINGLEVALUE",
-                $"'Width_Y',$,IFCREAL({StepWriter.Real(bbox.Size.Y)}),$");
-            int pDimZ = w.Add("IFCPROPERTYSINGLEVALUE",
-                $"'Height_Z',$,IFCREAL({StepWriter.Real(bbox.Size.Z)}),$");
+            bounds = bounds.Union(vertex);
+        }
+
+        if (!bounds.IsEmpty)
+        {
+            var size = bounds.Size * scale;
+            var pDimX = w.Add("IFCPROPERTYSINGLEVALUE",
+                $"'Length_X',$,IFCLENGTHMEASURE({StepWriter.Real(size.X)}),$");
+            var pDimY = w.Add("IFCPROPERTYSINGLEVALUE",
+                $"'Width_Y',$,IFCLENGTHMEASURE({StepWriter.Real(size.Y)}),$");
+            var pDimZ = w.Add("IFCPROPERTYSINGLEVALUE",
+                $"'Height_Z',$,IFCLENGTHMEASURE({StepWriter.Real(size.Z)}),$");
             propIds.Add(pDimX);
             propIds.Add(pDimY);
             propIds.Add(pDimZ);

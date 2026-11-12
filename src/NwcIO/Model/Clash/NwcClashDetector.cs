@@ -64,7 +64,18 @@ public static class NwcClashDetector
         string modelName)
     {
         bool sameSelection = ReferenceEquals(meshesA, meshesB) ||
-            (meshesA.Count == meshesB.Count && meshesA.Count > 0 && ReferenceEquals(meshesA[0], meshesB[0]));
+            meshesA.SequenceEqual(meshesB, ReferenceEqualityComparer.Instance);
+        Dictionary<NwcMesh, int>? firstIndexA = null;
+        HashSet<NwcMesh>? meshesInB = null;
+        if (!sameSelection)
+        {
+            firstIndexA = new Dictionary<NwcMesh, int>(ReferenceEqualityComparer.Instance);
+            for (int i = 0; i < meshesA.Count; i++)
+            {
+                firstIndexA.TryAdd(meshesA[i], i);
+            }
+            meshesInB = new HashSet<NwcMesh>(meshesB, ReferenceEqualityComparer.Instance);
+        }
 
         bool ignoreSameLayer = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameLayer);
         bool ignoreSameGroup = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameGroup);
@@ -74,12 +85,17 @@ public static class NwcClashDetector
             var meshA = meshesA[i];
             var boxA = meshA.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
+            bool canVisitReverse = !sameSelection && meshesInB!.Contains(meshA);
 
-            int startJ = sameSelection ? i + 1 : 0;
-            for (int j = startJ; j < meshesB.Count; j++)
+            for (var j = sameSelection ? i + 1 : 0; j < meshesB.Count; j++)
             {
                 var meshB = meshesB[j];
                 if (ReferenceEquals(meshA, meshB) || meshA.Id == meshB.Id) continue;
+                // The reverse pair was already visited from the earlier mesh in A.
+                if (canVisitReverse && firstIndexA!.TryGetValue(meshB, out int firstIndex) && firstIndex < i)
+                {
+                    continue;
+                }
 
                 var boxB = meshB.GetWorldBoundingBox();
                 if (boxB.IsEmpty) continue;
@@ -149,7 +165,19 @@ public static class NwcClashDetector
         List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsB,
         NwcClashTest test)
     {
-        bool sameSelection = itemsA.Select(item => item.Mesh).SequenceEqual(itemsB.Select(item => item.Mesh));
+        bool sameSelection = itemsA.Select(item => item.Mesh)
+            .SequenceEqual(itemsB.Select(item => item.Mesh), ReferenceEqualityComparer.Instance);
+        Dictionary<NwcMesh, int>? firstIndexA = null;
+        HashSet<NwcMesh>? meshesInB = null;
+        if (!sameSelection)
+        {
+            firstIndexA = new Dictionary<NwcMesh, int>(ReferenceEqualityComparer.Instance);
+            for (int i = 0; i < itemsA.Count; i++)
+            {
+                firstIndexA.TryAdd(itemsA[i].Mesh, i);
+            }
+            meshesInB = new HashSet<NwcMesh>(itemsB.Select(item => item.Mesh), ReferenceEqualityComparer.Instance);
+        }
         bool ignoreSameFile = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameFile);
         bool ignoreSameLayer = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameLayer);
 
@@ -158,11 +186,17 @@ public static class NwcClashDetector
             var itemA = itemsA[i];
             var boxA = itemA.Mesh.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
+            bool canVisitReverse = !sameSelection && meshesInB!.Contains(itemA.Mesh);
 
-            for (int j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
+            for (var j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
             {
                 var itemB = itemsB[j];
                 if (ReferenceEquals(itemA.Mesh, itemB.Mesh)) continue;
+                // Mesh IDs can repeat across models; only references identify pairs.
+                if (canVisitReverse && firstIndexA!.TryGetValue(itemB.Mesh, out int firstIndex) && firstIndex < i)
+                {
+                    continue;
+                }
 
                 if (ignoreSameFile && string.Equals(itemA.ModelName, itemB.ModelName, StringComparison.OrdinalIgnoreCase))
                 {

@@ -7,6 +7,68 @@ namespace NwcIO.Tests;
 
 public sealed class GridSystemTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GridSystem_AfterEndpointEdit_UpdatesIntersectionsAndLocation(bool editStart)
+    {
+        var grids = new NwcGridSystem();
+        var line = grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
+        grids.AddLine("B", new Vector3d(5, -10, 0), new Vector3d(5, 10, 0));
+        grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(20, 0, 0));
+        Assert.Equal(0.0, grids.GetIntersections()[0].IntersectionPoint.X);
+        Assert.Equal("B / 1", grids.FormatLocation(new Vector3d(5, 0, 0)));
+
+        if (editStart)
+        {
+            line.Start = new Vector3d(20, -10, 0);
+        }
+        else
+        {
+            line.End = new Vector3d(20, 10, 0);
+        }
+
+        var intersection = Assert.Single(grids.GetIntersections(), i => i.Line1Name == "A" && i.Line2Name == "1");
+        Assert.Equal(10.0, intersection.IntersectionPoint.X);
+        Assert.Equal(0.0, intersection.IntersectionPoint.Y);
+        Assert.Equal("A / 1", grids.FormatLocation(new Vector3d(10, 0, 0)));
+    }
+
+    [Fact]
+    public void GridSystem_AfterDirectLineAddition_UpdatesIntersectionsAndLocation()
+    {
+        var grids = new NwcGridSystem();
+        grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
+        grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(30, 0, 0));
+        Assert.Single(grids.GetIntersections());
+        Assert.Equal("A (+20.00m) / 1", grids.FormatLocation(new Vector3d(20, 0, 0)));
+
+        grids.Lines.Add(new NwcGridLine("B", new Vector3d(20, -10, 0), new Vector3d(20, 10, 0)));
+
+        Assert.Equal(2, grids.GetIntersections().Count);
+        var intersection = Assert.Single(grids.GetIntersections(), i => i.Line2Name == "B");
+        Assert.Equal(20.0, intersection.IntersectionPoint.X);
+        Assert.Equal("1 / B", grids.FormatLocation(new Vector3d(20, 0, 0)));
+    }
+
+    [Fact]
+    public void GridSystem_AfterDirectLineRemoval_UpdatesIntersectionsAndLocation()
+    {
+        var grids = new NwcGridSystem();
+        var line = grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
+        grids.AddLine("B", new Vector3d(20, -10, 0), new Vector3d(20, 10, 0));
+        grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(30, 0, 0));
+        Assert.Equal(2, grids.GetIntersections().Count);
+        Assert.Equal("A / 1", grids.FormatLocation(new Vector3d(0, 0, 0)));
+
+        Assert.True(grids.Lines.Remove(line));
+
+        var intersection = Assert.Single(grids.GetIntersections());
+        Assert.Equal("B / 1", intersection.DisplayName);
+        Assert.Equal(20.0, intersection.IntersectionPoint.X);
+        Assert.Equal("B (-20.00m) / 1", grids.FormatLocation(new Vector3d(0, 0, 0)));
+    }
+
     [Fact]
     public void GridLine_CalculatesDistanceAndIntersection()
     {

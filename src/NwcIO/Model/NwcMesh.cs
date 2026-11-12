@@ -23,7 +23,15 @@ public sealed class NwcMesh
     public BoundingBox3d? BoundingBox { get; init; }
 
     /// <summary>Optional 3D world transformation associated with this mesh instance.</summary>
-    public NwcTransform? Transform { get; set; }
+    public NwcTransform? Transform
+    {
+        get => _transform;
+        set
+        {
+            _transform = value;
+            _cachedWorldBounds = null;
+        }
+    }
 
     /// <summary>Surface material and color assigned to this mesh.</summary>
     public NwcMaterial? Material { get; set; }
@@ -34,6 +42,7 @@ public sealed class NwcMesh
     /// <summary>Number of triangle faces in this mesh.</summary>
     public int TriangleCount => Indices.Count / 3;
 
+    private NwcTransform? _transform;
     private BoundingBox3d? _cachedWorldBounds;
 
     /// <summary>
