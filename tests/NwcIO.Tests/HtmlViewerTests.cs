@@ -249,4 +249,50 @@ public sealed class HtmlViewerTests
             }
         }
     }
+
+    [Fact]
+    public void Write_HostileModelStrings_AreNotAssignedToInnerHtmlInPropertiesPane()
+    {
+        const string hostile = "<img src=x onerror=alert(1)>";
+
+        var node = new NwcNode { Id = 1, Name = "n", Class = hostile };
+        node.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 1,
+            Tag = 1,
+            Class = hostile,
+            Name = hostile,
+            Value = hostile,
+        });
+
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = hostile,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+            Node = node,
+        };
+
+        var sw = new StringWriter();
+        NwcHtmlViewerExporter.Write(
+            sw, [mesh], [], [], new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)), new NwcHtmlViewerOptions());
+        string html = sw.ToString();
+
+        // The properties pane must be built with textContent, never innerHTML.
+        int fnStart = html.IndexOf("function showProperties", StringComparison.Ordinal);
+        Assert.True(fnStart >= 0, "showProperties is missing from the viewer script");
+        int fnEnd = html.IndexOf("\n  }", fnStart, StringComparison.Ordinal);
+        string body = fnEnd > fnStart ? html[fnStart..fnEnd] : html[fnStart..];
+
+        Assert.DoesNotContain("innerHTML", body);
+        Assert.Contains("pane.replaceChildren()", body);
+        Assert.Contains("title.textContent", body);
+        Assert.Contains("nameCell.textContent", body);
+        Assert.Contains("valCell.textContent", body);
+
+        // The hostile strings survive as data in the JSON payload (JSON-escaped markup).
+        Assert.Contains("\\u003Cimg src=x onerror=alert(1)\\u003E", html);
+    }
 }
