@@ -157,6 +157,42 @@ public class WriterTests
         Assert.Equal(expectedUtc, opened.FileInfo.SourceTimestampUtc.Value.ToUniversalTime());
     }
 
+    [Theory]
+    [InlineData(true, 0, 0, 1, 0)]
+    [InlineData(false, 0, 0, 1, 0)]
+    [InlineData(false, 0, 0.99999999, 0, 0.00005)]
+    public void DocumentBuilder_SavedViewpointWithZeroW_Roundtrips(bool withIdentity, double qx, double qy, double qz, double qw)
+    {
+        var builder = new NwcDocumentBuilder();
+        if (withIdentity)
+        {
+            builder.AddSavedViewpoint(new NwcSavedViewpoint
+            {
+                Name = "Front",
+                Camera = new NwcCamera { Position = new Vector3d(1, 2, 3), Rotation = Quaterniond.Identity },
+            });
+        }
+
+        var rotation = new Quaterniond(qx, qy, qz, qw);
+        builder.AddSavedViewpoint(new NwcSavedViewpoint
+        {
+            Name = "Back",
+            Camera = new NwcCamera { Position = new Vector3d(4, 5, 6), Rotation = rotation },
+        });
+
+        using var ms = new MemoryStream(builder.Build().ToByteArray());
+        var opened = NwcDocument.Open(ms);
+
+        Assert.Equal(withIdentity ? 2 : 1, opened.SavedViewpoints.Count);
+        var back = Assert.Single(opened.SavedViewpoints, v => v.Name == "Back");
+        var expected = rotation.Normalized();
+        Assert.Equal(new Vector3d(4, 5, 6), back.Camera!.Position);
+        Assert.Equal(expected.X, back.Camera.Rotation.X, 9);
+        Assert.Equal(expected.Y, back.Camera.Rotation.Y, 9);
+        Assert.Equal(expected.Z, back.Camera.Rotation.Z, 9);
+        Assert.Equal(expected.W, back.Camera.Rotation.W, 9);
+    }
+
     [Fact]
     public void Document_SaveToFileAndReopen_WorksCorrectly()
     {
