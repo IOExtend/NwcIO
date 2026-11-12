@@ -34,12 +34,12 @@ using NwcIO;
 // Open any .nwc or .nwd file directly from disk
 var doc = NwcDocument.Open("model.nwc");
 
-Console.WriteLine($"Root nodes: {doc.RootNodes.Count}");
+Console.WriteLine($"Source: {doc.FileInfo?.SourcePath}");
 Console.WriteLine($"Total 3D meshes: {doc.Meshes.Count}");
 
-foreach (var node in doc.RootNodes)
+foreach (var node in doc.RootNode.Children)
 {
-    Console.WriteLine($"Node: {node.Name} (Category: {node.Category})");
+    Console.WriteLine($"Node: {node.Name} (Class: {node.Class})");
 }
 ```
 
@@ -51,39 +51,43 @@ using NwcIO;
 var doc = NwcDocument.Open("federated_model.nwc");
 
 // Modern IFC4 with compact IfcTriangulatedFaceSet mesh tessellation
-doc.ExportIfc("output.ifc", new NwcIfcExportOptions
+doc.SaveIfc("output.ifc", new NwcIfcExportOptions
 {
-    Schema = NwcIfcSchema.Ifc4,
+    SchemaVersion = NwcIfcSchemaVersion.Ifc4,
     ProjectName = "Coordination Project"
 });
 
 // Binary glTF 2.0 for 3D web engines (Three.js, Babylon.js, Cesium)
-doc.ExportGlb("output.glb");
+doc.SaveGlb("output.glb");
 
 // Wavefront OBJ
-doc.ExportObj("output.obj");
+doc.SaveObj("output.obj");
 ```
 
 ### Multi-Discipline Clash Matrix
 
 ```csharp
 using NwcIO;
+using NwcIO.Model.Clash;
 
-// Create a coordination clash matrix across discipline files
+// Federate every model of the site folder into one assembly
+var assembly = NwcAssembly.LoadFromDirectory("./site");
+
+// Create a coordination clash matrix; disciplines separate meshes by model name
 var matrix = new NwcClashMatrix("Coordination Matrix");
+matrix.AddDiscipline("Architecture", "ARCH");
+matrix.AddDiscipline("Structure", "STRUCT");
+matrix.AddDiscipline("MEP", "MEP");
+matrix.PopulateStandardMatrix(defaultTolerance: 0.002);
 
-var arch = matrix.AddDiscipline("Architecture", NwcDocument.Open("ARCH.nwc"));
-var structDoc = matrix.AddDiscipline("Structure", NwcDocument.Open("STRUCT.nwc"));
-var mep = matrix.AddDiscipline("MEP", NwcDocument.Open("MEP.nwc"));
-
-// Configure tolerance and exclusion rules per cell
-matrix.SetTolerance(arch, structDoc, 0.005); // 5mm
-matrix.SetTolerance(structDoc, mep, 0.010);  // 10mm
+// Configure tolerance per cell (in meters): Architecture–Structure 5mm, Structure–MEP 10mm
+matrix.Cells[0].Tolerance = 0.005;
+matrix.Cells[1].Tolerance = 0.010;
 
 // Execute the entire coordination matrix
-var result = matrix.Execute();
+matrix.Execute(assembly);
 
-Console.WriteLine($"Total coordination clashes: {result.TotalClashes}");
+Console.WriteLine($"Total coordination clashes: {matrix.TotalClashesCount}");
 Console.WriteLine(matrix.ToMarkdownTable());
 
 // Save to buildingSMART BCF 2.1 zip package for issue tracking
@@ -94,14 +98,15 @@ matrix.SaveBcf("CoordinationIssues.bcfzip");
 
 ```csharp
 using NwcIO;
+using NwcIO.Model.Viewer;
 
 var doc = NwcDocument.Open("construction_site.nwd");
 
 // Export self-contained single-file HTML WebGL viewer with 4D schedule playback
-NwcHtmlViewerExporter.Export(doc, "interactive_site.html", new NwcHtmlViewerOptions
+doc.SaveHtmlViewer("interactive_site.html", new NwcHtmlViewerOptions
 {
-    EnableTimeLiner = true,
-    EnableSelectionSets = true
+    IncludeTimeLiner = true,
+    IncludeSelectionSets = true
 });
 ```
 
@@ -112,18 +117,19 @@ NwcHtmlViewerExporter.Export(doc, "interactive_site.html", new NwcHtmlViewerOpti
 Run standard coordination and export tasks from your terminal or CI/CD pipelines:
 
 ```bash
-# Inspect scene graph and metadata
-nwcio info model.nwc
+# Inspect scene graph and metadata (diagnostic report goes to stderr)
+nwcio model.nwc --report
 
-# Export to IFC4 and glTF
-nwcio export model.nwc --ifc model.ifc --glb model.glb
+# Convert to IFC4 and glTF
+nwcio model.nwc model.ifc --ifc-schema IFC4
+nwcio model.nwc model.glb
 
-# Multi-discipline clash matrix
-nwcio matrix ARCH.nwc STRUCT.nwc MEP.nwc --out-json matrix.json --bcf matrix.bcfzip
+# Multi-discipline clash matrix across a folder of federated models
+nwcio ./site --clash-matrix matrix.json --clash-matrix-md matrix.md --clash-matrix-bcf matrix.bcfzip
 
-# 4D TimeLiner linking & simulation
-nwcio timeliner model.nwc --schedule schedule.xml --link auto --export-csv sim.csv
+# 4D TimeLiner: import schedule.xml (when it exists), link it and simulate a date
+nwcio model.nwc --timeliner-xml schedule.xml --link-timeliner --timeliner-simulate 2026-06-01 --timeliner-csv sim.csv
 
 # Standalone 3D HTML WebGL viewer
-nwcio view model.nwc --output viewer.html --timeliner --selection-sets
+nwcio model.nwc --html-viewer viewer.html
 ```

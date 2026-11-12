@@ -42,5 +42,5 @@ The `NwcIO` package is the supported surface listed here. Everything else (inter
 | `NwcMeasureEngine` | Double-precision 3D point-to-point, point-to-mesh shortest distance (Voronoi algorithm), clearance, and area/volume calculations. |
 | `NwcDiffEngine` | Revision comparison and differential geometry/property analysis. |
 | `NwcHtmlViewerExporter` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback. |
-| `NwcIfcExporter` | ISO 10303-21 STEP exporter supporting IFC2x3 Coordination View and modern IFC4 mesh tessellation (`IfcTriangulatedFaceSet`). |
-| `NwcGlbExporter` & `NwcObjExporter` | Binary glTF 2.0 and Wavefront OBJ geometry exporters. |
+| `NwcDocument.SaveIfc` | ISO 10303-21 STEP export supporting IFC2x3 Coordination View and modern IFC4 mesh tessellation (`IfcTriangulatedFaceSet`), configured via `NwcIfcExportOptions`. |
+| `NwcDocument.SaveGlb` & `NwcDocument.SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. |

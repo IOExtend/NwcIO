@@ -44,8 +44,8 @@ The library targets .NET 8 and .NET 10. It uses managed code without native depe
 Export to IFC, glTF GLB, Wavefront OBJ, or JSON:
 
 ```sh
-# Convert to IFC2X3 or modern compact IFC4
-nwcio model.nwc model.ifc --ifc4
+# Convert to IFC2X3 (default) or modern compact IFC4
+nwcio model.nwc model.ifc --ifc-schema IFC4
 
 # Convert to binary glTF 2.0 (with PBR materials and vertex normals)
 nwcio model.nwc model.glb
@@ -60,27 +60,30 @@ nwcio model.nwc model.json
 Coordinate models, detect clashes, and export BCF:
 
 ```sh
-# Run clash detection between models and export buildingSMART BCF 2.1
-nwcio clash arch.nwc mep.nwc --bcf clashes.bcfzip --tolerance 0.01
+# Run clash detection across a folder of federated models and export buildingSMART BCF 2.1
+nwcio ./models --clash-bcf clashes.bcfzip --clash-tolerance 0.01
+
+# Group detected clashes into proximity clusters while exporting
+nwcio ./models --clash-bcf clashes.bcfzip --clash-group proximity --clash-radius 1.0
 
 # Execute multi-discipline clash matrix across a federated folder
-nwcio clash-matrix ./models/ -o matrix.json --export-markdown matrix.md --bcf matrix.bcfzip
+nwcio ./models --clash-matrix matrix.json --clash-matrix-md matrix.md --clash-matrix-bcf matrix.bcfzip
 
 # Export standalone 3D WebGL HTML viewer with sectioning and measure tools
-nwcio view model.nwc -o viewer.html --grids grids.xml
+nwcio model.nwc --html-viewer viewer.html --grids grids.xml
 ```
 
 TimeLiner, viewpoints, search sets, and revision diff:
 
 ```sh
-# Simulate 4D construction schedule at a specific date
-nwcio schedule model.nwc --sim-date 2026-06-01 --export-csv schedule.csv
+# Import a 4D schedule, link it to geometry and simulate a specific date
+nwcio model.nwc --timeliner-xml schedule.xml --link-timeliner --timeliner-simulate 2026-06-01 --timeliner-csv sim.csv
 
 # Export saved viewpoints and section planes to BCF 2.1 or Navisworks XML
-nwcio export-viewpoints model.nwc --bcf viewpoints.bcfzip --xml viewpoints.xml
+nwcio model.nwc --viewpoints-bcf viewpoints.bcfzip --viewpoints-xml viewpoints.xml
 
 # Compare two model revisions (added, deleted, modified geometry & properties)
-nwcio diff baseline.nwc revision.nwc -o diff.json --bcf diff.bcfzip
+nwcio revision.nwc --diff baseline.nwc --diff-json diff.json --diff-bcf diff.bcfzip
 ```
 
 Diagnostics and progress go to standard error. Run `nwcio --help` for the full list of options.
@@ -91,44 +94,46 @@ Open a Navisworks document, inspect elements, and export to GLB or IFC:
 
 ```csharp
 using NwcIO;
-using NwcIO.Exporters;
+using NwcIO.Model;
+using NwcIO.Model.Sets;
 
 // Open document directly from disk
 var doc = NwcDocument.Open("model.nwc");
 
-Console.WriteLine($"Model: {doc.ModelName}");
-Console.WriteLine($"Nodes: {doc.RootNodes.Count}, Triangles: {doc.TotalTriangleCount:N0}");
+Console.WriteLine($"Source: {doc.FileInfo?.SourcePath}");
+Console.WriteLine($"Meshes: {doc.Meshes.Count}, Transforms: {doc.Transforms.Count}");
 
-// Query nodes by property category
-foreach (var node in doc.FindNodesByProperty("Item", "Type", "Wall"))
+// Query nodes with a search condition (category, property, operator, value)
+foreach (var node in doc.FindNodes(new NwcSearchCondition("Item", "Type", NwcSearchOperator.Equals, "Wall")))
 {
-    Console.WriteLine($"Node: {node.Name} (Path: {node.Path})");
+    Console.WriteLine($"Node: {node.Name} (Class: {node.Class})");
 }
 
 // Export to binary glTF 2.0 and IFC4
-NwcGlbExporter.Export(doc, "model.glb");
-NwcIfcExporter.Export(doc, "model.ifc", new NwcIfcExportOptions { Schema = NwcIfcSchema.Ifc4 });
+doc.SaveGlb("model.glb");
+doc.SaveIfc("model.ifc", new NwcIfcExportOptions { SchemaVersion = NwcIfcSchemaVersion.Ifc4 });
 ```
 
 Run 3D geometric clash detection between documents:
 
 ```csharp
 using NwcIO;
-using NwcIO.Clash;
+using NwcIO.Model.Clash;
 
 var archDoc = NwcDocument.Open("Architecture.nwc");
 var mepDoc = NwcDocument.Open("MEP.nwc");
 
-// Detect interferences with broad-phase AABB and narrow-phase triangle intersection
-var report = NwcClashDetector.DetectClashes(archDoc, mepDoc, new NwcClashOptions
-{
-    Tolerance = 0.01, // 10mm tolerance
-    ClashType = NwcClashType.Hard
-});
+// Federate the models, then run a hard clash test with broad-phase AABB
+// and narrow-phase triangle intersection
+var assembly = NwcAssembly.Create("Federated Model", archDoc, mepDoc);
+var test = new NwcClashTest("Architecture vs MEP", NwcClashTestType.Hard, tolerance: 0.01);
+NwcClashDetector.Run(assembly, test);
+
+Console.WriteLine($"{test.TotalClashCount} clashes detected");
 
 // Group clashes by spatial 3D proximity and export BCF 2.1
-report.GroupByProximity(clusterDistance: 1.5);
-report.SaveBcf("Clashes.bcfzip");
+NwcClashGrouper.GroupByProximity(test, clusterDistance: 1.5);
+NwcClashBcfExporter.Save("Clashes.bcfzip", test);
 ```
 
 See the [public API](https://github.com/IOExtend/NwcIO/blob/main/docs/public-api.md) for the supported surface and [getting started guide](https://github.com/IOExtend/NwcIO/blob/main/docs/getting-started.md) for detailed workflows.

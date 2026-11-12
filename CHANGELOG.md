@@ -277,4 +277,4 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
   - Surface Area Heuristic (SAH) Bounding Volume Hierarchy (BVH) spatial index.
   - Fast AABB vs AABB, triangle-triangle, and raycasting acceleration for clash detection between federated models (`NwcAssembly`).
 - **Cross-Platform CLI Tool (`nwcio`)**:
-  - Available as a .NET Tool and executable CLI for `info`, `export`, `clash`, and `view` commands.
+  - Available as a .NET Tool and executable CLI taking an input file or federated folder plus an optional output path and long options (IFC/GLB/OBJ/JSON/BCF/HTML/NWC export, clash detection, clash matrix, TimeLiner, viewpoints, revision diff).
