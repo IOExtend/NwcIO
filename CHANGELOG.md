@@ -2,6 +2,12 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
+## [Unreleased]
+
+### Documentation
+
+- **Documentation**: Added a "Scope and frozen features" section to the README listing the extras that now receive bug fixes only and their planned replacements.
+
 ## [0.10.0] - 2026-11-11
 
 ### Major Additions & Capabilities

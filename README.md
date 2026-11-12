@@ -147,6 +147,17 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 - Geometry extraction supports triangle meshes, line sets, cylinders, and point clouds; proprietary custom parametric solids are tessellated.
 - Writing native `.nwd` files is not supported (export targets native `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
 
+## Scope and frozen features
+
+NwcIO reads and writes its own format. These extras are frozen: they receive bug fixes only, with no new features or options.
+
+- HTML viewer, GLB and OBJ export, and IFC export.
+- Clash detection (triangle-level and bounding-box engines), clash grouping, clash matrix, and the HTML clash report.
+- Measure, grids, revision diff, and BCF.
+- TimeLiner schedule import and export, selection and search sets, appearance profiler, mesh clipper, and Navisworks XML exchange. These stay in NwcIO.
+
+Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through a planned `NwcIO.Scene` adapter over the shared `IOScene` model, which is also planned. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. None of these packages is published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
+
 ## Build from source and tests
 
 Use the .NET SDK selected by `global.json`, which specifies 10.0.100 with `latestFeature` roll-forward.
