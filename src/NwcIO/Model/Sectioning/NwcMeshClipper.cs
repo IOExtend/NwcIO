@@ -21,6 +21,14 @@ public static class NwcMeshClipper
             return mesh;
         }
 
+        // The planes are in world space and the vertices in the mesh's local space: cut with the planes mapped into
+        // local space, so the result keeps its vertices and Transform
+        if (mesh.Transform is not null)
+        {
+            double[] m = mesh.Transform.ToMatrix4x4();
+            activePlanes = activePlanes.Select(p => ToLocalSpace(p, m)).ToList();
+        }
+
         var currentVerts = new List<Vector3d>(mesh.Vertices);
         var currentIndices = new List<int>(mesh.Indices);
 
@@ -55,6 +63,30 @@ public static class NwcMeshClipper
 
         if (!sectionBox.IsEnabled) return mesh;
         return Clip(mesh, sectionBox.ToSectionPlanes());
+    }
+
+    /// <summary>
+    /// Maps a world-space plane n·x = d (n normalized, as <see cref="ClipMeshByPlane"/> reads it) into the local space
+    /// of a mesh whose world position is x = M·l + t, with <paramref name="m"/> laid out as in
+    /// <see cref="NwcMesh.GetWorldVertices"/>: (Mᵀn)·l = d − n·t, then normalized.
+    /// </summary>
+    private static NwcSectionPlane ToLocalSpace(NwcSectionPlane plane, double[] m)
+    {
+        var n = plane.Normal.Normalize();
+        var localNormal = new Vector3d(
+            m[0] * n.X + m[1] * n.Y + m[2] * n.Z,
+            m[4] * n.X + m[5] * n.Y + m[6] * n.Z,
+            m[8] * n.X + m[9] * n.Y + m[10] * n.Z);
+        double localDistance = plane.Distance - (n.X * m[12] + n.Y * m[13] + n.Z * m[14]);
+
+        double length = localNormal.Length;
+        if (!(length > 1e-12) || !double.IsFinite(length) || !double.IsFinite(localDistance))
+        {
+            // Like GetWorldVertices, which keeps the local vertices for a transform it can't apply
+            return plane;
+        }
+
+        return new NwcSectionPlane(plane.PlaneIndex, localNormal / length, localDistance / length, plane.IsEnabled, plane.Alignment);
     }
 
     private static void ClipMeshByPlane(
