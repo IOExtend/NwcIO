@@ -117,6 +117,11 @@ public static class NwcTimeLinerLinker
 
         foreach (var task in schedule.FlattenTasks())
         {
+            // An empty task name substring-matches every node, which would attach the
+            // whole scene graph to the task; only named tasks take part in name linking.
+            if (string.IsNullOrWhiteSpace(task.Name)) continue;
+
+            var attachedIds = new HashSet<int>(task.AttachedNodeIds);
             bool anyMatched = false;
             foreach (var node in allNodes)
             {
@@ -124,7 +129,7 @@ public static class NwcTimeLinerLinker
                     ? string.Equals(node.Name, task.Name, StringComparison.OrdinalIgnoreCase)
                     : (node.Name?.Contains(task.Name, StringComparison.OrdinalIgnoreCase) == true);
 
-                if (match && !task.AttachedNodeIds.Contains(node.Id))
+                if (match && attachedIds.Add(node.Id))
                 {
                     task.AttachedNodeIds.Add(node.Id);
                     anyMatched = true;

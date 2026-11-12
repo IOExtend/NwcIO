@@ -74,12 +74,20 @@ public static class NwcTimeLinerXmlSerializer
         }
         elem.Add(plannedElem);
 
-        if (task.ActualStart.HasValue && task.ActualEnd.HasValue)
+        // An in-progress task can have an actual start (and cost) but no actual end yet;
+        // each value is written independently so nothing is silently dropped.
+        if (task.ActualStart.HasValue || task.ActualEnd.HasValue || task.ActualCost.HasValue)
         {
-            var actualElem = new XElement("actual",
-                new XAttribute("start", task.ActualStart.Value.ToString("o", CultureInfo.InvariantCulture)),
-                new XAttribute("end", task.ActualEnd.Value.ToString("o", CultureInfo.InvariantCulture)));
+            var actualElem = new XElement("actual");
 
+            if (task.ActualStart.HasValue)
+            {
+                actualElem.Add(new XAttribute("start", task.ActualStart.Value.ToString("o", CultureInfo.InvariantCulture)));
+            }
+            if (task.ActualEnd.HasValue)
+            {
+                actualElem.Add(new XAttribute("end", task.ActualEnd.Value.ToString("o", CultureInfo.InvariantCulture)));
+            }
             if (task.ActualCost.HasValue)
             {
                 actualElem.Add(new XAttribute("cost", task.ActualCost.Value.ToString("F2", CultureInfo.InvariantCulture)));
