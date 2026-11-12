@@ -302,4 +302,26 @@ public class IfcExportTests
         Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
         Assert.Contains("END-ISO-10303-21;", ifc);
     }
+
+    [Fact]
+    public void IfcExportOptions_SchemaAcceptsKnownValuesAndRejectsUnknownOnes()
+    {
+        var options = new NwcIfcExportOptions();
+
+        options.Schema = "IFC4";
+        Assert.Equal(NwcIfcSchemaVersion.Ifc4, options.SchemaVersion);
+        Assert.Equal("IFC4", options.Schema);
+
+        options.Schema = "ifc2x3";
+        Assert.Equal(NwcIfcSchemaVersion.Ifc2x3, options.SchemaVersion);
+        Assert.Equal("IFC2X3", options.Schema);
+
+        Assert.Throws<ArgumentException>(() => options.Schema = "IFC4X3");
+        Assert.Throws<ArgumentException>(() => options.Schema = "IF44");
+        Assert.Throws<ArgumentException>(() => options.Schema = "");
+        Assert.Throws<ArgumentException>(() => options.Schema = null!);
+
+        // The rejected assignment must not have changed the selected schema.
+        Assert.Equal(NwcIfcSchemaVersion.Ifc2x3, options.SchemaVersion);
+    }
 }

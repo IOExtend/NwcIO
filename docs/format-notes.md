@@ -173,7 +173,7 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Character Encoding**:
   - Full Unicode support with ISO 10303-21 `\X2\HHHH...\X0\` escaping for Cyrillic and international characters (e.g., Russian BIM category and parameter names).
 - **Geometric Representations**:
-  - **IFC2x3 (Boundary Representation)**: Serialized as `IfcFacetedBrep` composed of `IfcClosedShell` containing `IfcFace` &rarr; `IfcFaceOuterBound` &rarr; `IfcPolyLoop` referencing `IfcCartesianPoint` coordinates with vertex deduplication.
+  - **IFC2x3 (Boundary Representation)**: Serialized as `IfcFacetedBrep` composed of `IfcClosedShell` containing `IfcFace` &rarr; `IfcFaceOuterBound` &rarr; `IfcPolyLoop` referencing `IfcCartesianPoint` coordinates, with one point shared per mesh vertex index when `SharedVertices` is enabled (the default); coincident coordinates at different vertex indices are not merged.
   - **IFC4 (Modern Tessellation)**: Serialized as `IfcTriangulatedFaceSet` referencing `IfcCartesianPointList3D` with representation type `'Tessellation'`. Reduces entity count and file size by over 60%, delivering sub-120 ms export times for full buildings.
 - **Type Products & Occurrence Relations (`IfcRelDefinesByType`)**:
   - Generates type definition objects (`IfcTypeProduct` subtypes): `IFCWALLTYPE`, `IFCSLABTYPE`, `IFCCOLUMNTYPE`, `IFCBEAMTYPE`, `IFCREINFORCINGBARTYPE`, `IFCFOOTINGTYPE`, `IFCRAILINGTYPE`, `IFCROOFTYPE`, `IFCSTAIRFLIGHTTYPE`, `IFCPIPESEGMENTTYPE`, `IFCDUCTSEGMENTTYPE`, `IFCWINDOWTYPE`/`IFCWINDOWSTYLE`, `IFCDOORTYPE`/`IFCDOORSTYLE`, and `IFCBUILDINGELEMENTPROXYTYPE`.
@@ -224,6 +224,6 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
   - World up vector: $\vec{U} = Q \cdot (0, 1, 0) \cdot Q^*$.
   - 3D target / look-at point: $\vec{T} = \vec{P} + \vec{D} \times d_{\text{focal}}$.
 - **glTF 2.0 & BCF Integration**:
-  - Serialized into glTF 2.0 `cameras` array with perspective projection and vertical field of view (`yfov = 2 * atan(tan(fov/2) / aspect)`).
+  - Serialized into glTF 2.0 `cameras` array with perspective projection and vertical field of view (`yfov = FieldOfView * π / 180`, i.e. the camera's vertical FOV in degrees converted straight to radians, falling back to 1.04719755 rad ≈ 60° when not positive; no horizontal-to-vertical conversion is applied — `aspectRatio` is written separately).
   - Placed as camera scene nodes with `translation` ($\vec{P}$) and `rotation` ($Q$).
   - Exported to buildingSMART BCF 2.1 archives with `PerspectiveCamera` and `OrthogonalCamera` visualization blocks.

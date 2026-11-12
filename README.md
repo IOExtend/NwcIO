@@ -107,7 +107,7 @@ foreach (var node in doc.FindNodesByProperty("Item", "Type", "Wall"))
 
 // Export to binary glTF 2.0 and IFC4
 NwcGlbExporter.Export(doc, "model.glb");
-NwcIfcExporter.Export(doc, "model.ifc", new NwcIfcExportOptions { Schema = NwcIfcSchema.Ifc4 });
+NwcIfcExporter.Export(doc, "model.ifc", new NwcIfcExportOptions { SchemaVersion = NwcIfcSchemaVersion.Ifc4 });
 ```
 
 Run 3D geometric clash detection between documents:
