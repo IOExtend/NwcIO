@@ -22,14 +22,15 @@ public static class XRefTableParser
             return null;
         }
 
-        // Find the start of the JSON object ('{')
-        int start = 0;
-        while (start < data.Length && data[start] != (byte)'{')
+        // Find the start of the JSON object by the literal StreamClassifier recognizes the stream by: the binary
+        // prefix before it can hold a '{' byte. Without that literal, fall back to the first '{'.
+        int start = data.AsSpan().IndexOf("{\"Type\":"u8);
+        if (start < 0)
         {
-            start++;
+            start = data.AsSpan().IndexOf((byte)'{');
         }
 
-        if (start >= data.Length)
+        if (start < 0)
         {
             return null;
         }
