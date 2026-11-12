@@ -91,6 +91,7 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
   - Added `--grids <file.xml>`: Loads a spatial grid system from XML and assigns grid locations.
   - Added `--export-grids <file.xml>`: Exports extracted or configured grid systems to XML.
 
+## [0.7.0] - 2026-11-10
 ### Major Additions & Capabilities
 - **Intelligent Clash Grouping & Clustering Engine (`NwcClashGrouper`)**:
   - Spatial 3D proximity clustering (`GroupByProximity`) using Disjoint-Set (Union-Find) algorithm, grouping thousands of raw collisions into manageable spatial clusters with auto-calculated cluster centroids and optimal framing viewpoints.
@@ -142,6 +143,8 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
   - Added `NwcAssembly.SaveViewpointsXml(...)` and `NwcAssembly.ToViewpointsXml()`.
 - **CLI Enhancements (`nwcio`)**:
   - Added `--viewpoints-xml <file.xml>`: exports saved viewpoints, active section planes, and redlines to Autodesk Navisworks XML format.
+
+## [0.5.0] - 2026-11-10
 
 ### Major Additions & Capabilities
 - **Navisworks Clash Detective & 3D Triangle Collision Engine**:
