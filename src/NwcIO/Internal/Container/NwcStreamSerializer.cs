@@ -381,16 +381,7 @@ internal static class NwcStreamSerializer
             vpWriter.Write(cam.Position.Y);
             vpWriter.Write(cam.Position.Z);
 
-            var rot = cam.Rotation;
-            double norm = Math.Sqrt(rot.X * rot.X + rot.Y * rot.Y + rot.Z * rot.Z + rot.W * rot.W);
-            if (norm > 1e-9)
-            {
-                rot = new Quaterniond(rot.X / norm, rot.Y / norm, rot.Z / norm, rot.W / norm);
-            }
-            else
-            {
-                rot = Quaterniond.Identity;
-            }
+            var rot = cam.Rotation.Normalized();
 
             vpWriter.Write(rot.X);
             vpWriter.Write(rot.Y);

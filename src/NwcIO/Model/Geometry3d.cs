@@ -60,6 +60,15 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
     public bool IsNormalized(double epsilon = 1e-4) =>
         Math.Abs((X * X + Y * Y + Z * Z + W * W) - 1.0) < epsilon;
 
+    /// <summary>
+    /// Returns this quaternion scaled to unit length, or <see cref="Identity"/> when its length is approximately zero.
+    /// </summary>
+    public Quaterniond Normalized()
+    {
+        double norm = Math.Sqrt(X * X + Y * Y + Z * Z + W * W);
+        return norm > 1e-9 ? new(X / norm, Y / norm, Z / norm, W / norm) : Identity;
+    }
+
     public override string ToString() =>
         string.Create(CultureInfo.InvariantCulture, $"({X:F4}, {Y:F4}, {Z:F4}, {W:F4})");
 }
