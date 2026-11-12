@@ -32,8 +32,15 @@ internal static class SelectionSetParser
             using var ms = new MemoryStream(data, writable: false);
             return NwcXmlSetSerializer.Read(ms);
         }
+        catch (FormatException)
+        {
+            // Valid XML whose condition uses an operator this library does not know must
+            // surface to the caller; swallowing it here made Open return zero sets.
+            throw;
+        }
         catch
         {
+            // The stream is not XML at all — leave the set list empty rather than failing Open.
             return Array.Empty<NwcSetItem>();
         }
     }

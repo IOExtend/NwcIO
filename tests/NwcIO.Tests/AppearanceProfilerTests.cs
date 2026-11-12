@@ -226,4 +226,62 @@ public sealed class AppearanceProfilerTests
             }
         }
     }
+
+    [Fact]
+    public void XmlAppearanceProfiler_EveryOperatorRoundtrips()
+    {
+        foreach (var op in Enum.GetValues<NwcSearchOperator>())
+        {
+            var profiler = new NwcAppearanceProfiler();
+            profiler.AddRule("r", "Item", "Name", op, "Duct*", new RgbaColor(1.0f, 0.0f, 0.0f, 1.0f), 0.0f);
+
+            using var ms = new MemoryStream();
+            NwcXmlAppearanceProfilerSerializer.Write(profiler, ms);
+            ms.Position = 0;
+
+            var back = NwcXmlAppearanceProfilerSerializer.Read(ms).Rules[0].Condition.Operator;
+            Assert.Equal(op, back);
+        }
+    }
+
+    [Fact]
+    public void XmlAppearanceProfiler_ReadsSetsStyleInclusiveOperatorSpelling()
+    {
+        var profiler = new NwcAppearanceProfiler();
+        profiler.AddRule("r", "Item", "Name", NwcSearchOperator.GreaterThanOrEqual, "5", new RgbaColor(1.0f, 0.0f, 0.0f, 1.0f), 0.0f);
+
+        using var ms = new MemoryStream();
+        NwcXmlAppearanceProfilerSerializer.Write(profiler, ms);
+        ms.Position = 0;
+        string xml;
+        using (var reader = new StreamReader(ms))
+        {
+            xml = reader.ReadToEnd();
+        }
+
+        // The sets serializer writes "greater_or_equal"; both spellings must be accepted.
+        Assert.Contains("greater_or_equal", xml);
+        using var alternate = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("greater_or_equal", "greater_equal")));
+        var back = NwcXmlAppearanceProfilerSerializer.Read(alternate).Rules[0].Condition.Operator;
+        Assert.Equal(NwcSearchOperator.GreaterThanOrEqual, back);
+    }
+
+    [Fact]
+    public void XmlAppearanceProfiler_UnknownOperator_ThrowsInsteadOfFallingBackToEquals()
+    {
+        var profiler = new NwcAppearanceProfiler();
+        profiler.AddRule("r", "Item", "Name", NwcSearchOperator.Equals, "x", new RgbaColor(1.0f, 0.0f, 0.0f, 1.0f), 0.0f);
+
+        using var ms = new MemoryStream();
+        NwcXmlAppearanceProfilerSerializer.Write(profiler, ms);
+        ms.Position = 0;
+        string xml;
+        using (var reader = new StreamReader(ms))
+        {
+            xml = reader.ReadToEnd();
+        }
+
+        using var invalid = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("equals", "regex")));
+        Assert.Throws<FormatException>(() => NwcXmlAppearanceProfilerSerializer.Read(invalid));
+    }
 }

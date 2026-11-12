@@ -1,3 +1,5 @@
+using System.Text;
+using NwcIO.Internal.Container;
 using NwcIO.Model;
 using NwcIO.Model.Sets;
 using Xunit;
@@ -127,5 +129,82 @@ public class SelectionSetTests
         Assert.Equal("MySearch", s2.Name);
         Assert.Single(s2.Conditions);
         Assert.Equal("Beam", s2.Conditions[0].Value);
+    }
+
+    [Fact]
+    public void SearchSet_EveryOperatorRoundtripsThroughNavisworksXml()
+    {
+        foreach (var op in Enum.GetValues<NwcSearchOperator>())
+        {
+            var searchSet = new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", op, "Duct*")]);
+
+            using var ms = new MemoryStream();
+            NwcXmlSetSerializer.Write([searchSet], ms);
+            ms.Position = 0;
+
+            var loaded = Assert.IsType<NwcSearchSet>(Assert.Single(NwcXmlSetSerializer.Read(ms)));
+            var back = Assert.Single(loaded.Conditions).Operator;
+            Assert.Equal(op, back);
+        }
+    }
+
+    [Fact]
+    public void SearchSet_ReadsProfilerStyleInclusiveOperatorSpelling()
+    {
+        var searchSet = new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", NwcSearchOperator.LessThanOrEqual, "5")]);
+
+        using var ms = new MemoryStream();
+        NwcXmlSetSerializer.Write([searchSet], ms);
+        ms.Position = 0;
+        string xml;
+        using (var reader = new StreamReader(ms))
+        {
+            xml = reader.ReadToEnd();
+        }
+
+        // The appearance profiler serializer writes "less_equal"; both spellings must be accepted.
+        Assert.Contains("less_or_equal", xml);
+        using var alternate = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("less_or_equal", "less_equal")));
+        var loaded = Assert.IsType<NwcSearchSet>(Assert.Single(NwcXmlSetSerializer.Read(alternate)));
+        Assert.Equal(NwcSearchOperator.LessThanOrEqual, Assert.Single(loaded.Conditions).Operator);
+    }
+
+    [Fact]
+    public void SearchSet_UnknownOperator_ThrowsInsteadOfFallingBackToEquals()
+    {
+        var searchSet = new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "x")]);
+
+        using var ms = new MemoryStream();
+        NwcXmlSetSerializer.Write([searchSet], ms);
+        ms.Position = 0;
+        string xml;
+        using (var reader = new StreamReader(ms))
+        {
+            xml = reader.ReadToEnd();
+        }
+
+        using var invalid = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("equals", "regex")));
+        Assert.Throws<FormatException>(() => NwcXmlSetSerializer.Read(invalid));
+    }
+
+    [Fact]
+    public void Open_UnknownOperatorInRawSetsStream_ThrowsInsteadOfReturningZeroSets()
+    {
+        // A raw XML sets stream (no [100][105] binary header) holding one valid set
+        // plus a condition with an operator this library does not know.
+        using var xmlMs = new MemoryStream();
+        NwcXmlSetSerializer.Write(
+        [
+            new NwcSelectionSet("Piles", [1, 2]),
+            new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "x")]),
+        ], xmlMs);
+        string xml = Encoding.UTF8.GetString(xmlMs.ToArray());
+        byte[] raw = Encoding.UTF8.GetBytes(xml.Replace("equals", "bogus_operator"));
+
+        using var file = new MemoryStream();
+        NwcContainerWriter.Write(file, [raw]);
+        file.Position = 0;
+
+        Assert.Throws<FormatException>(() => NwcDocument.Open(file));
     }
 }
