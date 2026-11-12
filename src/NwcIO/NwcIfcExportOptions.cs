@@ -48,13 +48,39 @@ public sealed class NwcIfcExportOptions
     /// <summary>Target IFC schema version (default: Ifc2x3).</summary>
     public NwcIfcSchemaVersion SchemaVersion { get; set; } = NwcIfcSchemaVersion.Ifc2x3;
 
-    /// <summary>IFC Schema version string (e.g. "IFC2X3" or "IFC4").</summary>
+    /// <summary>
+    /// IFC Schema version string: "IFC2X3" or "IFC4" (case-insensitive on set,
+    /// same validation as the CLI <c>--ifc-schema</c>). Any other value throws
+    /// <see cref="ArgumentException"/> instead of silently falling back to IFC2X3;
+    /// use <see cref="SchemaVersion"/> for the typed equivalent.
+    /// </summary>
     public string Schema
     {
         get => SchemaVersion == NwcIfcSchemaVersion.Ifc4 ? "IFC4" : "IFC2X3";
-        set => SchemaVersion = value?.Equals("IFC4", StringComparison.OrdinalIgnoreCase) == true
-            ? NwcIfcSchemaVersion.Ifc4
-            : NwcIfcSchemaVersion.Ifc2x3;
+        set
+        {
+            if (value is null)
+            {
+                throw new ArgumentException(
+                    "Unknown IFC schema '<null>'. Expected \"IFC2X3\" or \"IFC4\" (case-insensitive).",
+                    nameof(value));
+            }
+
+            if (value.Equals("IFC2X3", StringComparison.OrdinalIgnoreCase))
+            {
+                SchemaVersion = NwcIfcSchemaVersion.Ifc2x3;
+            }
+            else if (value.Equals("IFC4", StringComparison.OrdinalIgnoreCase))
+            {
+                SchemaVersion = NwcIfcSchemaVersion.Ifc4;
+            }
+            else
+            {
+                throw new ArgumentException(
+                    $"Unknown IFC schema '{value}'. Expected \"IFC2X3\" or \"IFC4\" (case-insensitive).",
+                    nameof(value));
+            }
+        }
     }
 
     /// <summary>Length unit for coordinates in the IFC model (default: Millimetre).</summary>
@@ -90,8 +116,8 @@ public sealed class NwcIfcExportOptions
     /// <summary>Custom storey name for IfcBuildingStorey (default: "Level 1").</summary>
     public string? StoreyName { get; set; }
 
-    /// <summary>Author string for the STEP header (default: "mahach666").</summary>
-    public string Author { get; set; } = "mahach666";
+    /// <summary>Author string for the STEP header and the owner history's IfcPerson (default: empty).</summary>
+    public string Author { get; set; } = "";
 
     /// <summary>Organization string for the STEP header (default: "NwcIO").</summary>
     public string Organization { get; set; } = "NwcIO";

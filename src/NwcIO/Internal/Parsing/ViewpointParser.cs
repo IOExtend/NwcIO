@@ -57,12 +57,14 @@ internal static class ViewpointParser
                 double qz = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 52));
                 double qw = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 60));
 
+                double x = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 12));
+                double y = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 20));
+                double z = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 28));
+
+                // Any unit quaternion is a valid rotation, including those with W = 0 (180° turns)
                 double normSq = qx * qx + qy * qy + qz * qz + qw * qw;
-                if (Math.Abs(normSq - 1.0) < 0.01 && Math.Abs(qw) > 0.0001)
+                if (Math.Abs(normSq - 1.0) < 0.01 && double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(z))
                 {
-                    double x = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 12));
-                    double y = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 20));
-                    double z = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 28));
 
                     double aspect = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 68));
                     double focal = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 76));

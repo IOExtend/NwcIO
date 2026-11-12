@@ -145,7 +145,9 @@ internal static class HtmlClashReportExporter
                         int count = matrixCounts.GetValueOrDefault((row, col));
                         if (count > 0)
                         {
-                            writer.WriteLine($"              <td class=\"cell-clash\" onclick=\"filterPair('{WebUtility.HtmlEncode(row)}', '{WebUtility.HtmlEncode(col)}')\" title=\"Filter clashes between {WebUtility.HtmlEncode(row)} and {WebUtility.HtmlEncode(col)}\"><span class=\"clash-badge\">{count}</span></td>");
+                            // The names are data attributes, never JavaScript: the browser decodes &#39; back to ' in an
+                            // attribute before running its handler, so a name inside the handler's string could end it
+                            writer.WriteLine($"              <td class=\"cell-clash\" data-model-a=\"{WebUtility.HtmlEncode(row)}\" data-model-b=\"{WebUtility.HtmlEncode(col)}\" onclick=\"filterPair(this.dataset.modelA, this.dataset.modelB)\" title=\"Filter clashes between {WebUtility.HtmlEncode(row)} and {WebUtility.HtmlEncode(col)}\"><span class=\"clash-badge\">{count}</span></td>");
                         }
                         else
                         {

@@ -22,14 +22,8 @@ public static class XRefTableParser
             return null;
         }
 
-        // Find the start of the JSON object ('{')
-        int start = 0;
-        while (start < data.Length && data[start] != (byte)'{')
-        {
-            start++;
-        }
-
-        if (start >= data.Length)
+        int start = data.AsSpan().IndexOf((byte)'{');
+        if (start < 0)
         {
             return null;
         }
@@ -49,7 +43,28 @@ public static class XRefTableParser
         try
         {
             var memory = data.AsMemory(start, length);
-            using var doc = JsonDocument.Parse(memory);
+            JsonDocument? document = null;
+            while (document is null)
+            {
+                try
+                {
+                    document = JsonDocument.Parse(memory);
+                }
+                catch (JsonException)
+                {
+                    // The binary prefix can hold a '{' byte: retry from the next one. A nested object is never
+                    // complete JSON on its own, as the rest of the root follows it, so the root is still the one found.
+                    int next = memory.Span[1..].IndexOf((byte)'{');
+                    if (next < 0)
+                    {
+                        return null;
+                    }
+
+                    memory = memory[(next + 1)..];
+                }
+            }
+
+            using var doc = document;
             var root = doc.RootElement;
 
             string type = root.TryGetProperty("Type", out var typeProp) ? typeProp.GetString() ?? "" : "";

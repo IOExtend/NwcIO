@@ -74,6 +74,45 @@ public class IfcExportTests
     }
 
     [Fact]
+    public void SaveIfc_ToPath_WritesNoByteOrderMarkAndTheAuthorInTheHeader()
+    {
+        var doc = CreateSyntheticDocument();
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.ifc");
+        try
+        {
+            doc.SaveIfc(path, new NwcIfcExportOptions { Author = "Alice", Organization = "Acme" });
+
+            byte[] bytes = File.ReadAllBytes(path);
+            Assert.Equal("ISO-10303-21;"u8.ToArray(), bytes.Take(13).ToArray());
+
+            string ifc = System.Text.Encoding.UTF8.GetString(bytes);
+            Assert.Contains("('Alice'),('Acme'),", ifc);
+            Assert.Contains("IFCPERSON($,'Alice',", ifc);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SaveObj_ToPath_WritesNoByteOrderMark()
+    {
+        var doc = CreateSyntheticDocument();
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.obj");
+        try
+        {
+            doc.SaveObj(path);
+
+            Assert.Equal((byte)'#', File.ReadAllBytes(path)[0]);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void SaveIfc_SyntheticCube_ProducesValidStep21CoordinationView()
     {
         var doc = CreateSyntheticDocument("Стена монолитная", "Бетон В25");
@@ -301,5 +340,27 @@ public class IfcExportTests
         Assert.Contains("FILE_SCHEMA(('IFC4'));", ifc);
         Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
         Assert.Contains("END-ISO-10303-21;", ifc);
+    }
+
+    [Fact]
+    public void IfcExportOptions_SchemaAcceptsKnownValuesAndRejectsUnknownOnes()
+    {
+        var options = new NwcIfcExportOptions();
+
+        options.Schema = "IFC4";
+        Assert.Equal(NwcIfcSchemaVersion.Ifc4, options.SchemaVersion);
+        Assert.Equal("IFC4", options.Schema);
+
+        options.Schema = "ifc2x3";
+        Assert.Equal(NwcIfcSchemaVersion.Ifc2x3, options.SchemaVersion);
+        Assert.Equal("IFC2X3", options.Schema);
+
+        Assert.Throws<ArgumentException>(() => options.Schema = "IFC4X3");
+        Assert.Throws<ArgumentException>(() => options.Schema = "IF44");
+        Assert.Throws<ArgumentException>(() => options.Schema = "");
+        Assert.Throws<ArgumentException>(() => options.Schema = null!);
+
+        // The rejected assignment must not have changed the selected schema.
+        Assert.Equal(NwcIfcSchemaVersion.Ifc2x3, options.SchemaVersion);
     }
 }

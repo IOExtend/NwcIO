@@ -149,6 +149,7 @@ public static class NwcClashDetector
         List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsB,
         NwcClashTest test)
     {
+        bool sameSelection = itemsA.Select(item => item.Mesh).SequenceEqual(itemsB.Select(item => item.Mesh));
         bool ignoreSameFile = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameFile);
         bool ignoreSameLayer = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameLayer);
 
@@ -158,7 +159,7 @@ public static class NwcClashDetector
             var boxA = itemA.Mesh.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
 
-            for (int j = 0; j < itemsB.Count; j++)
+            for (int j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
             {
                 var itemB = itemsB[j];
                 if (ReferenceEquals(itemA.Mesh, itemB.Mesh)) continue;

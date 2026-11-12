@@ -221,35 +221,35 @@ public static class JsonExporter
 
                 writer.WriteStartObject("camera");
                 writer.WriteString("projection", vp.Camera.Projection.ToString());
-                writer.WriteNumber("fieldOfView", vp.Camera.FieldOfView);
-                writer.WriteNumber("focalDistance", vp.Camera.FocalDistance);
-                writer.WriteNumber("aspectRatio", vp.Camera.AspectRatio);
-                writer.WriteNumber("nearDistance", vp.Camera.NearDistance);
-                writer.WriteNumber("farDistance", vp.Camera.FarDistance);
+                WriteSafeNumber(writer, "fieldOfView", vp.Camera.FieldOfView);
+                WriteSafeNumber(writer, "focalDistance", vp.Camera.FocalDistance);
+                WriteSafeNumber(writer, "aspectRatio", vp.Camera.AspectRatio);
+                WriteSafeNumber(writer, "nearDistance", vp.Camera.NearDistance);
+                WriteSafeNumber(writer, "farDistance", vp.Camera.FarDistance);
 
                 writer.WriteStartObject("position");
-                writer.WriteNumber("x", vp.Camera.Position.X);
-                writer.WriteNumber("y", vp.Camera.Position.Y);
-                writer.WriteNumber("z", vp.Camera.Position.Z);
+                WriteSafeNumber(writer, "x", vp.Camera.Position.X);
+                WriteSafeNumber(writer, "y", vp.Camera.Position.Y);
+                WriteSafeNumber(writer, "z", vp.Camera.Position.Z);
                 writer.WriteEndObject();
 
                 writer.WriteStartObject("rotation");
-                writer.WriteNumber("x", vp.Camera.Rotation.X);
-                writer.WriteNumber("y", vp.Camera.Rotation.Y);
-                writer.WriteNumber("z", vp.Camera.Rotation.Z);
-                writer.WriteNumber("w", vp.Camera.Rotation.W);
+                WriteSafeNumber(writer, "x", vp.Camera.Rotation.X);
+                WriteSafeNumber(writer, "y", vp.Camera.Rotation.Y);
+                WriteSafeNumber(writer, "z", vp.Camera.Rotation.Z);
+                WriteSafeNumber(writer, "w", vp.Camera.Rotation.W);
                 writer.WriteEndObject();
 
                 writer.WriteStartObject("direction");
-                writer.WriteNumber("x", vp.Camera.Direction.X);
-                writer.WriteNumber("y", vp.Camera.Direction.Y);
-                writer.WriteNumber("z", vp.Camera.Direction.Z);
+                WriteSafeNumber(writer, "x", vp.Camera.Direction.X);
+                WriteSafeNumber(writer, "y", vp.Camera.Direction.Y);
+                WriteSafeNumber(writer, "z", vp.Camera.Direction.Z);
                 writer.WriteEndObject();
 
                 writer.WriteStartObject("target");
-                writer.WriteNumber("x", vp.Camera.Target.X);
-                writer.WriteNumber("y", vp.Camera.Target.Y);
-                writer.WriteNumber("z", vp.Camera.Target.Z);
+                WriteSafeNumber(writer, "x", vp.Camera.Target.X);
+                WriteSafeNumber(writer, "y", vp.Camera.Target.Y);
+                WriteSafeNumber(writer, "z", vp.Camera.Target.Z);
                 writer.WriteEndObject();
 
                 writer.WriteEndObject(); // camera

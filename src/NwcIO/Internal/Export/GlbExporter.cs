@@ -273,7 +273,9 @@ public static class GlbExporter
             // scene
             writer.WriteNumber("scene", 0);
 
-            int camCount = viewpoints?.Count ?? 0;
+            // glTF has no value for a non-finite number, so a camera that can't be placed is left out
+            var cameras = viewpoints?.Where(vp => IsFinite(vp.Camera.Position) && IsFinite(vp.Camera.Rotation)).ToList();
+            int camCount = cameras?.Count ?? 0;
             int totalNodes = meshes.Count + camCount;
 
             // scenes
@@ -299,11 +301,11 @@ public static class GlbExporter
                 writer.WriteEndObject();
             }
 
-            if (viewpoints is not null)
+            if (cameras is not null)
             {
-                for (int i = 0; i < viewpoints.Count; i++)
+                for (int i = 0; i < cameras.Count; i++)
                 {
-                    var vp = viewpoints[i];
+                    var vp = cameras[i];
                     var cam = vp.Camera;
                     writer.WriteStartObject();
                     writer.WriteString("name", vp.Name);
@@ -329,12 +331,12 @@ public static class GlbExporter
             writer.WriteEndArray();
 
             // cameras
-            if (viewpoints is not null && viewpoints.Count > 0)
+            if (cameras is not null && cameras.Count > 0)
             {
                 writer.WriteStartArray("cameras");
-                for (int i = 0; i < viewpoints.Count; i++)
+                for (int i = 0; i < cameras.Count; i++)
                 {
-                    var vp = viewpoints[i];
+                    var vp = cameras[i];
                     var cam = vp.Camera;
                     writer.WriteStartObject();
                     writer.WriteString("name", vp.Name);
@@ -343,23 +345,22 @@ public static class GlbExporter
                     {
                         writer.WriteString("type", "orthographic");
                         writer.WriteStartObject("orthographic");
-                        double xmag = Math.Max(1.0, cam.FocalDistance * 0.5);
-                        double ymag = xmag / (cam.AspectRatio > 0 ? cam.AspectRatio : 1.0);
+                        double xmag = Math.Max(1.0, PositiveOr(cam.FocalDistance * 0.5, 1.0));
+                        double ymag = xmag / PositiveOr(cam.AspectRatio, 1.0);
                         writer.WriteNumber("xmag", xmag);
-                        writer.WriteNumber("ymag", ymag);
-                        writer.WriteNumber("zfar", cam.FarDistance > 0 ? cam.FarDistance : 10000.0);
-                        writer.WriteNumber("znear", cam.NearDistance > 0 ? cam.NearDistance : 0.1);
+                        writer.WriteNumber("ymag", PositiveOr(ymag, xmag));
+                        writer.WriteNumber("zfar", PositiveOr(cam.FarDistance, 10000.0));
+                        writer.WriteNumber("znear", PositiveOr(cam.NearDistance, 0.1));
                         writer.WriteEndObject();
                     }
                     else
                     {
                         writer.WriteString("type", "perspective");
                         writer.WriteStartObject("perspective");
-                        writer.WriteNumber("aspectRatio", cam.AspectRatio > 0 ? cam.AspectRatio : 1.0);
-                        double yfovRad = cam.FieldOfView * (Math.PI / 180.0);
-                        writer.WriteNumber("yfov", yfovRad > 0 ? yfovRad : 1.04719755);
-                        writer.WriteNumber("zfar", cam.FarDistance > 0 ? cam.FarDistance : 10000.0);
-                        writer.WriteNumber("znear", cam.NearDistance > 0 ? cam.NearDistance : 0.1);
+                        writer.WriteNumber("aspectRatio", PositiveOr(cam.AspectRatio, 1.0));
+                        writer.WriteNumber("yfov", PositiveOr(cam.FieldOfView * (Math.PI / 180.0), 1.04719755));
+                        writer.WriteNumber("zfar", PositiveOr(cam.FarDistance, 10000.0));
+                        writer.WriteNumber("znear", PositiveOr(cam.NearDistance, 0.1));
                         writer.WriteEndObject();
                     }
 
@@ -531,6 +532,14 @@ public static class GlbExporter
 
         return result;
     }
+
+    private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
+
+    private static bool IsFinite(Quaterniond q) =>
+        double.IsFinite(q.X) && double.IsFinite(q.Y) && double.IsFinite(q.Z) && double.IsFinite(q.W);
+
+    private static double PositiveOr(double value, double fallback) =>
+        double.IsFinite(value) && value > 0 ? value : fallback;
 
     private static void WriteSafeFloatValue(Utf8JsonWriter writer, float val)
     {
