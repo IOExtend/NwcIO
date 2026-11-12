@@ -958,22 +958,51 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   });
 
   function showProperties(mesh) {
+    // Build the pane with textContent: names, layers and property strings come from
+    // the source model and must never be parsed as HTML.
     const pane = document.getElementById('prop-inspector');
-    let html = `<div style="font-weight:600;font-size:13px;margin-bottom:8px;color:#fff;">${mesh.name || 'Unnamed Element'}</div>`;
-    html += `<div style="font-size:11px;color:#888;margin-bottom:12px;">Layer: ${mesh.layer || 'Default'}</div>`;
+    pane.replaceChildren();
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:8px;color:#fff;';
+    title.textContent = mesh.name || 'Unnamed Element';
+    pane.appendChild(title);
+
+    const layer = document.createElement('div');
+    layer.style.cssText = 'font-size:11px;color:#888;margin-bottom:12px;';
+    layer.textContent = 'Layer: ' + (mesh.layer || 'Default');
+    pane.appendChild(layer);
 
     if (mesh.properties && Object.keys(mesh.properties).length > 0) {
       for (const [cat, props] of Object.entries(mesh.properties)) {
-        html += `<div class="prop-category"><div class="prop-category-title">${cat}</div><table class="prop-table">`;
+        const category = document.createElement('div');
+        category.className = 'prop-category';
+
+        const categoryTitle = document.createElement('div');
+        categoryTitle.className = 'prop-category-title';
+        categoryTitle.textContent = cat;
+        category.appendChild(categoryTitle);
+
+        const table = document.createElement('table');
+        table.className = 'prop-table';
         for (const [pname, pval] of Object.entries(props)) {
-          html += `<tr><td class="name">${pname}</td><td class="val">${pval}</td></tr>`;
+          const row = table.insertRow();
+          const nameCell = row.insertCell();
+          nameCell.className = 'name';
+          nameCell.textContent = pname;
+          const valCell = row.insertCell();
+          valCell.className = 'val';
+          valCell.textContent = pval;
         }
-        html += `</table></div>`;
+        category.appendChild(table);
+        pane.appendChild(category);
       }
     } else {
-      html += `<div style="color:#777;font-size:11px;">No custom properties recorded.</div>`;
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:#777;font-size:11px;';
+      empty.textContent = 'No custom properties recorded.';
+      pane.appendChild(empty);
     }
-    pane.innerHTML = html;
   }
 
   // Populate Viewpoints Tab
