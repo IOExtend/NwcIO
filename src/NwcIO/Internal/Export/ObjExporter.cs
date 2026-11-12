@@ -22,7 +22,7 @@ public static class ObjExporter
         ArgumentNullException.ThrowIfNull(path);
 
         using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, System.Text.Encoding.UTF8, bufferSize: 65536);
+        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
         Write(meshes, writer, worldCoordinates, sourceDocument);
     }
 

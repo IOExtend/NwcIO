@@ -74,6 +74,45 @@ public class IfcExportTests
     }
 
     [Fact]
+    public void SaveIfc_ToPath_WritesNoByteOrderMarkAndTheAuthorInTheHeader()
+    {
+        var doc = CreateSyntheticDocument();
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.ifc");
+        try
+        {
+            doc.SaveIfc(path, new NwcIfcExportOptions { Author = "Alice", Organization = "Acme" });
+
+            byte[] bytes = File.ReadAllBytes(path);
+            Assert.Equal("ISO-10303-21;"u8.ToArray(), bytes.Take(13).ToArray());
+
+            string ifc = System.Text.Encoding.UTF8.GetString(bytes);
+            Assert.Contains("('Alice'),('Acme'),", ifc);
+            Assert.Contains("IFCPERSON($,'Alice',", ifc);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SaveObj_ToPath_WritesNoByteOrderMark()
+    {
+        var doc = CreateSyntheticDocument();
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.obj");
+        try
+        {
+            doc.SaveObj(path);
+
+            Assert.Equal((byte)'#', File.ReadAllBytes(path)[0]);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void SaveIfc_SyntheticCube_ProducesValidStep21CoordinationView()
     {
         var doc = CreateSyntheticDocument("Стена монолитная", "Бетон В25");

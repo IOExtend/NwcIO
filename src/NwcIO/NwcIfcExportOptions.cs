@@ -116,8 +116,8 @@ public sealed class NwcIfcExportOptions
     /// <summary>Custom storey name for IfcBuildingStorey (default: "Level 1").</summary>
     public string? StoreyName { get; set; }
 
-    /// <summary>Author string for the STEP header (default: "mahach666").</summary>
-    public string Author { get; set; } = "mahach666";
+    /// <summary>Author string for the STEP header and the owner history's IfcPerson (default: empty).</summary>
+    public string Author { get; set; } = "";
 
     /// <summary>Organization string for the STEP header (default: "NwcIO").</summary>
     public string Organization { get; set; } = "NwcIO";
