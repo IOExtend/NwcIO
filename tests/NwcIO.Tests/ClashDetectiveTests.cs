@@ -77,6 +77,60 @@ public sealed class ClashDetectiveTests
     }
 
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ClashDetection_OverlappingSelectionsReportsEachPairOnce(bool federated, bool includeSharedPair)
+    {
+        var mesh1 = CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2));
+        var mesh2 = CreateBoxMesh(2, new(1.5, 0.5, 0.5), new(3.5, 1.5, 1.5));
+        var mesh3 = CreateBoxMesh(3, new(3, 0, 0), new(5, 2, 2));
+        var builder = new NwcDocumentBuilder().SetFileInfo("Architecture.nwc")
+            .AddMesh(mesh1)
+            .AddMesh(mesh2);
+        if (!federated)
+        {
+            builder.AddMesh(mesh3);
+        }
+        var doc = builder.Build();
+        var test = new NwcClashTest("Overlapping selections");
+        test.SelectionA.ExplicitNodeIds.AddRange([1, 2]);
+        test.SelectionB.ExplicitNodeIds.AddRange(includeSharedPair ? [1, 2, 3] : [1, 3]);
+
+        if (federated)
+        {
+            var otherDoc = new NwcDocumentBuilder().SetFileInfo("MEP.nwc").AddMesh(mesh3).Build();
+            NwcClashDetector.Run(NwcAssembly.Create("Federated", doc, otherDoc), test);
+        }
+        else
+        {
+            doc.RunClashDetection(test);
+        }
+
+        var pairs = test.Results.Select(clash => (
+            Math.Min(clash.Item1.Mesh!.Id, clash.Item2.Mesh!.Id),
+            Math.Max(clash.Item1.Mesh!.Id, clash.Item2.Mesh!.Id))).OrderBy(pair => pair.Item1).ToArray();
+        Assert.Equal([(1, 2), (2, 3)], pairs);
+    }
+
+    [Fact]
+    public void AssemblyClashDetection_AllVsAllPreservesPairsWithRepeatedMeshIds()
+    {
+        var architecture = new NwcDocumentBuilder().SetFileInfo("Architecture.nwc")
+            .AddMesh(CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2)))
+            .Build();
+        var mep = new NwcDocumentBuilder().SetFileInfo("MEP.nwc")
+            .AddMesh(CreateBoxMesh(1, new(1, 1, 1), new(3, 3, 3)))
+            .Build();
+
+        var test = NwcAssembly.Create("Federated", architecture, mep).RunClashDetection();
+
+        var clash = Assert.Single(test.Results);
+        Assert.NotEqual(clash.Item1.ModelName, clash.Item2.ModelName);
+    }
+
+    [Theory]
     [InlineData(false, false, 0)]
     [InlineData(true, false, 2)]
     [InlineData(true, true, 1)]
