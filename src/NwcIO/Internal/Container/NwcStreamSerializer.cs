@@ -122,8 +122,11 @@ internal static class NwcStreamSerializer
         w.Write(-1);
 
         // [int64 timestamp in unix seconds]
-        long timestamp = fileInfo.SourceTimestampUtc.HasValue
-            ? new DateTimeOffset(fileInfo.SourceTimestampUtc.Value, TimeSpan.Zero).ToUnixTimeSeconds()
+        // A Local value (DateTime.Now, File.GetLastWriteTime) is converted; an Unspecified one is taken as UTC
+        long timestamp = fileInfo.SourceTimestampUtc is { } sourceTimestamp
+            ? new DateTimeOffset(sourceTimestamp.Kind == DateTimeKind.Local
+                ? sourceTimestamp.ToUniversalTime()
+                : DateTime.SpecifyKind(sourceTimestamp, DateTimeKind.Utc)).ToUnixTimeSeconds()
             : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         w.Write(timestamp);
 
