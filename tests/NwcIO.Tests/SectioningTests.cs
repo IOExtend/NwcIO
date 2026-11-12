@@ -155,6 +155,47 @@ public class SectioningTests
         Assert.Equal(mesh.Indices.Count, clipped.Indices.Count);
     }
 
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    public void NwcMeshClipper_Clip_KeepsTheWindingOfCutTriangles(int rotation, bool keepTwoVertices)
+    {
+        // A counter-clockwise triangle in the XY plane, facing +Z; each rotation starts it at a different vertex
+        var corners = new[] { new Vector3d(0, 0, 0), new Vector3d(10, 0, 0), new Vector3d(0, 10, 0) };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Triangle",
+            Vertices = corners,
+            Indices = new[] { rotation, (rotation + 1) % 3, (rotation + 2) % 3 },
+        };
+
+        // Y <= 6 keeps the two vertices at Y = 0 (area 50 - 8 = 42); Y >= 6 keeps the one at Y = 10 (area 8)
+        var plane = keepTwoVertices
+            ? new NwcSectionPlane { Normal = new Vector3d(0, -1, 0), Distance = -6.0 }
+            : new NwcSectionPlane { Normal = new Vector3d(0, 1, 0), Distance = 6.0 };
+
+        var clipped = NwcMeshClipper.Clip(mesh, new[] { plane });
+
+        Assert.Equal(keepTwoVertices ? 6 : 3, clipped.Indices.Count);
+        double signedArea = 0;
+        for (int i = 0; i < clipped.Indices.Count; i += 3)
+        {
+            var a = clipped.Vertices[clipped.Indices[i]];
+            var b = clipped.Vertices[clipped.Indices[i + 1]];
+            var c = clipped.Vertices[clipped.Indices[i + 2]];
+            double normalZ = Vector3d.Cross(b - a, c - a).Z;
+            Assert.True(normalZ > 0, $"Triangle {i / 3} faces -Z");
+            signedArea += normalZ / 2;
+        }
+
+        Assert.Equal(keepTwoVertices ? 42.0 : 8.0, signedArea, 6);
+    }
+
     private static NwcMesh CreateCubeMesh(Vector3d min, Vector3d max)
     {
         var vertices = new[]
