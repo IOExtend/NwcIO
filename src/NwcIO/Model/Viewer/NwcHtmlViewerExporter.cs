@@ -1435,6 +1435,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 """;
     }
 
+    private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
+
     private static string BuildJsonPayload(
         IReadOnlyList<NwcMesh> meshes,
         IReadOnlyList<NwcSavedViewpoint> viewpoints,
@@ -1448,19 +1450,22 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         writer.WriteStartObject();
         writer.WriteString("title", options.Title);
 
-        // Bounding Box
-        writer.WriteStartObject("boundingBox");
-        writer.WriteStartArray("min");
-        writer.WriteNumberValue(bounds.Min.X);
-        writer.WriteNumberValue(bounds.Min.Y);
-        writer.WriteNumberValue(bounds.Min.Z);
-        writer.WriteEndArray();
-        writer.WriteStartArray("max");
-        writer.WriteNumberValue(bounds.Max.X);
-        writer.WriteNumberValue(bounds.Max.Y);
-        writer.WriteNumberValue(bounds.Max.Z);
-        writer.WriteEndArray();
-        writer.WriteEndObject();
+        // Bounding Box: left out when it isn't finite (a document without geometry), so the viewer uses its default
+        if (IsFinite(bounds.Min) && IsFinite(bounds.Max))
+        {
+            writer.WriteStartObject("boundingBox");
+            writer.WriteStartArray("min");
+            writer.WriteNumberValue(bounds.Min.X);
+            writer.WriteNumberValue(bounds.Min.Y);
+            writer.WriteNumberValue(bounds.Min.Z);
+            writer.WriteEndArray();
+            writer.WriteStartArray("max");
+            writer.WriteNumberValue(bounds.Max.X);
+            writer.WriteNumberValue(bounds.Max.Y);
+            writer.WriteNumberValue(bounds.Max.Z);
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
 
         // Meshes
         writer.WriteStartArray("meshes");
@@ -1491,9 +1496,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteStartArray("vertices");
             foreach (var v in mesh.Vertices)
             {
-                writer.WriteNumberValue(v.X);
-                writer.WriteNumberValue(v.Y);
-                writer.WriteNumberValue(v.Z);
+                // JSON has no non-finite numbers; writing 0 keeps the vertex count the indices refer to
+                writer.WriteNumberValue(double.IsFinite(v.X) ? v.X : 0);
+                writer.WriteNumberValue(double.IsFinite(v.Y) ? v.Y : 0);
+                writer.WriteNumberValue(double.IsFinite(v.Z) ? v.Z : 0);
             }
             writer.WriteEndArray();
 
@@ -1538,21 +1544,29 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             {
                 writer.WriteStartObject();
                 writer.WriteString("name", vp.Name);
-                writer.WriteStartObject("camera");
 
-                writer.WriteStartArray("position");
-                writer.WriteNumberValue(vp.Camera.Position.X);
-                writer.WriteNumberValue(vp.Camera.Position.Y);
-                writer.WriteNumberValue(vp.Camera.Position.Z);
-                writer.WriteEndArray();
+                // A camera that can't be placed is left out: the viewer only moves to a viewpoint with one
+                var position = vp.Camera.Position;
+                var target = vp.Camera.Target;
+                if (IsFinite(position) && IsFinite(target))
+                {
+                    writer.WriteStartObject("camera");
 
-                writer.WriteStartArray("target");
-                writer.WriteNumberValue(vp.Camera.Target.X);
-                writer.WriteNumberValue(vp.Camera.Target.Y);
-                writer.WriteNumberValue(vp.Camera.Target.Z);
-                writer.WriteEndArray();
+                    writer.WriteStartArray("position");
+                    writer.WriteNumberValue(position.X);
+                    writer.WriteNumberValue(position.Y);
+                    writer.WriteNumberValue(position.Z);
+                    writer.WriteEndArray();
 
-                writer.WriteEndObject(); // camera
+                    writer.WriteStartArray("target");
+                    writer.WriteNumberValue(target.X);
+                    writer.WriteNumberValue(target.Y);
+                    writer.WriteNumberValue(target.Z);
+                    writer.WriteEndArray();
+
+                    writer.WriteEndObject(); // camera
+                }
+
                 writer.WriteEndObject(); // viewpoint
             }
             writer.WriteEndArray();
