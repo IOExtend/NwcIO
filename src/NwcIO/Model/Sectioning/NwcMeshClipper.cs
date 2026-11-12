@@ -155,8 +155,9 @@ public static class NwcMeshClipper
                 var i1 = IntersectSegment(vIn1, vOut, dIn1, dOut);
                 var i2 = IntersectSegment(vIn2, vOut, dIn2, dOut);
 
-                AddTriangle(outVerts, outIndices, vIn1, i1, i2);
-                AddTriangle(outVerts, outIndices, vIn1, i2, vIn2);
+                // In the triangle's own order, the kept quad runs vIn1 -> vIn2 -> i2 -> i1
+                AddTriangle(outVerts, outIndices, vIn1, vIn2, i2);
+                AddTriangle(outVerts, outIndices, vIn1, i2, i1);
             }
         }
     }
