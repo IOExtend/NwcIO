@@ -344,7 +344,7 @@ public sealed class NwcAssembly
     /// <summary>Exports detected clash results to a buildingSMART BCF 2.1 zip archive (.bcfzip).</summary>
     public void ExportClashBcf(string path)
     {
-        Clash.NwcClashBcfExporter.Save(path, ClashTests.SelectMany(t => t.Results), Name);
+        Clash.NwcClashBcfExporter.Save(path, ClashTests, Name);
     }
 
     /// <summary>Creates a Navisworks Federated Project Manifest (NWF) representation of this assembly.</summary>

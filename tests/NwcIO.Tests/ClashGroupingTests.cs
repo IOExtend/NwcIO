@@ -220,6 +220,95 @@ public sealed class ClashGroupingTests
         Assert.NotNull(viewpointEntry);
     }
 
+    private static NwcClashTest CreateGroupedTest()
+    {
+        var test = new NwcClashTest("Grouped");
+        test.Results.AddRange(
+        [
+            CreateClash("c1", new Vector3d(0, 0, 0), -0.05),
+            CreateClash("c2", new Vector3d(0.2, 0, 0), -0.05),
+            CreateClash("c3", new Vector3d(50, 0, 0), -0.05),
+            CreateClash("c4", new Vector3d(50.3, 0, 0), -0.05),
+            CreateClash("c5", new Vector3d(200, 0, 0), -0.05),
+        ]);
+        NwcClashGrouper.GroupByProximity(test, clusterDistance: 2.0, minClusterSize: 2);
+        Assert.Equal(2, test.Groups.Count);
+        Assert.Single(test.Results);
+        return test;
+    }
+
+    private static int CountTopics(Stream bcf)
+    {
+        bcf.Position = 0;
+        using var zip = new ZipArchive(bcf, ZipArchiveMode.Read, leaveOpen: true);
+        return zip.Entries.Count(e => e.FullName.EndsWith("/markup.bcf", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Document_ExportClashBcf_IncludesGroupedClashes()
+    {
+        var doc = new NwcDocumentBuilder().SetFileInfo("Model.nwc").Build();
+        doc.ClashTests.Add(CreateGroupedTest());
+
+        using var ms = new MemoryStream();
+        doc.ExportClashBcf(ms);
+
+        Assert.Equal(3, CountTopics(ms)); // 2 groups + 1 ungrouped clash
+    }
+
+    [Fact]
+    public void Assembly_And_Matrix_ExportClashBcf_IncludeGroupedClashes()
+    {
+        var assembly = NwcAssembly.Create("Asm");
+        assembly.ClashTests.Add(CreateGroupedTest());
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.Cells.Add(new NwcClashMatrixCell("A", "B") { ExecutedTest = CreateGroupedTest() });
+
+        string assemblyPath = Path.Combine(Path.GetTempPath(), $"nwcio_{Guid.NewGuid():N}.bcfzip");
+        string matrixPath = Path.Combine(Path.GetTempPath(), $"nwcio_{Guid.NewGuid():N}.bcfzip");
+        try
+        {
+            assembly.ExportClashBcf(assemblyPath);
+            matrix.SaveBcf(matrixPath);
+
+            using (var fs = File.OpenRead(assemblyPath)) Assert.Equal(3, CountTopics(fs));
+            using (var fs = File.OpenRead(matrixPath)) Assert.Equal(3, CountTopics(fs));
+        }
+        finally
+        {
+            File.Delete(assemblyPath);
+            File.Delete(matrixPath);
+        }
+    }
+
+    [Fact]
+    public void Matrix_ClashesAndJson_IncludeGroupedClashes()
+    {
+        var cell = new NwcClashMatrixCell("A", "B") { ExecutedTest = CreateGroupedTest() };
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.Cells.Add(cell);
+
+        Assert.Equal(5, cell.Clashes.Count);
+
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio_{Guid.NewGuid():N}.json");
+        try
+        {
+            matrix.SaveJson(path);
+            using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+            var written = json.RootElement.EnumerateObject()
+                .Select(p => p.Value)
+                .Where(v => v.ValueKind == System.Text.Json.JsonValueKind.Array)
+                .SelectMany(a => a.EnumerateArray())
+                .Single(c => c.TryGetProperty("clashesCount", out _));
+            Assert.Equal(5, written.GetProperty("clashesCount").GetInt32());
+            Assert.Equal(5, written.GetProperty("clashes").GetArrayLength());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static NwcClashResult CreateClash(
         string name,
         Vector3d point,
