@@ -22,14 +22,7 @@ public static class XRefTableParser
             return null;
         }
 
-        // Find the start of the JSON object by the literal StreamClassifier recognizes the stream by: the binary
-        // prefix before it can hold a '{' byte. Without that literal, fall back to the first '{'.
-        int start = data.AsSpan().IndexOf("{\"Type\":"u8);
-        if (start < 0)
-        {
-            start = data.AsSpan().IndexOf((byte)'{');
-        }
-
+        int start = data.AsSpan().IndexOf((byte)'{');
         if (start < 0)
         {
             return null;
@@ -50,7 +43,24 @@ public static class XRefTableParser
         try
         {
             var memory = data.AsMemory(start, length);
-            using var doc = JsonDocument.Parse(memory);
+            JsonDocument document;
+            try
+            {
+                document = JsonDocument.Parse(memory);
+            }
+            catch (JsonException)
+            {
+                // Retry past a binary-prefix brace only after the root JSON fails to parse.
+                int fallback = memory.Span.IndexOf("{\"Type\":"u8);
+                if (fallback <= 0)
+                {
+                    return null;
+                }
+
+                document = JsonDocument.Parse(memory[fallback..]);
+            }
+
+            using var doc = document;
             var root = doc.RootElement;
 
             string type = root.TryGetProperty("Type", out var typeProp) ? typeProp.GetString() ?? "" : "";
