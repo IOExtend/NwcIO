@@ -8,6 +8,82 @@ namespace NwcIO.Tests;
 
 public sealed class ClashDetectiveTests
 {
+    [Theory]
+    [InlineData(0.001, 0.008, false)]
+    [InlineData(1, 0.008, false)]
+    [InlineData(1000, 0.008, false)]
+    [InlineData(0.001, 0.002, true)]
+    [InlineData(1, 0.002, true)]
+    [InlineData(1000, 0.002, true)]
+    [InlineData(0.001, 0.005, true)]
+    [InlineData(1, 0.005, true)]
+    [InlineData(1000, 0.005, true)]
+    public void TriangleIntersectionPerpendicularPairsAreScaleIndependent(double scale, double y, bool expected)
+    {
+        var v0 = Vector3d.Zero;
+        var v1 = new Vector3d(0.01, 0, 0) * scale;
+        var v2 = new Vector3d(0, 0.01, 0) * scale;
+        var u0 = new Vector3d(0.005, y, -0.005) * scale;
+        var u1 = new Vector3d(0.005, y, 0.005) * scale;
+        var u2 = new Vector3d(0.005, 0.02, 0) * scale;
+
+        Assert.Equal(expected, NwcTriangleIntersection.TrianglesIntersect(v0, v1, v2, u0, u1, u2, out _));
+        Assert.Equal(expected, NwcTriangleIntersection.TrianglesIntersect(u0, u1, u2, v0, v2, v1, out _));
+    }
+
+    [Theory]
+    [InlineData(0.001, 0)]
+    [InlineData(1, 0)]
+    [InlineData(1000, 0)]
+    [InlineData(0.001, 1)]
+    [InlineData(1, 1)]
+    [InlineData(1000, 1)]
+    [InlineData(0.001, 2)]
+    [InlineData(1, 2)]
+    [InlineData(1000, 2)]
+    public void TriangleIntersectionCoplanarPairsUseProjectedOverlap(double scale, int axis)
+    {
+        Vector3d Point(double x, double y)
+        {
+            return (axis == 0 ? new Vector3d(0, x, y) :
+                axis == 1 ? new Vector3d(x, 0, y) : new Vector3d(x, y, 0)) * scale;
+        }
+
+        var v0 = Point(0, 0);
+        var v1 = Point(1, 0);
+        var v2 = Point(0, 1);
+        var pairs = new[]
+        {
+            (Point(1, 1), Point(0.6, 1), Point(1, 0.6), false), // Disjoint despite AABB overlap.
+            (Point(0.2, 0.2), Point(1, 0.2), Point(0.2, 1), true), // Crossing edges.
+            (Point(0.1, 0.1), Point(0.2, 0.1), Point(0.1, 0.2), true), // Containment.
+            (Point(1, 0), Point(0, 1), Point(1, 1), true), // Shared edge.
+            (Point(1, 0), Point(2, 0), Point(1, 1), true), // Shared vertex.
+        };
+
+        foreach (var (u0, u1, u2, expected) in pairs)
+        {
+            Assert.Equal(expected, NwcTriangleIntersection.TrianglesIntersect(v0, v1, v2, u0, u1, u2, out _));
+            Assert.Equal(expected, NwcTriangleIntersection.TrianglesIntersect(u0, u2, u1, v0, v1, v2, out _));
+        }
+    }
+
+    [Theory]
+    [InlineData(0.001)]
+    [InlineData(1)]
+    [InlineData(1000)]
+    public void TriangleIntersectionRejectsZeroAreaTriangles(double scale)
+    {
+        var a = Vector3d.Zero;
+        var b = new Vector3d(1, 0, 0) * scale;
+        var c = new Vector3d(0, 1, 0) * scale;
+        foreach (var end in new[] { a, b * 0.5 })
+        {
+            Assert.False(NwcTriangleIntersection.TrianglesIntersect(a, b, c, a, b, end, out _));
+            Assert.False(NwcTriangleIntersection.TrianglesIntersect(a, b, end, a, b, c, out _));
+        }
+    }
+
     [Fact]
     public void TriangleIntersectionDetectsCrossingTriangles()
     {
