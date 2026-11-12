@@ -53,7 +53,7 @@ var doc = NwcDocument.Open("federated_model.nwc");
 // Modern IFC4 with compact IfcTriangulatedFaceSet mesh tessellation
 doc.ExportIfc("output.ifc", new NwcIfcExportOptions
 {
-    Schema = NwcIfcSchema.Ifc4,
+    SchemaVersion = NwcIfcSchemaVersion.Ifc4,
     ProjectName = "Coordination Project"
 });
 
