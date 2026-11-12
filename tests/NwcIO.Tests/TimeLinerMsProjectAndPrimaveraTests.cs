@@ -1,6 +1,7 @@
 using System.Globalization;
 using NwcIO.Cli;
 using NwcIO.Model;
+using NwcIO.Model.Sets;
 using NwcIO.Model.TimeLiner;
 using NwcIO.Model.Viewer;
 using Xunit;
@@ -282,6 +283,88 @@ public class TimeLinerMsProjectAndPrimaveraTests
         finally
         {
             if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("--timeliner-xml", false)]
+    [InlineData("--timeliner-xml", true)]
+    [InlineData("--timeliner-msproject", false)]
+    [InlineData("--timeliner-msproject", true)]
+    [InlineData("--timeliner-primavera", false)]
+    [InlineData("--timeliner-primavera", true)]
+    public void Cli_ImportsAndLinksScheduleBeforeCsvAndNwcExports(string importOption, bool hasEmbeddedSchedule)
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-cli-timeliner-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+            var imported = new NwcTimeLinerSchedule("Imported", [new NwcTimeLinerTask("1", "Imported Task", start, start.AddDays(2))]);
+            var input = new NwcDocumentBuilder()
+                .AddSelectionSet(new NwcSelectionSet("Imported Task", [42]))
+                .Build();
+            if (hasEmbeddedSchedule)
+            {
+                input.TimeLiner = new NwcTimeLinerSchedule("Stale", [new NwcTimeLinerTask("2", "Stale Task", start, start.AddDays(1))]);
+            }
+            string inputPath = Path.Combine(tempDir, "input.nwc");
+            input.Save(inputPath);
+
+            string schedulePath = Path.Combine(tempDir, importOption == "--timeliner-primavera" ? "schedule.xer" : "schedule.xml");
+            switch (importOption)
+            {
+                case "--timeliner-xml": NwcTimeLinerXmlSerializer.Save(imported, schedulePath); break;
+                case "--timeliner-msproject": NwcTimeLinerMsProjectXmlSerializer.Save(imported, schedulePath); break;
+                case "--timeliner-primavera": NwcTimeLinerPrimaveraXerSerializer.Save(imported, schedulePath); break;
+                default: throw new ArgumentException("Unknown import option.", nameof(importOption));
+            }
+
+            string primaryCsv = Path.Combine(tempDir, "primary.csv");
+            string extraCsv = Path.Combine(tempDir, "extra.csv");
+            string outputNwc = Path.Combine(tempDir, "linked.nwc");
+            int code = Program.Main([inputPath, primaryCsv, importOption, schedulePath,
+                "--link-timeliner", "--timeliner-csv", extraCsv, "--nwc", outputNwc]);
+
+            Assert.Equal(0, code);
+            foreach (string csv in new[] { primaryCsv, extraCsv })
+            {
+                var task = Assert.Single(NwcTimeLinerCsvSerializer.Open(csv).Tasks);
+                Assert.Equal("Imported Task", task.Name);
+                Assert.Equal("Imported Task", task.AttachedSelectionSetName);
+            }
+            var linked = NwcDocument.Open(outputNwc);
+            Assert.NotNull(linked.TimeLiner);
+            var linkedTask = Assert.Single(linked.TimeLiner.Tasks);
+            Assert.Equal("Imported Task", linkedTask.Name);
+            Assert.Equal("Imported Task", linkedTask.AttachedSelectionSetName);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Cli_InvalidTimeLinerXml_DoesNotOverwriteOutput()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-cli-invalid-timeliner-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string input = Path.Combine(tempDir, "input.nwc");
+            string schedule = Path.Combine(tempDir, "schedule.xml");
+            string output = Path.Combine(tempDir, "output.csv");
+            NwcDocument.Create().Save(input);
+            File.WriteAllText(schedule, "<invalid");
+            File.WriteAllText(output, "existing output");
+
+            Assert.Equal(3, Program.Main([input, output, "--timeliner-xml", schedule]));
+            Assert.Equal("existing output", File.ReadAllText(output));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
         }
     }
 

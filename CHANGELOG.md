@@ -2,6 +2,13 @@
 
 All notable changes to the `NwcIO` library and CLI are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Import and link TimeLiner schedules before single-document CLI exports, including primary CSV output and `--timeliner-csv`.
+- Count each mesh pair once when a federated clash test uses identical selections on both sides.
+- Correct the README and getting-started API/CLI examples and the discipline-pair tolerance assignments.
+
 ## [0.10.0] - 2026-11-11
 
 ### Major Additions & Capabilities

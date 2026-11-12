@@ -76,6 +76,34 @@ public sealed class ClashDetectiveTests
         Assert.NotNull(clash.Item2.IfcGuid);
     }
 
+    [Theory]
+    [InlineData(false, false, 0)]
+    [InlineData(true, false, 2)]
+    [InlineData(true, true, 1)]
+    public void AssemblyClashDetection_ReportsOnlyUniqueCrossModelPairs(bool intersect, bool distinctSelections, int expectedCount)
+    {
+        var architecture = new NwcDocumentBuilder().SetFileInfo("Architecture.nwc")
+            .AddMesh(CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2)))
+            .AddMesh(CreateBoxMesh(2, new(1, 0, 0), new(3, 2, 2)))
+            .Build();
+        double x = intersect ? 1.5 : 100;
+        var mep = new NwcDocumentBuilder().SetFileInfo("MEP.nwc")
+            .AddMesh(CreateBoxMesh(3, new(x, -1, 0.5), new(x + 1, 3, 1.5)))
+            .Build();
+        var test = new NwcClashTest("Architecture vs MEP", NwcClashTestType.Hard, tolerance: 0.01);
+        test.Rules.Add(NwcClashRule.SameFile());
+        if (distinctSelections)
+        {
+            test.SelectionA.ExplicitNodeIds.Add(2);
+            test.SelectionB.ExplicitNodeIds.Add(3);
+        }
+
+        NwcClashDetector.Run(NwcAssembly.Create("Federated", architecture, mep), test);
+
+        Assert.Equal(expectedCount, test.TotalClashCount);
+        Assert.All(test.Results, clash => Assert.NotEqual(clash.Item1.ModelName, clash.Item2.ModelName));
+    }
+
     [Fact]
     public void IgnoreSameLayerRuleFiltersOutSameLayerClashes()
     {
