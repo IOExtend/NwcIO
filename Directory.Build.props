@@ -16,7 +16,7 @@
   <PropertyGroup>
     <Version>0.10.0</Version>
     <Authors>mahach666</Authors>
-    <Copyright>Copyright (c) 2026 IOExtend</Copyright>
+    <Copyright>Copyright (c) 2026 mahach666</Copyright>
     <Product>NwcIO</Product>
     <Description>Fast, pure managed .NET library and CLI tool for reading and writing Autodesk Navisworks files (.nwc, .nwd, .nwf) without Navisworks installed.</Description>
     <NeutralLanguage>en</NeutralLanguage>
