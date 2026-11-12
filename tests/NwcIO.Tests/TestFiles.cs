@@ -61,6 +61,27 @@ internal static class TestFiles
     }
 
     /// <summary>
+    /// Returns a human-readable reason why no fixture could be resolved, or null when
+    /// one is available. A set-but-unresolvable <see cref="EnvironmentVariable"/> value
+    /// is called out so a broken fixture setup is visible in the test output.
+    /// </summary>
+    public static string? DescribeSkipReason()
+    {
+        if (TryResolvePrimary() is not null)
+        {
+            return null;
+        }
+
+        var env = Environment.GetEnvironmentVariable(EnvironmentVariable);
+        if (!string.IsNullOrEmpty(env))
+        {
+            return $"No .nwc fixture found: {EnvironmentVariable} is set to '{env}', which is neither an existing .nwc file nor a directory containing one.";
+        }
+
+        return $"No .nwc fixture found (set {EnvironmentVariable} or add a test_files directory).";
+    }
+
+    /// <summary>
     /// Returns the path to a secondary test model for multi-model federated testing, or null if none is available.
     /// </summary>
     public static string? TryResolveSecondary(string? primaryPath)

@@ -3,19 +3,30 @@ using Xunit;
 
 namespace NwcIO.Tests;
 
+/// <summary>
+/// Marks a test that needs a private real-model fixture; xUnit reports it as
+/// skipped with a reason when no fixture is available.
+/// </summary>
+internal sealed class RealFixtureFactAttribute : FactAttribute
+{
+    public RealFixtureFactAttribute()
+    {
+        string? skipReason = TestFiles.DescribeSkipReason();
+        if (skipReason is not null)
+        {
+            Skip = skipReason;
+        }
+    }
+}
+
 public class RealFixtureTests
 {
     private static readonly string? FixturePath = TestFiles.TryResolvePrimary();
 
-    [Fact]
+    [RealFixtureFact]
     public void Open_RealNwcFixture_ParsesHeaderAndRecords()
     {
-        if (FixturePath is null)
-        {
-            return; // Skip on machines without the sample files
-        }
-
-        var doc = NwcDocument.Open(FixturePath);
+        var doc = NwcDocument.Open(FixturePath!);
 
         Assert.NotNull(doc.FileInfo);
         Assert.NotNull(doc.FileInfo.SourcePath);
@@ -250,15 +261,10 @@ public class RealFixtureTests
         }
     }
 
-    [Fact]
+    [RealFixtureFact]
     public void Save_RealNwcFixture_RoundtripsSuccessfully()
         {
-            if (FixturePath is null)
-            {
-                return;
-            }
-
-            var original = NwcDocument.Open(FixturePath);
+            var original = NwcDocument.Open(FixturePath!);
             string tempNwc = Path.Combine(Path.GetTempPath(), $"roundtrip_{Guid.NewGuid():N}.nwc");
 
             try
