@@ -88,9 +88,9 @@ internal static class NwcStreamSerializer
 
     public static byte[] BuildTimeLinerStream(Model.TimeLiner.NwcTimeLinerSchedule schedule)
     {
-        using var csvMs = new MemoryStream();
-        Model.TimeLiner.NwcTimeLinerCsvSerializer.Write(schedule, csvMs);
-        byte[] csvBytes = csvMs.ToArray();
+        using var xmlMs = new MemoryStream();
+        Model.TimeLiner.NwcTimeLinerXmlSerializer.Write(schedule, xmlMs);
+        var xmlBytes = xmlMs.ToArray();
 
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
@@ -98,8 +98,8 @@ internal static class NwcStreamSerializer
         w.Write(100); // tag category
         w.Write(106); // tag TimeLiner
         w.Write(schedule.Tasks.Count);
-        w.Write(csvBytes.Length);
-        w.Write(csvBytes);
+        w.Write(xmlBytes.Length);
+        w.Write(xmlBytes);
 
         return ms.ToArray();
     }
