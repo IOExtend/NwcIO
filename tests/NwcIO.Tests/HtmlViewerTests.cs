@@ -194,4 +194,59 @@ public sealed class HtmlViewerTests
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
         }
     }
+
+    [Fact]
+    public void SaveHtmlViewer_DoesNotMutateCallerOptionsAcrossExports()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-html-opts-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            static NwcDocument BuildDoc(string fileInfo, string taskName, string setName)
+            {
+                var start = new DateTimeOffset(2026, 1, 5, 8, 0, 0, TimeSpan.Zero);
+                return new NwcDocumentBuilder().SetFileInfo(fileInfo)
+                    .AddMesh(new NwcMesh
+                    {
+                        Id = 1,
+                        Name = "m",
+                        Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                        Indices = [0, 1, 2],
+                        BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+                    })
+                    .SetTimeLiner(new Model.TimeLiner.NwcTimeLinerSchedule(
+                        "Schedule", [new Model.TimeLiner.NwcTimeLinerTask("1", taskName, start, start.AddDays(2))]))
+                    .AddSelectionSet(new Model.Sets.NwcSelectionSet(setName, [1]))
+                    .Build();
+            }
+
+            var a = BuildDoc("A.rvt", "TaskOfA", "SetOfA");
+            var b = BuildDoc("B.rvt", "TaskOfB", "SetOfB");
+
+            var opts = new NwcHtmlViewerOptions { Title = "batch" };
+            string htmlA = Path.Combine(tempDir, "a.html");
+            string htmlB = Path.Combine(tempDir, "b.html");
+            a.SaveHtmlViewer(htmlA, opts);
+            b.SaveHtmlViewer(htmlB, opts);
+
+            // The caller's options instance must stay untouched after both saves.
+            Assert.Null(opts.TimeLiner);
+            Assert.Null(opts.SelectionSets);
+            Assert.Null(opts.GridSystem);
+            Assert.Equal("batch", opts.Title);
+
+            string contentB = File.ReadAllText(htmlB);
+            Assert.Contains("SetOfB", contentB);
+            Assert.DoesNotContain("SetOfA", contentB);
+            Assert.Contains("TaskOfB", contentB);
+            Assert.DoesNotContain("TaskOfA", contentB);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
 }

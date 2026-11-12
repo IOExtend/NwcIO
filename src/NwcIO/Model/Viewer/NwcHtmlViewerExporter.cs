@@ -42,6 +42,9 @@ public static class NwcHtmlViewerExporter
         ArgumentNullException.ThrowIfNull(doc);
 
         options ??= new NwcHtmlViewerOptions { Title = Path.GetFileNameWithoutExtension(path) };
+        // Fill in document defaults on a copy: the caller's options instance must stay
+        // untouched so it can be reused for other documents without leaking state.
+        options = ShallowCopy(options);
         options.GridSystem ??= doc.GridSystem;
         options.TimeLiner ??= doc.TimeLiner;
         options.SelectionSets ??= doc.SelectionSets;
@@ -59,6 +62,8 @@ public static class NwcHtmlViewerExporter
         ArgumentNullException.ThrowIfNull(assembly);
 
         options ??= new NwcHtmlViewerOptions { Title = assembly.Name };
+        // Fill in assembly defaults on a copy; see the document overload above.
+        options = ShallowCopy(options);
         options.GridSystem ??= assembly.GridSystem;
         options.TimeLiner ??= assembly.TimeLiner;
         options.SelectionSets ??= assembly.SelectionSets;
@@ -66,6 +71,30 @@ public static class NwcHtmlViewerExporter
         using var writer = new StreamWriter(fs, Encoding.UTF8);
         Write(writer, assembly.AllMeshes, assembly.SavedViewpoints, assembly.ClashTests, assembly.BoundingBox, options);
     }
+
+    /// <summary>
+    /// Copies every option value to a fresh instance, so defaulting never mutates
+    /// an options object owned by the caller. Keep in sync with new
+    /// <see cref="NwcHtmlViewerOptions"/> properties.
+    /// </summary>
+    private static NwcHtmlViewerOptions ShallowCopy(NwcHtmlViewerOptions options) => new()
+    {
+        Title = options.Title,
+        IncludeProperties = options.IncludeProperties,
+        IncludeClashes = options.IncludeClashes,
+        IncludeViewpoints = options.IncludeViewpoints,
+        IncludeRedlines = options.IncludeRedlines,
+        IncludeSectioning = options.IncludeSectioning,
+        IncludeMeasure = options.IncludeMeasure,
+        IncludeGrids = options.IncludeGrids,
+        IncludeTimeLiner = options.IncludeTimeLiner,
+        TimeLiner = options.TimeLiner,
+        IncludeSelectionSets = options.IncludeSelectionSets,
+        SelectionSets = options.SelectionSets,
+        GridSystem = options.GridSystem,
+        Theme = options.Theme,
+        MaxMeshVertices = options.MaxMeshVertices,
+    };
 
     /// <summary>
     /// Writes the standalone 3D HTML WebGL viewer to a <see cref="TextWriter"/>.
