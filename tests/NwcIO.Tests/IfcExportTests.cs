@@ -1,4 +1,5 @@
 using NwcIO.Model;
+using NwcIO.Model.Sectioning;
 using Xunit;
 
 namespace NwcIO.Tests;
@@ -215,6 +216,97 @@ public class IfcExportTests
         // In Metre mode, coordinates are 1.0
         Assert.Contains("*,.LENGTHUNIT.,$,.METRE.", ifcM);
         Assert.Contains("1.", ifcM);
+    }
+
+    [Theory]
+    [InlineData(false, NwcIfcLengthUnit.Millimetre, true, "1000.")]
+    [InlineData(true, NwcIfcLengthUnit.Millimetre, true, "1000.")]
+    [InlineData(false, NwcIfcLengthUnit.Metre, true, "1.")]
+    [InlineData(true, NwcIfcLengthUnit.Metre, true, "1.")]
+    [InlineData(false, NwcIfcLengthUnit.Metre, false, "1000.")]
+    [InlineData(true, NwcIfcLengthUnit.Metre, false, "1000.")]
+    public void SaveIfc_Dimensions_UseExportedLengthUnits(
+        bool assembly, NwcIfcLengthUnit unit, bool convert, string expected)
+    {
+        var doc = CreateSyntheticDocument();
+        var ifc = ExportDimensions(doc, assembly, new NwcIfcExportOptions
+        {
+            LengthUnit = unit,
+            ConvertMmToMetres = convert,
+        });
+
+        AssertDimensions(ifc, expected, expected, expected);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public void SaveIfc_Dimensions_UseSelectedCoordinateSpace(bool assembly, bool worldCoordinates)
+    {
+        var doc = CreateSyntheticDocument();
+        doc.Meshes[0].Transform = new NwcTransform
+        {
+            Id = 1,
+            Translation = new Vector3d(5000, -3000, 2000),
+            // Rotate the cube 45 degrees about Z, increasing its X and Y extents.
+            Rotation = new Quaterniond(0, 0, Math.Sin(Math.PI / 8), Math.Cos(Math.PI / 8)),
+        };
+        var ifc = ExportDimensions(doc, assembly, new NwcIfcExportOptions
+        {
+            WorldCoordinates = worldCoordinates,
+            LengthUnit = NwcIfcLengthUnit.Metre,
+            ConvertMmToMetres = true,
+        });
+
+        foreach (var name in new[] { "Length_X", "Width_Y", "Height_Z" })
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                ifc, $@"IFCPROPERTYSINGLEVALUE\('{name}',\$,IFCLENGTHMEASURE\(([^)]+)\),\$\)");
+            Assert.True(match.Success, $"Missing length measure for {name}");
+            var actual = double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            var expected = worldCoordinates && name != "Height_Z" ? Math.Sqrt(2) : 1;
+            Assert.Equal(expected, actual, 6);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveIfc_Dimensions_RetainPostClipExtents(bool assembly)
+    {
+        var doc = CreateSyntheticDocument();
+        var ifc = ExportDimensions(doc, assembly, new NwcIfcExportOptions
+        {
+            LengthUnit = NwcIfcLengthUnit.Metre,
+            ConvertMmToMetres = true,
+            SectionPlanes = new[] { new NwcSectionPlane { Normal = new Vector3d(1, 0, 0), Distance = 250 } },
+        });
+
+        AssertDimensions(ifc, "0.75", "1.", "1.");
+    }
+
+    private static string ExportDimensions(NwcDocument doc, bool assembly, NwcIfcExportOptions options)
+    {
+        using var sw = new StringWriter();
+        if (assembly)
+        {
+            NwcAssembly.Create("Dimensions", doc).SaveIfc(sw, options);
+        }
+        else
+        {
+            doc.SaveIfc(sw, options);
+        }
+
+        return sw.ToString();
+    }
+
+    private static void AssertDimensions(string ifc, string x, string y, string z)
+    {
+        Assert.Contains($"IFCPROPERTYSINGLEVALUE('Length_X',$,IFCLENGTHMEASURE({x}),$)", ifc);
+        Assert.Contains($"IFCPROPERTYSINGLEVALUE('Width_Y',$,IFCLENGTHMEASURE({y}),$)", ifc);
+        Assert.Contains($"IFCPROPERTYSINGLEVALUE('Height_Z',$,IFCLENGTHMEASURE({z}),$)", ifc);
     }
 
     [Fact]
