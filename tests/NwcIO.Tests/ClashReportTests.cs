@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Xml.Linq;
@@ -161,6 +162,32 @@ public class ClashReportTests
         Assert.Contains("clash-badge", html, StringComparison.Ordinal);
         Assert.Contains("applyFilters()", html, StringComparison.Ordinal);
         Assert.Contains("sortTable(", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HtmlClashReport_MatrixKeepsModelNamesOutOfScript()
+    {
+        const string nameA = "a');alert(1);('";
+        const string nameB = "O\"Brien <&>";
+        var meshA = new NwcMesh { Id = 1, Vertices = [], Indices = [], BoundingBox = new BoundingBox3d(new(0, 0, 0), new(5, 5, 3)) };
+        var meshB = new NwcMesh { Id = 2, Vertices = [], Indices = [], BoundingBox = new BoundingBox3d(new(2, 2, 0), new(7, 7, 3)) };
+        var assembly = NwcAssembly.Create("Project",
+            CreateMockDocument(nameA + ".rvt", [meshA]),
+            CreateMockDocument(nameB + ".rvt", [meshB]));
+
+        using var sw = new StringWriter();
+        assembly.SaveClashReportHtml(sw, assembly.FindClashes());
+        string html = sw.ToString();
+
+        var cells = html.Split('\n').Where(l => l.Contains("class=\"cell-clash\"", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, cells.Count);
+        Assert.All(cells, cell =>
+        {
+            Assert.Contains("onclick=\"filterPair(this.dataset.modelA, this.dataset.modelB)\"", cell, StringComparison.Ordinal);
+            Assert.DoesNotContain("alert", cell.Substring(cell.IndexOf("onclick=", StringComparison.Ordinal), 60), StringComparison.Ordinal);
+        });
+        Assert.Contains(cells, cell => cell.Contains($"data-model-a=\"{WebUtility.HtmlEncode(nameA)}\" data-model-b=\"{WebUtility.HtmlEncode(nameB)}\"", StringComparison.Ordinal));
+        Assert.Contains(cells, cell => cell.Contains($"data-model-a=\"{WebUtility.HtmlEncode(nameB)}\" data-model-b=\"{WebUtility.HtmlEncode(nameA)}\"", StringComparison.Ordinal));
     }
 
     [Fact]
