@@ -155,10 +155,38 @@ public readonly record struct BoundingBox3d(Vector3d Min, Vector3d Max)
     /// </summary>
     public bool IntersectsRay(Vector3d origin, Vector3d invDir, double maxDistance, out double tMin)
     {
+        if (IntersectsRay(origin, invDir, maxDistance, out double tNear, out double tFar))
+        {
+            tMin = tNear >= 0 ? tNear : tFar;
+            return true;
+        }
+
+        tMin = double.PositiveInfinity;
+        return false;
+    }
+
+    /// <summary>
+    /// Like <see cref="IntersectsRay(Vector3d, Vector3d, double, out double)"/>, but <paramref name="tEntry"/> is the
+    /// distance at which the ray enters the box: 0 when the origin is inside it, never the exit distance.
+    /// </summary>
+    internal bool IntersectsRayEntry(Vector3d origin, Vector3d invDir, double maxDistance, out double tEntry)
+    {
+        if (IntersectsRay(origin, invDir, maxDistance, out double tNear, out _))
+        {
+            tEntry = Math.Max(tNear, 0);
+            return true;
+        }
+
+        tEntry = double.PositiveInfinity;
+        return false;
+    }
+
+    private bool IntersectsRay(Vector3d origin, Vector3d invDir, double maxDistance, out double tNear, out double tFar)
+    {
         double t1 = (Min.X - origin.X) * invDir.X;
         double t2 = (Max.X - origin.X) * invDir.X;
-        double tNear = Math.Min(t1, t2);
-        double tFar = Math.Max(t1, t2);
+        tNear = Math.Min(t1, t2);
+        tFar = Math.Max(t1, t2);
 
         t1 = (Min.Y - origin.Y) * invDir.Y;
         t2 = (Max.Y - origin.Y) * invDir.Y;
@@ -170,14 +198,7 @@ public readonly record struct BoundingBox3d(Vector3d Min, Vector3d Max)
         tNear = Math.Max(tNear, Math.Min(t1, t2));
         tFar = Math.Min(tFar, Math.Max(t1, t2));
 
-        if (tNear <= tFar && tFar >= 0 && tNear <= maxDistance)
-        {
-            tMin = tNear >= 0 ? tNear : tFar;
-            return true;
-        }
-
-        tMin = double.PositiveInfinity;
-        return false;
+        return tNear <= tFar && tFar >= 0 && tNear <= maxDistance;
     }
 
     public override string ToString() =>

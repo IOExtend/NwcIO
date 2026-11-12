@@ -142,7 +142,7 @@ public sealed class NwcSpatialIndex
         ref double closestDist,
         ref RaycastHit? bestHit)
     {
-        if (!node.Bounds.IntersectsRay(origin, invDir, closestDist, out double tNode) || tNode >= closestDist)
+        if (!node.Bounds.IntersectsRayEntry(origin, invDir, closestDist, out double tNode) || tNode >= closestDist)
         {
             return;
         }
@@ -165,8 +165,8 @@ public sealed class NwcSpatialIndex
         // Branch node: test both children and visit the closer one first
         double distL = 0;
         double distR = 0;
-        bool hitL = node.Left is not null && node.Left.Bounds.IntersectsRay(origin, invDir, closestDist, out distL);
-        bool hitR = node.Right is not null && node.Right.Bounds.IntersectsRay(origin, invDir, closestDist, out distR);
+        bool hitL = node.Left is not null && node.Left.Bounds.IntersectsRayEntry(origin, invDir, closestDist, out distL);
+        bool hitR = node.Right is not null && node.Right.Bounds.IntersectsRayEntry(origin, invDir, closestDist, out distR);
 
         if (hitL && hitR)
         {
