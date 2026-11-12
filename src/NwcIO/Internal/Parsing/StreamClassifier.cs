@@ -138,7 +138,8 @@ public static class StreamClassifier
                 double qz = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(i + 52));
                 double qw = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(i + 60));
                 double norm = qx * qx + qy * qy + qz * qz + qw * qw;
-                if (Math.Abs(norm - 1.0) < 0.005 && Math.Abs(qw) > 0.0001)
+                // W = 0 is a 180° turn, so the camera position, not W, rules out a chance match
+                if (Math.Abs(norm - 1.0) < 0.005 && HasFinitePosition(data, i))
                 {
                     return true;
                 }
@@ -146,6 +147,11 @@ public static class StreamClassifier
         }
         return false;
     }
+
+    private static bool HasFinitePosition(byte[] data, int offset) =>
+        double.IsFinite(BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(offset + 12))) &&
+        double.IsFinite(BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(offset + 20))) &&
+        double.IsFinite(BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(offset + 28)));
 
     private static int ReadInt32(byte[] data, int offset) =>
         offset + 4 <= data.Length ? BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset)) : 0;
