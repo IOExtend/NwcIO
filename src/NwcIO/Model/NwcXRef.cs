@@ -14,23 +14,64 @@ public sealed record NwcXRef(string OriginalPath, string RemappedPath)
     /// <summary>
     /// Checks whether the referenced file exists on disk, optionally relative to a base directory.
     /// </summary>
-    public bool Exists(string? baseDirectory = null)
+    public bool Exists(string? baseDirectory = null) => TryResolve(baseDirectory, out _);
+
+    /// <summary>
+    /// Resolves the reference to an existing file. Relative paths are resolved against
+    /// <paramref name="baseDirectory"/> when provided, otherwise against the process working
+    /// directory. An absolute stored path is tried first,
+    /// and when it is missing the trailing path segments are matched under the base
+    /// directory, longest suffix first, so a reference to <c>&lt;old-root&gt;/Arch/A.nwc</c>
+    /// resolves to <c>&lt;base&gt;/Arch/A.nwc</c> before <c>&lt;base&gt;/A.nwc</c>.
+    /// </summary>
+    /// <param name="baseDirectory">Directory to resolve against, typically the directory of the referencing file.</param>
+    /// <param name="resolvedPath">The first existing candidate, in the order described above.</param>
+    /// <returns>True when an existing file was found.</returns>
+    public bool TryResolve(string? baseDirectory, out string resolvedPath)
     {
         var path = EffectivePath;
+
+        if (!string.IsNullOrEmpty(baseDirectory) && !Path.IsPathRooted(path))
+        {
+            return TryResolveSuffixUnder(path, baseDirectory, out resolvedPath);
+        }
+
         if (File.Exists(path))
+        {
+            resolvedPath = path;
+            return true;
+        }
+
+        if (!string.IsNullOrEmpty(baseDirectory) && TryResolveSuffixUnder(path, baseDirectory, out resolvedPath))
         {
             return true;
         }
 
-        if (!string.IsNullOrEmpty(baseDirectory))
+        resolvedPath = "";
+        return false;
+    }
+
+    private static bool TryResolveSuffixUnder(string path, string baseDirectory, out string resolvedPath)
+    {
+        // Skip drive roots ("C:") so they are never joined onto the base directory.
+        var segments = path.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        int first = segments.Length > 1 && segments[0].EndsWith(':') ? 1 : 0;
+
+        // Longest suffix first (start ascends); the last iteration is the bare file name.
+        for (int start = first; start < segments.Length; start++)
         {
-            var combined = Path.Combine(baseDirectory, Path.GetFileName(path));
+            string suffix = string.Join(Path.DirectorySeparatorChar, segments[start..]);
+            string combined = Path.Combine(baseDirectory, suffix);
             if (File.Exists(combined))
             {
+                resolvedPath = combined;
                 return true;
             }
         }
 
+        resolvedPath = "";
         return false;
     }
 }
