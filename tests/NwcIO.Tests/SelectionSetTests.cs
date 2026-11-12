@@ -1,3 +1,5 @@
+using System.Text;
+using NwcIO.Internal.Container;
 using NwcIO.Model;
 using NwcIO.Model.Sets;
 using Xunit;
@@ -183,5 +185,26 @@ public class SelectionSetTests
 
         using var invalid = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("equals", "regex")));
         Assert.Throws<FormatException>(() => NwcXmlSetSerializer.Read(invalid));
+    }
+
+    [Fact]
+    public void Open_UnknownOperatorInRawSetsStream_ThrowsInsteadOfReturningZeroSets()
+    {
+        // A raw XML sets stream (no [100][105] binary header) holding one valid set
+        // plus a condition with an operator this library does not know.
+        using var xmlMs = new MemoryStream();
+        NwcXmlSetSerializer.Write(
+        [
+            new NwcSelectionSet("Piles", [1, 2]),
+            new NwcSearchSet("S", [new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "x")]),
+        ], xmlMs);
+        string xml = Encoding.UTF8.GetString(xmlMs.ToArray());
+        byte[] raw = Encoding.UTF8.GetBytes(xml.Replace("equals", "bogus_operator"));
+
+        using var file = new MemoryStream();
+        NwcContainerWriter.Write(file, [raw]);
+        file.Position = 0;
+
+        Assert.Throws<FormatException>(() => NwcDocument.Open(file));
     }
 }
