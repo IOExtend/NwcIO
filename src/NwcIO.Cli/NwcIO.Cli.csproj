@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>NwcIO.Cli</PackageId>
-    <Description>Command line tool that reads Autodesk Navisworks files (.nwc, .nwd, .nwf) without Navisworks and exports GLB, OBJ, or JSON.</Description>
+    <Description>Command line tool that reads Autodesk Navisworks files (.nwc, .nwd, .nwf) without Navisworks and exports IFC, GLB, OBJ, JSON, BCF, HTML or NWC.</Description>
     <OutputType>Exe</OutputType>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>nwcio</ToolCommandName>

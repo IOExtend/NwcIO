@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/nwcio-banner.png" alt="NwcIO" width="640">
+  <img src="https://raw.githubusercontent.com/IOExtend/NwcIO/main/docs/images/nwcio-banner.png" alt="NwcIO" width="640">
 </p>
 
 # NwcIO
@@ -131,7 +131,7 @@ report.GroupByProximity(clusterDistance: 1.5);
 report.SaveBcf("Clashes.bcfzip");
 ```
 
-See the [public API](docs/public-api.md) for the supported surface and [getting started guide](docs/getting-started.md) for detailed workflows.
+See the [public API](https://github.com/IOExtend/NwcIO/blob/main/docs/public-api.md) for the supported surface and [getting started guide](https://github.com/IOExtend/NwcIO/blob/main/docs/getting-started.md) for detailed workflows.
 
 ## Documentation
 
@@ -160,15 +160,15 @@ dotnet test
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Release changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](https://github.com/IOExtend/NwcIO/blob/main/CONTRIBUTING.md). Release changes are recorded in [CHANGELOG.md](https://github.com/IOExtend/NwcIO/blob/main/CHANGELOG.md).
 
 ## Security
 
-Report vulnerabilities through GitHub private vulnerability reporting in the repository's Security tab. Do not open public issues for security vulnerabilities. See [SECURITY.md](SECURITY.md).
+Report vulnerabilities through GitHub private vulnerability reporting in the repository's Security tab. Do not open public issues for security vulnerabilities. See [SECURITY.md](https://github.com/IOExtend/NwcIO/blob/main/SECURITY.md).
 
 ## License and trademarks
 
-NwcIO is licensed under the [MIT License](LICENSE). Copyright holder: mahach666.
+NwcIO is licensed under the [MIT License](https://github.com/IOExtend/NwcIO/blob/main/LICENSE). Copyright holder: mahach666.
 
 NwcIO is not affiliated with, endorsed by or sponsored by Autodesk. Autodesk and Navisworks are trademarks of Autodesk, Inc.
 
