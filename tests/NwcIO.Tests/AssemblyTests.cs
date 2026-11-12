@@ -236,9 +236,9 @@ public class AssemblyTests
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-cwd-" + Guid.NewGuid().ToString("N"));
         string nwfDir = Path.Combine(tempDir, "federation");
-        string cwdDir = Path.Combine(tempDir, "cwd");
-        string nwfArch = Path.Combine(nwfDir, "Arch");
-        string cwdArch = Path.Combine(cwdDir, "Arch");
+        string relativeDir = "nwcio-decoy-" + Guid.NewGuid().ToString("N");
+        string nwfArch = Path.Combine(nwfDir, relativeDir);
+        string cwdArch = Path.Combine(Directory.GetCurrentDirectory(), relativeDir);
         Directory.CreateDirectory(nwfArch);
         Directory.CreateDirectory(cwdArch);
         try
@@ -247,31 +247,28 @@ public class AssemblyTests
             // with the same relative name reachable from the process CWD (offset 500).
             CreateComponentModel("Real.rvt", 1, offsetX: 0).Save(Path.Combine(nwfArch, "B.nwc"));
             CreateComponentModel("Decoy.rvt", 2, offsetX: 500).Save(Path.Combine(cwdArch, "B.nwc"));
+            CreateComponentModel("Missing.rvt", 3, offsetX: 1000).Save(Path.Combine(cwdArch, "Missing.nwc"));
 
             string nwfPath = Path.Combine(nwfDir, "fed.nwf");
-            WriteNwfWithXRefs(nwfPath, "Arch/B.nwc");
+            string missingPath = Path.Combine(relativeDir, "Missing.nwc");
+            WriteNwfWithXRefs(nwfPath, Path.Combine(relativeDir, "B.nwc"), missingPath);
 
-            string oldCwd = Directory.GetCurrentDirectory();
-            Directory.SetCurrentDirectory(cwdDir);
-            try
-            {
-                var assembly = NwcAssembly.OpenNwf(nwfPath);
+            var assembly = NwcAssembly.OpenNwf(nwfPath);
 
-                Assert.Equal(2, assembly.Models.Count);
-                Assert.Single(assembly.AllMeshes);
-                // The federation's own B.nwc must win over the same-named file in the CWD.
-                Assert.Equal(1, assembly.AllMeshes.Count(m => Math.Abs(m.BoundingBox!.Value.Min.X - 0.0) < 1e-6));
-                Assert.Equal(0, assembly.AllMeshes.Count(m => Math.Abs(m.BoundingBox!.Value.Min.X - 500.0) < 1e-6));
-                Assert.Empty(assembly.UnresolvedXRefs);
-            }
-            finally
-            {
-                Directory.SetCurrentDirectory(oldCwd);
-            }
+            Assert.Equal(2, assembly.Models.Count);
+            var mesh = Assert.Single(assembly.AllMeshes);
+            Assert.Equal(0.0, mesh.BoundingBox!.Value.Min.X);
+            Assert.Equal(missingPath.Replace('\\', '/'), Assert.Single(assembly.UnresolvedXRefs).EffectivePath);
+
+            var missing = new NwcXRef(missingPath, "");
+            Assert.False(missing.TryResolve(nwfDir, out _));
+            Assert.False(missing.Exists(nwfDir));
+            Assert.True(missing.TryResolve(null, out _));
         }
         finally
         {
             Directory.Delete(tempDir, true);
+            Directory.Delete(cwdArch, true);
         }
     }
 }
