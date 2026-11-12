@@ -1,4 +1,5 @@
 using NwcIO.Internal.Container;
+using NwcIO.Internal.Parsing;
 using NwcIO.Model;
 using Xunit;
 
@@ -6,6 +7,44 @@ namespace NwcIO.Tests;
 
 public class WriterTests
 {
+    [Theory]
+    [InlineData(3, 3, false)]
+    [InlineData(3, 3, true)]
+    [InlineData(1, 124, false)]
+    [InlineData(1, 124, true)]
+    public void Document_GuidShapedGeometryAndToc_RoundtripPreservesGuids(int meshCount, int vertexCount, bool withGuids)
+    {
+        var meshes = Enumerable.Range(1, meshCount).Select(id => new NwcMesh
+        {
+            Id = id,
+            Vertices = Enumerable.Range(0, vertexCount).Select(v => new Vector3d(v, v % 2, id)).ToArray(),
+            Indices = [0, 1, 2],
+        }).ToArray();
+        var guids = withGuids
+            ? new[] { Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"), Guid.Parse("ffeeddcc-bbaa-9988-7766-554433221100") }
+            : Array.Empty<Guid>();
+        var doc = NwcDocument.Create(meshes: meshes, guids: guids);
+        var bytes = doc.ToByteArray();
+
+        using var ms = new MemoryStream(bytes);
+        var reopened = NwcDocument.Open(ms);
+
+        Assert.Equal(guids, reopened.Guids);
+        Assert.Equal(meshCount, reopened.Meshes.Count);
+        for (var i = 0; i < meshCount; i++)
+        {
+            Assert.Equal(meshes[i].Vertices, reopened.Meshes[i].Vertices);
+        }
+
+        var container = NwcContainerReader.Read(bytes);
+        StreamClassifier.ClassifyAll(container.Streams);
+        var toc = Assert.Single(container.Streams, s => s.Kind == NwcStreamKind.Toc);
+        var geometry = Assert.Single(container.Streams, s => s.Kind == NwcStreamKind.Geometry);
+        Assert.Equal(NwcStreamKind.Toc, StreamClassifier.Classify(toc));
+        Assert.Equal(NwcStreamKind.Geometry, StreamClassifier.Classify(geometry));
+        Assert.Equal(withGuids ? 1 : 0, container.Streams.Count(s => s.Kind == NwcStreamKind.Guids));
+    }
+
     [Fact]
     public void ContainerWriter_Roundtrip_RestoresExactStreamBuffers()
     {

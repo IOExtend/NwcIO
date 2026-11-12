@@ -60,6 +60,34 @@ public static class StreamClassifier
             return NwcStreamKind.Transforms;
         }
 
+        // Mesh record IDs are arbitrary. Recognize a vertex buffer before the GUID heuristic.
+        if (data.Length >= 24 && ReadInt32(data, 4) is 94 or 95 && ReadInt32(data, 12) == 60)
+        {
+            var p1 = ReadInt32(data, 16);
+            var p2 = ReadInt32(data, 20);
+            var vertexCount = p2 > 0 && p2 % 3 == 0 ? p2 / 3 : p1;
+            if (vertexCount >= 3 && 24L + 12L * vertexCount <= data.Length)
+            {
+                return NwcStreamKind.Geometry;
+            }
+        }
+
+        // TOC: [int32 recCount][int32 chunkCount][chunkCount x int32 sizes][recCount x int32 lengths]
+        // Its size and chunk count can also satisfy the GUID-table heuristic.
+        if (data.Length >= 16)
+        {
+            var recCount = ReadInt32(data, 0);
+            var chunkCount = ReadInt32(data, 4);
+            if (recCount > 0 && recCount < 1_000_000 && chunkCount > 0 && chunkCount < 5000)
+            {
+                var expected = 8 + 4 * chunkCount + 4 * recCount;
+                if (data.Length == expected || data.Length == expected + 4)
+                {
+                    return NwcStreamKind.Toc;
+                }
+            }
+        }
+
         // GUID table: [a][count] followed by exactly count 16-byte GUIDs.
         if (data.Length >= 8 && (data.Length - 8) % 16 == 0)
         {
@@ -85,21 +113,6 @@ public static class StreamClassifier
         if (data.Length >= 8 && ReadInt32(data, 0) == 100 && (ReadInt32(data, 4) is 94 or 95))
         {
             return NwcStreamKind.Geometry;
-        }
-
-        // TOC: [int32 recCount][int32 chunkCount][chunkCount x int32 sizes][recCount x int32 lengths]
-        if (data.Length >= 16)
-        {
-            int recCount = ReadInt32(data, 0);
-            int chunkCount = ReadInt32(data, 4);
-            if (recCount > 0 && recCount < 1_000_000 && chunkCount > 0 && chunkCount < 5000)
-            {
-                int expected = 8 + 4 * chunkCount + 4 * recCount;
-                if (data.Length == expected || data.Length == expected + 4)
-                {
-                    return NwcStreamKind.Toc;
-                }
-            }
         }
 
         // Saved viewpoints and cameras (starts with tag 517 + camera quaternion)
