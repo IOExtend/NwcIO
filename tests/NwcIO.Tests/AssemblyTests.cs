@@ -128,4 +128,106 @@ public class AssemblyTests
             if (File.Exists(tempPath)) File.Delete(tempPath);
         }
     }
+
+    private static NwcDocument CreateComponentModel(string sourcePath, int meshId, double offsetX)
+    {
+        return new NwcDocumentBuilder().SetFileInfo(sourcePath)
+            .AddMesh(new NwcMesh
+            {
+                Id = meshId,
+                Vertices = [new(offsetX, 0, 0), new(offsetX + 1, 0, 0), new(offsetX, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new BoundingBox3d(new(offsetX, 0, 0), new(offsetX + 1, 1, 0)),
+            })
+            .Build();
+    }
+
+    private static void WriteNwfWithXRefs(string nwfPath, params string[] effectivePaths)
+    {
+        string table = string.Join(",", effectivePaths.Select(p =>
+            "{\"OriginalPath\":\"" + p.Replace('\\', '/') + "\",\"RemappedPath\":\"\"}"));
+        string json = "{\"Type\":\"XRefTable\",\"Version\":1,\"SavedFilename\":\"fed.nwf\",\"Table\":[" + table + "]}";
+        byte[] xrefStream = System.Text.Encoding.UTF8.GetBytes(json);
+        using var fs = File.Create(nwfPath);
+        NwcIO.Internal.Container.NwcContainerWriter.Write(fs, [xrefStream]);
+    }
+
+    [Fact]
+    public void OpenNwf_ResolvesSubfoldersDeduplicatesAndReportsMissing()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-nwf-" + Guid.NewGuid().ToString("N"));
+        string archDir = Path.Combine(tempDir, "Arch");
+        Directory.CreateDirectory(archDir);
+        try
+        {
+            CreateComponentModel("A.rvt", 1, offsetX: 0).Save(Path.Combine(archDir, "A.nwc"));
+            CreateComponentModel("B.rvt", 2, offsetX: 100).Save(Path.Combine(archDir, "B.nwc"));
+            CreateComponentModel("C.rvt", 3, offsetX: 200).Save(Path.Combine(tempDir, "C.nwc"));
+            Directory.CreateDirectory(Path.Combine(tempDir, "Textures"));
+            File.WriteAllText(Path.Combine(tempDir, "Textures", "tex.png"), "not really a png");
+
+            string nowhere = Path.Combine(tempDir, "nowhere").Replace(@"\", "/");
+            string nwfPath = Path.Combine(tempDir, "fed.nwf");
+            WriteNwfWithXRefs(
+                nwfPath,
+                nowhere + "/Arch/A.nwc",            // dead absolute root; subfolder must be kept
+                "Arch/B.nwc",                       // relative: resolves against the nwf dir, not CWD
+                nowhere + "/Arch/B.nwc",            // same file via a different stored path: dedup
+                nowhere + "/flat/C.nwc",            // subfolder missing: bare file-name fallback
+                nowhere + "/Mech/D.nwc",            // nowhere to be found: unresolved
+                "Textures/tex.png");                // resolves but unsupported: skipped
+
+            var assembly = NwcAssembly.OpenNwf(nwfPath);
+
+            // nwf doc + A, B, C — B must appear once despite two references.
+            Assert.Equal(4, assembly.Models.Count);
+            Assert.Equal(3, assembly.AllMeshes.Count);
+            Assert.Equal(1, assembly.AllMeshes.Count(m => Math.Abs(m.BoundingBox!.Value.Min.X - 0.0) < 1e-6));
+            Assert.Equal(1, assembly.AllMeshes.Count(m => Math.Abs(m.BoundingBox!.Value.Min.X - 100.0) < 1e-6));
+            Assert.Equal(1, assembly.AllMeshes.Count(m => Math.Abs(m.BoundingBox!.Value.Min.X - 200.0) < 1e-6));
+
+            var unresolved = Assert.Single(assembly.UnresolvedXRefs);
+            Assert.EndsWith("Mech/D.nwc", unresolved.EffectivePath);
+            var skipped = Assert.Single(assembly.SkippedXRefs);
+            Assert.EndsWith("tex.png", skipped.EffectivePath);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void XRefTryResolve_PrefersLongestSuffixUnderBaseDirectory()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-xref-" + Guid.NewGuid().ToString("N"));
+        string archDir = Path.Combine(tempDir, "Arch");
+        Directory.CreateDirectory(archDir);
+        try
+        {
+            File.WriteAllText(Path.Combine(archDir, "A.nwc"), "x");
+            File.WriteAllText(Path.Combine(tempDir, "D.nwc"), "x");
+
+            var subfolder = new NwcXRef("Z:/dead/root/Arch/A.nwc", "");
+            Assert.True(subfolder.TryResolve(tempDir, out string resolvedSub));
+            Assert.Equal(Path.Combine(archDir, "A.nwc"), resolvedSub);
+
+            // The 'flat' subfolder does not exist under the base directory, so the
+            // bare file name is the fallback that finds D.nwc at the root.
+            var bareName = new NwcXRef("Z:/dead/root/flat/D.nwc", "");
+            Assert.True(bareName.TryResolve(tempDir, out string resolvedBare));
+            Assert.Equal(Path.Combine(tempDir, "D.nwc"), resolvedBare);
+
+            var relative = new NwcXRef("Arch/A.nwc", "");
+            Assert.True(relative.Exists(tempDir));
+
+            var missing = new NwcXRef("Z:/dead/root/Mech/Missing.nwc", "");
+            Assert.False(missing.TryResolve(tempDir, out _));
+            Assert.False(missing.Exists(tempDir));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
 }

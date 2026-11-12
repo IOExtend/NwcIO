@@ -37,6 +37,20 @@ public sealed class NwcAssembly
     public Clash.NwcClashMatrix? ClashMatrix { get; set; }
 
     /// <summary>
+    /// XRef entries of the opened federation that could not be resolved to an existing file,
+    /// so the corresponding component model is missing from <see cref="Models"/>.
+    /// Populated by <see cref="OpenNwf"/>; empty for assemblies built otherwise.
+    /// </summary>
+    public IReadOnlyList<NwcXRef> UnresolvedXRefs { get; internal set; } = [];
+
+    /// <summary>
+    /// XRef entries that resolved to an existing file which this loader does not append
+    /// (anything other than .nwc/.nwd, including nested .nwf files). Populated by
+    /// <see cref="OpenNwf"/>; empty for assemblies built otherwise.
+    /// </summary>
+    public IReadOnlyList<NwcXRef> SkippedXRefs { get; internal set; } = [];
+
+    /// <summary>
     /// Gets the spatial acceleration index (BVH) over all meshes across all contributing models.
     /// </summary>
     public NwcSpatialIndex SpatialIndex => _spatialIndex ??= new NwcSpatialIndex(AllMeshes);
@@ -182,28 +196,44 @@ public sealed class NwcAssembly
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(nwfPath)) ?? ".";
 
         var loadedDocs = new List<NwcDocument> { primaryDoc };
+        var loadedPaths = new HashSet<string>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal);
+        var unresolved = new List<NwcXRef>();
+        var skipped = new List<NwcXRef>();
 
         if (primaryDoc.XRefs is not null && primaryDoc.XRefs.References.Count > 0)
         {
             foreach (var xref in primaryDoc.XRefs.References)
             {
-                string candidate = xref.EffectivePath;
-                if (!File.Exists(candidate))
+                if (!xref.TryResolve(baseDir, out string resolved))
                 {
-                    candidate = Path.Combine(baseDir, Path.GetFileName(candidate));
+                    unresolved.Add(xref);
+                    continue;
                 }
 
-                if (File.Exists(candidate) &&
-                    (candidate.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) ||
-                     candidate.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase)))
+                // Load every resolved file once, whatever the stored path spelled like.
+                if (!loadedPaths.Add(Path.GetFullPath(resolved)))
                 {
-                    loadedDocs.Add(NwcDocument.Open(candidate, options));
+                    continue;
                 }
+
+                if (!resolved.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) &&
+                    !resolved.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped.Add(xref);
+                    continue;
+                }
+
+                loadedDocs.Add(NwcDocument.Open(resolved, options));
             }
         }
 
         string assemblyName = Path.GetFileNameWithoutExtension(nwfPath);
-        return Create(assemblyName, loadedDocs);
+        var assembly = Create(assemblyName, loadedDocs);
+        assembly.UnresolvedXRefs = unresolved;
+        assembly.SkippedXRefs = skipped;
+        return assembly;
     }
 
     /// <summary>
