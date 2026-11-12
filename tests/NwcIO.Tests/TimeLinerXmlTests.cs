@@ -155,4 +155,55 @@ public class TimeLinerXmlTests
         Assert.Contains(10, taskRoof.AttachedNodeIds);
         Assert.Contains(11, taskRoof.AttachedNodeIds);
     }
+
+    [Fact]
+    public void LinkByNodeName_EmptyTaskName_LinksNothing()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "C" };
+        for (int i = 1; i <= 5; i++)
+        {
+            root.Children.Add(new NwcNode { Id = i, Name = "Wall " + i, Class = "C" });
+        }
+
+        var schedule = new NwcTimeLinerSchedule("S");
+        var emptyName = new NwcTimeLinerTask("T1", "",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1));
+        var whitespaceName = new NwcTimeLinerTask("T2", "   ",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(1));
+        schedule.Tasks.Add(emptyName);
+        schedule.Tasks.Add(whitespaceName);
+
+        int linked = NwcTimeLinerLinker.LinkByNodeName(schedule, root);
+
+        Assert.Equal(0, linked);
+        Assert.Empty(emptyName.AttachedNodeIds);
+        Assert.Empty(whitespaceName.AttachedNodeIds);
+    }
+
+    [Fact]
+    public void XmlRoundtrip_InProgressTask_KeepsActualStartAndCostWithoutActualEnd()
+    {
+        var schedule = new NwcTimeLinerSchedule("S");
+        var task = new NwcTimeLinerTask("T2", "InProg",
+            DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal),
+            DateTimeOffset.Parse("2026-01-10T00:00:00Z", CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal))
+        {
+            ActualStart = DateTimeOffset.Parse("2026-01-02T00:00:00Z", CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal),
+            ActualCost = 10m,
+        };
+        schedule.Tasks.Add(task);
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerXmlSerializer.Write(schedule, ms);
+        ms.Position = 0;
+
+        var read = NwcTimeLinerXmlSerializer.Read(ms);
+        var roundtripped = Assert.Single(read.Tasks);
+
+        Assert.NotNull(roundtripped.ActualStart);
+        Assert.Equal(task.ActualStart.Value, roundtripped.ActualStart!.Value);
+        Assert.Null(roundtripped.ActualEnd);
+        Assert.NotNull(roundtripped.ActualCost);
+        Assert.Equal(10m, roundtripped.ActualCost!.Value);
+    }
 }
