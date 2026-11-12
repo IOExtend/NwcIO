@@ -20,7 +20,7 @@ internal static class IfcExporter
         ArgumentNullException.ThrowIfNull(path);
 
         using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, System.Text.Encoding.UTF8, bufferSize: 65536);
+        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
         Write(doc, writer, options, Path.GetFileName(path));
     }
 
@@ -235,7 +235,7 @@ internal static class IfcExporter
         }
 
         // 8. Write complete STEP physical file
-        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization);
+        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
     }
 
     /// <summary>Writes a federated <see cref="NwcAssembly"/> to an IFC file.</summary>
@@ -245,7 +245,7 @@ internal static class IfcExporter
         ArgumentNullException.ThrowIfNull(path);
 
         using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, System.Text.Encoding.UTF8, bufferSize: 65536);
+        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
         WriteAssembly(assembly, writer, options, Path.GetFileName(path));
     }
 
@@ -466,7 +466,7 @@ internal static class IfcExporter
                 $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},{StepWriter.List(storeyIds.Select(StepWriter.Ref))}");
         }
 
-        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization);
+        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
     }
 
     private static int WriteMeshFacetedBrep(

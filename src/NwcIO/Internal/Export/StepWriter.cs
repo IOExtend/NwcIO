@@ -39,14 +39,15 @@ internal sealed class StepWriter
         string schema = "IFC2X3",
         string description = "ViewDefinition [CoordinationView_V2.0]",
         string application = "NwcIO",
-        string organization = "mahach666")
+        string organization = "NwcIO",
+        string author = "")
     {
         var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 
         w.WriteLine("ISO-10303-21;");
         w.WriteLine("HEADER;");
         w.WriteLine($"FILE_DESCRIPTION(('{Escape(description)}'),'2;1');");
-        w.WriteLine($"FILE_NAME('{Escape(fileName)}','{now}',('{Escape(organization)}'),('{Escape(organization)}'),'{Escape(application)}','NwcIO','');");
+        w.WriteLine($"FILE_NAME('{Escape(fileName)}','{now}',('{Escape(author)}'),('{Escape(organization)}'),'{Escape(application)}','NwcIO','');");
         w.WriteLine($"FILE_SCHEMA(('{Escape(schema)}'));");
         w.WriteLine("ENDSEC;");
         w.WriteLine("DATA;");
