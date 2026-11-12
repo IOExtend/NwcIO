@@ -28,10 +28,13 @@ public sealed class NwcTransform
     /// </summary>
     public double[] ToMatrix4x4()
     {
-        double x = Rotation.X;
-        double y = Rotation.Y;
-        double z = Rotation.Z;
-        double w = Rotation.W;
+        // The formulas below assume a unit quaternion; a non-unit Rotation must not
+        // scale or shear the result, so normalize first (zero falls back to identity).
+        Quaterniond r = Rotation.Normalized();
+        double x = r.X;
+        double y = r.Y;
+        double z = r.Z;
+        double w = r.W;
 
         double xx = x * x;
         double yy = y * y;

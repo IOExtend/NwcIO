@@ -54,6 +54,9 @@ public sealed record NwcCamera
 
     private static Vector3d Rotate(Quaterniond q, Vector3d v)
     {
+        // The rotation formula is only exact for a unit quaternion; normalize so that
+        // Direction and Up keep their documented unit length for any Rotation scale.
+        q = q.Normalized();
         var qv = new Vector3d(q.X, q.Y, q.Z);
         var uv = Vector3d.Cross(qv, v);
         var uuv = Vector3d.Cross(qv, uv);

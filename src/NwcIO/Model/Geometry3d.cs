@@ -60,6 +60,36 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
     public bool IsNormalized(double epsilon = 1e-4) =>
         Math.Abs((X * X + Y * Y + Z * Z + W * W) - 1.0) < epsilon;
 
+    /// <summary>
+    /// Returns this quaternion scaled to unit length, or <see cref="Identity"/> when its
+    /// length is approximately zero or a component is not finite. Squaring is done after
+    /// dividing by the largest component, so large finite inputs cannot overflow the norm.
+    /// </summary>
+    public Quaterniond Normalized()
+    {
+        double max = Math.Max(Math.Max(Math.Abs(X), Math.Abs(Y)), Math.Max(Math.Abs(Z), Math.Abs(W)));
+        if (!double.IsFinite(max) || max <= 0)
+        {
+            return Identity;
+        }
+
+        double sx = X / max;
+        double sy = Y / max;
+        double sz = Z / max;
+        double sw = W / max;
+        double scaledNorm = Math.Sqrt(sx * sx + sy * sy + sz * sz + sw * sw); // in [1, 2]
+
+        // Keep the near-zero cut-off on the full norm (scaledNorm * max is the true
+        // norm, within rounding): a small-but-valid quaternion such as
+        // (7.5e-10, 0, 0, 7.5e-10) has norm > 1e-9 and must still normalize.
+        if (!(scaledNorm * max > 1e-9))
+        {
+            return Identity;
+        }
+
+        return new(sx / scaledNorm, sy / scaledNorm, sz / scaledNorm, sw / scaledNorm);
+    }
+
     public override string ToString() =>
         string.Create(CultureInfo.InvariantCulture, $"({X:F4}, {Y:F4}, {Z:F4}, {W:F4})");
 }
