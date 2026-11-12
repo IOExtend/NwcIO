@@ -89,7 +89,10 @@ public sealed class NwcAssembly
 
         var modelList = models.ToList();
         var allMeshes = new List<NwcMesh>();
-        var matMap = new Dictionary<string, NwcMaterial>(StringComparer.OrdinalIgnoreCase);
+        // Dedupe by reference, NOT by name: disciplines routinely define their own
+        // material with a shared name (Concrete, Steel) and different colours, and a
+        // by-name map would silently drop the later ones from AllMaterials.
+        var matSet = new HashSet<NwcMaterial>();
 
         var rootChildren = new List<NwcNode>();
         var totalBox = BoundingBox3d.Empty;
@@ -101,10 +104,7 @@ public sealed class NwcAssembly
 
             foreach (var mat in doc.Materials)
             {
-                if (!matMap.ContainsKey(mat.Name))
-                {
-                    matMap[mat.Name] = mat;
-                }
+                matSet.Add(mat);
             }
 
             foreach (var mesh in doc.Meshes)
@@ -150,7 +150,7 @@ public sealed class NwcAssembly
         };
         rootNode.Children.AddRange(rootChildren);
 
-        return new NwcAssembly(name, modelList, rootNode, allMeshes, matMap.Values.ToList(), totalBox, allViewpoints);
+        return new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints);
     }
 
     /// <summary>

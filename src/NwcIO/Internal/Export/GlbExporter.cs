@@ -56,11 +56,14 @@ public static class GlbExporter
         var accessors = new List<AccessorDef>();
         var gltfMeshes = new List<MeshDef>();
 
-        // Material indexing
+        // Material indexing. Meshes may reference materials the caller did not list
+        // (for example an assembly material table deduped by name), so the table is
+        // grown on demand instead of falling back to an arbitrary index 0.
+        var materialTable = new List<NwcMaterial>(materials);
         var matIndexMap = new Dictionary<NwcMaterial, int>();
-        for (int i = 0; i < materials.Count; i++)
+        for (int i = 0; i < materialTable.Count; i++)
         {
-            matIndexMap[materials[i]] = i;
+            matIndexMap[materialTable[i]] = i;
         }
 
         for (int m = 0; m < meshes.Count; m++)
@@ -188,13 +191,16 @@ public static class GlbExporter
 
             // Material assignment
             int? matIdx = null;
-            if (mesh.Material is not null && matIndexMap.TryGetValue(mesh.Material, out int foundIdx))
+            if (mesh.Material is not null)
             {
+                if (!matIndexMap.TryGetValue(mesh.Material, out int foundIdx))
+                {
+                    foundIdx = materialTable.Count;
+                    materialTable.Add(mesh.Material);
+                    matIndexMap[mesh.Material] = foundIdx;
+                }
+
                 matIdx = foundIdx;
-            }
-            else if (materials.Count > 0)
-            {
-                matIdx = 0;
             }
 
             gltfMeshes.Add(new MeshDef(
@@ -211,7 +217,7 @@ public static class GlbExporter
 
         // 2. Build JSON chunk
         byte[] jsonData = BuildJsonChunk(
-            materials,
+            materialTable,
             gltfMeshes,
             accessors,
             bufferViews,
@@ -251,7 +257,7 @@ public static class GlbExporter
     }
 
     private static byte[] BuildJsonChunk(
-        IReadOnlyList<NwcMaterial> materials,
+        List<NwcMaterial> materials,
         List<MeshDef> meshes,
         List<AccessorDef> accessors,
         List<BufferViewDef> bufferViews,

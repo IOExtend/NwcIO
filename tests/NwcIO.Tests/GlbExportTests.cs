@@ -86,4 +86,74 @@ public class GlbExportTests
         Assert.True(binChunkLength % 4 == 0, "BIN chunk must be 4-byte aligned");
         Assert.Equal((uint)(glb.Length - (binChunkOffset + 8)), binChunkLength);
     }
+
+    [Fact]
+    public void AssemblyGlb_SameNamedMaterialsInDifferentModels_KeepTheirOwnColors()
+    {
+        // Two models, each with its OWN material instance named "Concrete" but a
+        // different colour: grey in A, blue in B. The by-name assembly dedupe used to
+        // drop B's material, silently recolouring B's mesh with material index 0.
+        static NwcDocument DocWith(string source, string meshName, float r, float g, float b)
+        {
+            var material = new NwcMaterial { Id = 1, Name = "Concrete", Color = new RgbaColor(r, g, b) };
+            return new NwcDocumentBuilder().SetFileInfo(source)
+                .AddMaterial(material)
+                .AddMesh(new NwcMesh
+                {
+                    Id = 1,
+                    Name = meshName,
+                    Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                    Indices = [0, 1, 2],
+                    BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+                    Material = material,
+                })
+                .Build();
+        }
+
+        var assembly = NwcAssembly.Create("X", DocWith("A.rvt", "MeshA", 128, 128, 128), DocWith("B.rvt", "MeshB", 0, 0, 255));
+
+        // Both distinct material instances must survive the assembly material table.
+        Assert.Equal(2, assembly.AllMaterials.Count);
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write(assembly.AllMeshes, assembly.AllMaterials, ms, worldCoordinates: false);
+        byte[] glb = ms.ToArray();
+
+        uint jsonChunkLength = BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        string json = System.Text.Encoding.UTF8.GetString(glb.AsSpan(20, (int)jsonChunkLength).ToArray()).Trim();
+
+        using var jsonDoc = JsonDocument.Parse(json);
+        var root = jsonDoc.RootElement;
+
+        // Two materials exported: one grey, one blue.
+        var materials = root.GetProperty("materials");
+        Assert.Equal(2, materials.GetArrayLength());
+        int blueIndex = -1, greyIndex = -1;
+        for (int i = 0; i < 2; i++)
+        {
+            float r = materials[i].GetProperty("pbrMetallicRoughness").GetProperty("baseColorFactor")[0].GetSingle();
+            float b = materials[i].GetProperty("pbrMetallicRoughness").GetProperty("baseColorFactor")[2].GetSingle();
+            if (b > 0.9f && r < 0.1f) blueIndex = i;
+            if (r > 0.4f && b > 0.4f) greyIndex = i;
+        }
+        Assert.True(blueIndex >= 0, "blue Concrete missing from the materials array");
+        Assert.True(greyIndex >= 0, "grey Concrete missing from the materials array");
+
+        // Each mesh references its own material: MeshA grey, MeshB blue.
+        var meshes = root.GetProperty("meshes");
+        Assert.Equal(2, meshes.GetArrayLength());
+        foreach (var mesh in meshes.EnumerateArray())
+        {
+            int matIdx = mesh.GetProperty("primitives")[0].GetProperty("material").GetInt32();
+            string? meshName = mesh.GetProperty("name").GetString();
+            if (meshName == "MeshA")
+            {
+                Assert.Equal(greyIndex, matIdx);
+            }
+            else if (meshName == "MeshB")
+            {
+                Assert.Equal(blueIndex, matIdx);
+            }
+        }
+    }
 }
