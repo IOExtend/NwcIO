@@ -11,6 +11,37 @@ public sealed class ClashDetectiveTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void MeshClashDetectionPreservesSharedVertexForNearlyParallelTriangles(bool swapMeshes)
+    {
+        var v = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(0.01, 0, 0), new(0, 0.01, 0)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 0), new(0.01, 0.01, 0)),
+        };
+        var u = new NwcMesh
+        {
+            Id = 2,
+            Vertices = [new(0, 0, 0), new(1, 1, 0.00000018), new(1, 1.001, 0.00000018009)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1.001, 0.00000018009)),
+        };
+        var doc = new NwcDocumentBuilder()
+            .AddMesh(swapMeshes ? u : v)
+            .AddMesh(swapMeshes ? v : u)
+            .Build();
+        var test = new NwcClashTest("Nearly parallel shared vertex", NwcClashTestType.Hard);
+
+        NwcClashDetector.Run(doc, test);
+
+        var clash = Assert.Single(test.Results);
+        Assert.Equal(Vector3d.Zero, clash.ClashPoint);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void MeshClashDetectionPreservesIntersectionsWhenTriangleSizesDiffer(bool swapMeshes)
     {
         var large = new NwcMesh

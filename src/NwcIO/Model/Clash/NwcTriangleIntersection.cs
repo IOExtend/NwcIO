@@ -41,7 +41,7 @@ internal static class NwcTriangleIntersection
 
         // Unit normals make this parallelism test dimensionless.
         var d = Vector3d.Cross(n1, n2);
-        double maxD = Math.Max(Math.Abs(d.X), Math.Max(Math.Abs(d.Y), Math.Abs(d.Z)));
+        bool parallel = Vector3d.Dot(d, d) < Epsilon * Epsilon;
 
         // Distances of triangle U to plane 1
         var du0 = Vector3d.Dot(n1, u0 - v0);
@@ -49,7 +49,7 @@ internal static class NwcTriangleIntersection
         var du2 = Vector3d.Dot(n1, u2 - v0);
 
         // Preserve signed distances for non-parallel planes so their true intervals survive.
-        if (maxD < Epsilon)
+        if (parallel)
         {
             if (Math.Abs(du0) < distanceTolerance) du0 = 0.0;
             if (Math.Abs(du1) < distanceTolerance) du1 = 0.0;
@@ -66,7 +66,7 @@ internal static class NwcTriangleIntersection
         var dv1 = Vector3d.Dot(n2, v1 - u0);
         var dv2 = Vector3d.Dot(n2, v2 - u0);
 
-        if (maxD < Epsilon)
+        if (parallel)
         {
             if (Math.Abs(dv0) < distanceTolerance) dv0 = 0.0;
             if (Math.Abs(dv1) < distanceTolerance) dv1 = 0.0;
@@ -78,7 +78,7 @@ internal static class NwcTriangleIntersection
 
         if (dv0dv1 > 0.0 && dv0dv2 > 0.0) return false; // Same side of plane 2
 
-        if (maxD < Epsilon)
+        if (parallel)
         {
             if (du0 != 0.0 || du1 != 0.0 || du2 != 0.0 ||
                 dv0 != 0.0 || dv1 != 0.0 || dv2 != 0.0)
