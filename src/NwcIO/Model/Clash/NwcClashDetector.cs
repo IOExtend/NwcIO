@@ -12,7 +12,7 @@ public static class NwcClashDetector
     /// <summary>
     /// Executes clash detection across an individual Navisworks document according to the specified test configuration.
     /// </summary>
-    /// <exception cref="ArgumentException">A selection names a set that the document doesn't contain.</exception>
+    /// <exception cref="ArgumentException">An active set selection names a set that the document doesn't contain.</exception>
     public static NwcClashTest Run(NwcDocument document, NwcClashTest test)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -29,7 +29,7 @@ public static class NwcClashDetector
     /// <summary>
     /// Executes clash detection across all contributing models of a federated Navisworks assembly.
     /// </summary>
-    /// <exception cref="ArgumentException">A selection names a set that none of the models contains.</exception>
+    /// <exception cref="ArgumentException">An active set selection names a set that none of the models contains.</exception>
     public static NwcClashTest Run(NwcAssembly assembly, NwcClashTest test)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -369,6 +369,8 @@ public static class NwcClashDetector
     {
         foreach (var selection in new[] { test.SelectionA, test.SelectionB })
         {
+            if (selection.ExplicitNodeIds.Count > 0 || selection.FilterCondition is not null) continue;
+
             foreach (string name in selection.SetNames)
             {
                 if (!documents.Any(d => d.FindSet(name) is not null))
