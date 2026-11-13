@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using NwcIO.Model.Sets;
 
 namespace NwcIO.Model.Clash;
 
@@ -82,6 +83,7 @@ public static class NwcXmlClashSerializer
     {
         xml.WriteStartElement("classtest");
         xml.WriteAttributeString("name", test.Name);
+        xml.WriteAttributeString("guid", test.TestGuid.ToString("D"));
         xml.WriteAttributeString("testtype", test.TestType.ToString().ToLowerInvariant());
         xml.WriteAttributeString("status", test.Status);
         xml.WriteAttributeString("tolerance", test.Tolerance.ToString("0.######", CultureInfo.InvariantCulture));
@@ -89,6 +91,9 @@ public static class NwcXmlClashSerializer
         xml.WriteStartElement("linkage");
         xml.WriteAttributeString("mode", "none");
         xml.WriteEndElement();
+
+        WriteSelection(xml, "selectiona", test.SelectionA);
+        WriteSelection(xml, "selectionb", test.SelectionB);
 
         // Rules
         if (test.Rules.Count > 0)
@@ -99,6 +104,24 @@ public static class NwcXmlClashSerializer
                 xml.WriteStartElement("rule");
                 xml.WriteAttributeString("name", rule.Name);
                 xml.WriteAttributeString("enabled", rule.Enabled ? "1" : "0");
+                xml.WriteAttributeString("type", rule.RuleType.ToString());
+                xml.WriteAttributeString("threshold", rule.Threshold.ToString("R", CultureInfo.InvariantCulture));
+                if (rule.SetA is not null)
+                {
+                    xml.WriteAttributeString("seta", rule.SetA);
+                }
+                if (rule.SetB is not null)
+                {
+                    xml.WriteAttributeString("setb", rule.SetB);
+                }
+                if (rule.PropertyName is not null)
+                {
+                    xml.WriteAttributeString("propertyname", rule.PropertyName);
+                }
+                if (rule.PropertyValue is not null)
+                {
+                    xml.WriteAttributeString("propertyvalue", rule.PropertyValue);
+                }
                 xml.WriteEndElement();
             }
             xml.WriteEndElement(); // rules
@@ -133,6 +156,7 @@ public static class NwcXmlClashSerializer
     {
         xml.WriteStartElement("clashgroup");
         xml.WriteAttributeString("name", group.Name);
+        xml.WriteAttributeString("guid", group.GroupGuid.ToString("D"));
         xml.WriteAttributeString("status", group.Status.ToString().ToLowerInvariant());
         xml.WriteAttributeString("distance", group.Distance.ToString("0.######", CultureInfo.InvariantCulture));
 
@@ -140,6 +164,21 @@ public static class NwcXmlClashSerializer
         {
             xml.WriteElementString("description", group.Description);
         }
+
+        WriteDate(xml, "createddate", group.CreatedDate);
+        if (group.AssignedTo is not null)
+        {
+            xml.WriteElementString("assignedto", group.AssignedTo);
+        }
+        if (group.ApprovedBy is not null)
+        {
+            xml.WriteElementString("approvedby", group.ApprovedBy);
+        }
+        if (group.GridLocation is not null)
+        {
+            xml.WriteElementString("gridlocation", group.GridLocation);
+        }
+        WriteComments(xml, group.Comments);
 
         var pt = group.ClashPoint;
         xml.WriteStartElement("clashpoint");
@@ -164,6 +203,7 @@ public static class NwcXmlClashSerializer
     {
         xml.WriteStartElement("clashresult");
         xml.WriteAttributeString("name", result.Name);
+        xml.WriteAttributeString("guid", result.ResultGuid.ToString("D"));
         xml.WriteAttributeString("status", result.Status.ToString().ToLowerInvariant());
         xml.WriteAttributeString("distance", result.Distance.ToString("0.######", CultureInfo.InvariantCulture));
         xml.WriteAttributeString("resultstatus", result.Status.ToString().ToLowerInvariant());
@@ -189,17 +229,7 @@ public static class NwcXmlClashSerializer
             xml.WriteElementString("gridlocation", result.GridLocation);
         }
 
-        // Created Date
-        xml.WriteStartElement("createddate");
-        xml.WriteStartElement("date");
-        xml.WriteAttributeString("year", result.CreatedDate.Year.ToString(CultureInfo.InvariantCulture));
-        xml.WriteAttributeString("month", result.CreatedDate.Month.ToString(CultureInfo.InvariantCulture));
-        xml.WriteAttributeString("day", result.CreatedDate.Day.ToString(CultureInfo.InvariantCulture));
-        xml.WriteAttributeString("hour", result.CreatedDate.Hour.ToString(CultureInfo.InvariantCulture));
-        xml.WriteAttributeString("minute", result.CreatedDate.Minute.ToString(CultureInfo.InvariantCulture));
-        xml.WriteAttributeString("second", result.CreatedDate.Second.ToString(CultureInfo.InvariantCulture));
-        xml.WriteEndElement(); // date
-        xml.WriteEndElement(); // createddate
+        WriteDate(xml, "createddate", result.CreatedDate);
 
         if (!string.IsNullOrEmpty(result.AssignedTo))
         {
@@ -216,22 +246,163 @@ public static class NwcXmlClashSerializer
         WriteClashObject(xml, result.Item2);
         xml.WriteEndElement(); // clashobjects
 
-        // Comments
-        if (result.Comments.Count > 0)
-        {
-            xml.WriteStartElement("comments");
-            foreach (var comment in result.Comments)
-            {
-                xml.WriteStartElement("comment");
-                xml.WriteAttributeString("id", comment.Id.ToString(CultureInfo.InvariantCulture));
-                xml.WriteElementString("user", comment.Author);
-                xml.WriteElementString("body", comment.Body);
-                xml.WriteEndElement(); // comment
-            }
-            xml.WriteEndElement(); // comments
-        }
+        WriteComments(xml, result.Comments);
 
         xml.WriteEndElement(); // clashresult
+    }
+
+    private static XElement? Child(XElement element, string name) =>
+        element.Elements().FirstOrDefault(e => e.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    private static Guid ParseGuid(XElement element, Guid fallback) =>
+        Guid.TryParse((string?)element.Attribute("guid"), out var guid) ? guid : fallback;
+
+    private static void WriteDate(XmlWriter xml, string name, DateTimeOffset date)
+    {
+        if (name != "date")
+        {
+            xml.WriteStartElement(name);
+        }
+        xml.WriteStartElement("date");
+        // Keep legacy components, with an exact value for offsets and fractional seconds.
+        xml.WriteAttributeString("value", date.ToString("O", CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("year", date.Year.ToString(CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("month", date.Month.ToString(CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("day", date.Day.ToString(CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("hour", date.Hour.ToString(CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("minute", date.Minute.ToString(CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("second", date.Second.ToString(CultureInfo.InvariantCulture));
+        xml.WriteEndElement();
+        if (name != "date")
+        {
+            xml.WriteEndElement();
+        }
+    }
+
+    private static DateTimeOffset ParseDate(XElement? element, DateTimeOffset fallback)
+    {
+        var date = element is null ? null : Child(element, "date") ?? element;
+        if (date is null)
+        {
+            return fallback;
+        }
+        if (DateTimeOffset.TryParse((string?)date.Attribute("value"), CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
+        {
+            return value;
+        }
+        var parts = new int[6];
+        var names = new[] { "year", "month", "day", "hour", "minute", "second" };
+        for (var i = 0; i < names.Length; i++)
+        {
+            if (!int.TryParse((string?)date.Attribute(names[i]), NumberStyles.Integer, CultureInfo.InvariantCulture, out parts[i]))
+            {
+                return fallback;
+            }
+        }
+        try
+        {
+            return new DateTimeOffset(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], TimeSpan.Zero);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return fallback;
+        }
+    }
+
+    private static void WriteComments(XmlWriter xml, List<NwcClashComment> comments)
+    {
+        if (comments.Count == 0)
+        {
+            return;
+        }
+        xml.WriteStartElement("comments");
+        foreach (var comment in comments)
+        {
+            xml.WriteStartElement("comment");
+            xml.WriteAttributeString("id", comment.Id.ToString(CultureInfo.InvariantCulture));
+            xml.WriteAttributeString("status", comment.Status.ToString().ToLowerInvariant());
+            xml.WriteElementString("user", comment.Author);
+            xml.WriteElementString("body", comment.Body);
+            WriteDate(xml, "date", comment.Date);
+            xml.WriteEndElement();
+        }
+        xml.WriteEndElement();
+    }
+
+    private static IEnumerable<NwcClashComment> ParseComments(XElement element, NwcClashStatus fallbackStatus)
+    {
+        var comments = Child(element, "comments");
+        if (comments is null)
+        {
+            yield break;
+        }
+        foreach (var child in comments.Elements().Where(e => e.Name.LocalName.Equals("comment", StringComparison.OrdinalIgnoreCase)))
+        {
+            var comment = new NwcClashComment((string?)Child(child, "body") ?? string.Empty,
+                (string?)Child(child, "user") ?? "User", fallbackStatus);
+            if (int.TryParse((string?)child.Attribute("id"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            {
+                comment.Id = id;
+            }
+            if (Enum.TryParse<NwcClashStatus>((string?)child.Attribute("status"), true, out var status) && Enum.IsDefined(status))
+            {
+                comment.Status = status;
+            }
+            comment.Date = ParseDate(Child(child, "date"), comment.Date);
+            yield return comment;
+        }
+    }
+
+    private static void WriteSelection(XmlWriter xml, string name, NwcClashSelection selection)
+    {
+        xml.WriteStartElement(name);
+        xml.WriteAttributeString("name", selection.Name);
+        foreach (var set in selection.SetNames)
+        {
+            xml.WriteElementString("set", set);
+        }
+        foreach (var id in selection.ExplicitNodeIds)
+        {
+            xml.WriteElementString("nodeid", id.ToString(CultureInfo.InvariantCulture));
+        }
+        if (selection.FilterCondition is { } condition)
+        {
+            xml.WriteStartElement("condition");
+            xml.WriteAttributeString("category", condition.Category);
+            xml.WriteAttributeString("property", condition.Property);
+            xml.WriteAttributeString("operator", condition.Operator.ToString());
+            xml.WriteString(condition.Value);
+            xml.WriteEndElement();
+        }
+        xml.WriteEndElement();
+    }
+
+    private static NwcClashSelection ParseSelection(XElement? element)
+    {
+        if (element is null)
+        {
+            return NwcClashSelection.All();
+        }
+        var selection = new NwcClashSelection((string?)element.Attribute("name") ?? "All");
+        foreach (var child in element.Elements())
+        {
+            if (child.Name.LocalName.Equals("set", StringComparison.OrdinalIgnoreCase))
+            {
+                selection.SetNames.Add(child.Value);
+            }
+            else if (child.Name.LocalName.Equals("nodeid", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(child.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            {
+                selection.ExplicitNodeIds.Add(id);
+            }
+        }
+        if (Child(element, "condition") is { } condition)
+        {
+            _ = Enum.TryParse<NwcSearchOperator>((string?)condition.Attribute("operator"), true, out var op);
+            selection.FilterCondition = new NwcSearchCondition((string?)condition.Attribute("category") ?? "Item",
+                (string?)condition.Attribute("property") ?? "Name", op, condition.Value);
+        }
+        return selection;
     }
 
     private static void WriteClashObject(XmlWriter xml, NwcClashObject obj)
@@ -322,6 +493,10 @@ public static class NwcXmlClashSerializer
                 Status = (string?)testElem.Attribute("status") ?? "active",
             };
 
+            test.TestGuid = ParseGuid(testElem, test.TestGuid);
+            test.SelectionA = ParseSelection(Child(testElem, "selectiona"));
+            test.SelectionB = ParseSelection(Child(testElem, "selectionb"));
+
             // Rules
             var rulesElem = testElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("rules", StringComparison.OrdinalIgnoreCase));
             if (rulesElem is not null)
@@ -330,7 +505,20 @@ public static class NwcXmlClashSerializer
                 {
                     string rName = (string?)rElem.Attribute("name") ?? string.Empty;
                     bool enabled = ((string?)rElem.Attribute("enabled")) == "1";
-                    test.Rules.Add(new NwcClashRule(rName, NwcClashRuleType.Custom, enabled));
+                    var type = Enum.TryParse<NwcClashRuleType>((string?)rElem.Attribute("type"), true, out var parsedType) && Enum.IsDefined(parsedType)
+                        ? parsedType : NwcClashRuleType.Custom;
+                    var rule = new NwcClashRule(rName, type, enabled)
+                    {
+                        SetA = (string?)rElem.Attribute("seta"),
+                        SetB = (string?)rElem.Attribute("setb"),
+                        PropertyName = (string?)rElem.Attribute("propertyname"),
+                        PropertyValue = (string?)rElem.Attribute("propertyvalue"),
+                    };
+                    if (double.TryParse((string?)rElem.Attribute("threshold"), NumberStyles.Float, CultureInfo.InvariantCulture, out var threshold))
+                    {
+                        rule.Threshold = threshold;
+                    }
+                    test.Rules.Add(rule);
                 }
             }
 
@@ -377,6 +565,11 @@ public static class NwcXmlClashSerializer
             AssignedTo = (string?)grpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("assignedto", StringComparison.OrdinalIgnoreCase)),
             ApprovedBy = (string?)grpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("approvedby", StringComparison.OrdinalIgnoreCase)),
         };
+
+        group.GroupGuid = ParseGuid(grpElem, group.GroupGuid);
+        group.CreatedDate = ParseDate(Child(grpElem, "createddate"), group.CreatedDate);
+        group.GridLocation = (string?)Child(grpElem, "gridlocation");
+        group.Comments.AddRange(ParseComments(grpElem, status));
 
         var childResultsElem = grpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("clashresults", StringComparison.OrdinalIgnoreCase));
         var resultElems = childResultsElem is not null
@@ -438,17 +631,9 @@ public static class NwcXmlClashSerializer
             if (objList.Count > 1) result.Item2 = ParseClashObject(objList[1]);
         }
 
-        // Comments
-        var commentsElem = resElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("comments", StringComparison.OrdinalIgnoreCase));
-        if (commentsElem is not null)
-        {
-            foreach (var cElem in commentsElem.Elements().Where(e => e.Name.LocalName.Equals("comment", StringComparison.OrdinalIgnoreCase)))
-            {
-                string user = (string?)cElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("user", StringComparison.OrdinalIgnoreCase)) ?? "User";
-                string body = (string?)cElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("body", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
-                result.Comments.Add(new NwcClashComment(body, user, status));
-            }
-        }
+        result.ResultGuid = ParseGuid(resElem, result.ResultGuid);
+        result.CreatedDate = ParseDate(Child(resElem, "createddate"), result.CreatedDate);
+        result.Comments.AddRange(ParseComments(resElem, status));
 
         return result;
     }
