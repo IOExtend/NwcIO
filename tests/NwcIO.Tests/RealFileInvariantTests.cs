@@ -34,7 +34,7 @@ public class RealFileInvariantTests
         public long Mirrored;
         public long LeavesWithoutMesh;
         public int MaxDepth;
-        public readonly HashSet<object> Records = new(ReferenceEqualityComparer.Instance);
+        public long DistinctRecords;
     }
 
     [RealFixtureFact]
@@ -67,7 +67,7 @@ public class RealFileInvariantTests
             _output.WriteLine($"#{i} ok");
         }
 
-        _output.WriteLine($"files {files.Count}, fragments {totals.Fragments}, distinct records {totals.Records.Count}");
+        _output.WriteLine($"files {files.Count}, fragments {totals.Fragments}, distinct records {totals.DistinctRecords}");
         _output.WriteLine($"triangles {totals.Triangles}, segments {totals.Segments}, mirrored poses {totals.Mirrored}");
         _output.WriteLine($"leaves without mesh {totals.LeavesWithoutMesh}, max tree depth {totals.MaxDepth}");
     }
@@ -139,6 +139,8 @@ public class RealFileInvariantTests
     {
         Check(doc.Meshes.Count == doc.Transforms.Count, i, "mesh-transform-count");
         var lastNodeId = int.MinValue;
+        // Arrays are shared only within one file; a per-file set keeps nothing alive across files.
+        var records = new HashSet<object>(ReferenceEqualityComparer.Instance);
 
         for (var k = 0; k < doc.Meshes.Count; k++)
         {
@@ -203,11 +205,12 @@ public class RealFileInvariantTests
 
             totals.Fragments++;
             if (transform.Scale < 0) totals.Mirrored++;
-            if (totals.Records.Add(mesh.Vertices))
+            if (records.Add(mesh.Vertices))
             {
                 totals.Triangles += triangleIndices / 3;
                 totals.Segments += lineIndices / 2;
             }
         }
+        totals.DistinctRecords += records.Count;
     }
 }
