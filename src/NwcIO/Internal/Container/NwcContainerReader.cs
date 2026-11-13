@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
 
 namespace NwcIO.Internal.Container;
@@ -145,16 +146,33 @@ public static class NwcContainerReader
                 output.Write(buffer, 0, n);
             }
 
+            var compressedLength = (int)feed.BytesServed;
+            var payload = output.ToArray();
+            var a = 1u;
+            var b = 0u;
+            foreach (var value in payload)
+            {
+                a = (a + value) % 65521;
+                b = (b + a) % 65521;
+            }
+
+            // EOF can end inflation without ZLibStream validating a missing trailer.
+            if (compressedLength <= 4 ||
+                BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(offset + compressedLength - 4, 4)) != ((b << 16) | a))
+            {
+                throw new InvalidDataException($"Invalid or truncated zlib stream at offset {offset}.");
+            }
+
             stream = new LcRawStream
             {
                 Index = -1,
                 FileOffset = offset,
-                CompressedLength = (int)feed.BytesServed,
+                CompressedLength = compressedLength,
                 GapBefore = 0,
-                Data = output.ToArray(),
+                Data = payload,
                 SectionIndex = -1,
             };
-            return stream.CompressedLength > 4;
+            return true;
         }
         catch (InvalidDataException)
         {
