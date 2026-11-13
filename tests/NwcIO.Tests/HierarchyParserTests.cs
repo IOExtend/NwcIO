@@ -207,6 +207,70 @@ public class HierarchyParserTests
         Assert.Contains("8388608", Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(bytes, "Model")).Message);
     }
 
+    [Fact]
+    public void Read_DoublingDagOverPropertyLeaf_ThrowsBeforeExpanding()
+    {
+        // G0 is a leaf with 129 properties; G1..G20 double it, so G20 holds 2^21 - 1 nodes (under the node cap) but 129 * 2^20 property copies
+        var w = Begin();
+        var ids = new int[21];
+        for (int i = 20; i >= 1; i--)
+        {
+            ids[i] = w.Next;
+            Group(w, 2);
+        }
+
+        ids[0] = w.Next;
+        Leaf(w, 1, l => PropertyTab(l, 129));
+        for (int i = 1; i <= 20; i++)
+        {
+            w.Ref(ids[i - 1]);
+        }
+
+        var (message, allocated) = ReadFailing(End(w));
+
+        Assert.Contains("134217728 property references", message);
+        Assert.InRange(allocated, 0, 16 << 20);
+    }
+
+    [Fact]
+    public void Read_RepeatedPropertyTab_ThrowsBeforeCopying()
+    {
+        // one leaf references the same 12,000-item tab 11,200 times: 134,400,000 property references from about 235 KB
+        var w = Begin();
+        Group(w, 1);
+        Leaf(w, 11_200, l =>
+        {
+            int tab = l.Next;
+            PropertyTab(l, 12_000);
+            for (int i = 1; i < 11_200; i++)
+            {
+                l.Ref(tab);
+            }
+        });
+
+        var (message, allocated) = ReadFailing(End(w));
+
+        Assert.Contains("134217728 property references", message);
+        Assert.InRange(allocated, 0, 16 << 20);
+    }
+
+    [Fact]
+    public void Read_NestedChildCountsNearTheRemainingBytes_AllocatesOnlyWhatIsRead()
+    {
+        // 300 nested groups each declare 131,072 children, which 1 MiB of trailing bytes makes plausible; presized arrays would take 1 MiB per level
+        const int declared = 131_072;
+        var w = Begin();
+        for (int i = 0; i < 300; i++)
+        {
+            Group(w, declared);
+        }
+
+        var (message, allocated) = ReadFailing([.. w.ToArray(), .. new byte[declared * 8]]);
+
+        Assert.Contains("nesting deeper than 256", message);
+        Assert.InRange(allocated, 0, 16 << 20);
+    }
+
     // [k = 1][0][root 100][n = 1], then the top-level partition node: [i32 0] + a class-53 body + 16 zero bytes for its trailer.
     internal static byte[] PartitionHierarchy()
     {
@@ -237,6 +301,27 @@ public class HierarchyParserTests
 
     // The tail [1] and the zero pad to a multiple of 8.
     private static byte[] End(LcGraphWriter w) => w.Int(1).ToArray();
+
+    // The read's error message and the bytes it allocated on this thread.
+    private static (string Message, long Allocated) ReadFailing(byte[] bytes)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(bytes, "Model"));
+        return (ex.Message, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    // New class-86 tab "T" whose count items each back-reference its username as the key and carry no value: 12 bytes per item.
+    private static void PropertyTab(LcGraphWriter w, int count)
+    {
+        w.New(86);
+        w.Str("T");
+        int key = Username(w, "K", "lcK");
+        w.Int(0).Int(count);
+        for (int i = 0; i < count; i++)
+        {
+            w.Ref(key).Int(0);
+        }
+    }
 
     private static int Username(LcGraphWriter w, string? name, string? internalName)
     {

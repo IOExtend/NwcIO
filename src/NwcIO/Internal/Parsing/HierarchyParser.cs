@@ -12,6 +12,9 @@ internal static class HierarchyParser
     // shortcut: fixed cap on expanded node occurrences against crafted DAGs (real files stay near 1M); raise it if a real model needs more
     public const int MaxExpandedNodes = 1 << 23;
 
+    // shortcut: fixed cap on property references copied into expanded nodes (every occurrence copies its node's list, about 1 GiB at the cap), against crafted DAGs; raise it if a real model needs more
+    public const int MaxExpandedProperties = 1 << 27;
+
     private const string Segment = "LcOpNwdLogicalHierarchy";
 
     // Attribute bodies other than class 86 are parsed and dropped.
@@ -78,7 +81,12 @@ internal static class HierarchyParser
         {
             var (node, parent) = item;
             var occurrence = new NwcNode { Id = nodes.Count, Name = node.Name, Class = node.Class, Tag = node.Tag, Parent = parent };
-            occurrence.Properties.AddRange(node.Properties);
+            occurrence.Properties.EnsureCapacity((int)node.OwnProperties);
+            foreach (var tab in node.Tabs)
+            {
+                occurrence.Properties.AddRange(tab);
+            }
+
             parent.Children.Add(occurrence);
             nodes.Add(occurrence);
             for (int i = node.Children.Length - 1; i >= 0; i--)
@@ -90,8 +98,18 @@ internal static class HierarchyParser
         return nodes;
     }
 
-    // A stored node object; a back-referenced one is shared, so it can expand to several NwcNodes.
-    private sealed record Node(int Tag, string Name, string Class, List<NwcPropertyRecord> Properties, Node[] Children, long Size, int Height);
+    // A stored node object; a back-referenced one is shared, so it can expand to several NwcNodes. Tabs holds one reference per
+    // property tab, a back-referenced tab being the same list, so records are copied only by Expand, after the caps passed.
+    private sealed record Node(
+        int Tag,
+        string Name,
+        string Class,
+        List<List<NwcPropertyRecord>> Tabs,
+        long OwnProperties,
+        Node[] Children,
+        long Size,
+        long PropertyReferences,
+        int Height);
 
     // A class-52 object: display name and internal name.
     private sealed record Username(int Id, string? Display, string? Internal);
@@ -123,7 +141,7 @@ internal static class HierarchyParser
 
             _reader.ReadImplicitRoot();
             var top = ReadNodes(TopLevelClasses);
-            var (total, _) = Measure(top);
+            var (total, _, _) = Measure(top, 0);
             if (_reader.ReadInt32() != 1)
             {
                 throw _reader.Fail("hierarchy tail is not 1");
@@ -152,13 +170,16 @@ internal static class HierarchyParser
         private Node[] ReadNodes(ReadOnlySpan<int> allowedClasses)
         {
             // A node pointer is never null, so it takes at least [1][id].
-            var nodes = new Node[_reader.ReadCount(8)];
-            for (int i = 0; i < nodes.Length; i++)
+            int count = _reader.ReadCount(8);
+
+            // Grown as items are read: an array sized from the count could take the rest of the stream at every nesting level.
+            var nodes = new List<Node>();
+            for (int i = 0; i < count; i++)
             {
-                nodes[i] = (Node)_reader.ReadPointer(allowedClasses, _readBody, allowNull: false)!;
+                nodes.Add((Node)_reader.ReadPointer(allowedClasses, _readBody, allowNull: false)!);
             }
 
-            return nodes;
+            return [.. nodes];
         }
 
         // NODE53 / NODE22 (RS §3.1): name, username, flags, X, Y attributes, and for 53 the children.
@@ -169,28 +190,32 @@ internal static class HierarchyParser
             _reader.ReadInt32();
             _reader.ReadInt32();
             int attributeCount = _reader.ReadCount(4);
-            var properties = new List<NwcPropertyRecord>();
+            var tabs = new List<List<NwcPropertyRecord>>();
+            long ownProperties = 0;
             for (int i = 0; i < attributeCount; i++)
             {
-                if (_reader.ReadPointer(AttributeClasses, _readBody) is NwcPropertyRecord[] tab)
+                if (_reader.ReadPointer(AttributeClasses, _readBody) is List<NwcPropertyRecord> tab)
                 {
-                    properties.AddRange(tab);
+                    tabs.Add(tab);
+                    ownProperties = checked(ownProperties + tab.Count);
                 }
             }
 
             Node[] children = classId == 53 ? ReadNodes(ChildClasses) : [];
-            var (size, height) = Measure(children);
-            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", properties, children, size, height);
+            var (size, propertyReferences, height) = Measure(children, ownProperties);
+            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", tabs, ownProperties, children, size, propertyReferences, height);
         }
 
-        // Expanded size and height of a node with these children; children finish before their parent, so theirs are known.
-        private (long Size, int Height) Measure(Node[] children)
+        // Expanded size, property references and height of a node with these children; children finish before their parent, so theirs are known.
+        private (long Size, long PropertyReferences, int Height) Measure(Node[] children, long ownProperties)
         {
             long size = 1;
+            long propertyReferences = ownProperties;
             int height = 0;
             foreach (var child in children)
             {
                 size = checked(size + child.Size);
+                propertyReferences = checked(propertyReferences + child.PropertyReferences);
                 height = Math.Max(height, child.Height);
             }
 
@@ -200,12 +225,18 @@ internal static class HierarchyParser
                 throw _reader.Fail($"expanded tree exceeds {MaxExpandedNodes} nodes");
             }
 
+            // Each occurrence copies its node's records, so a small DAG over a property-heavy leaf multiplies them.
+            if (propertyReferences > MaxExpandedProperties)
+            {
+                throw _reader.Fail($"expanded tree exceeds {MaxExpandedProperties} property references");
+            }
+
             if (height > LcObjectReader.MaxNestingDepth)
             {
                 throw _reader.Fail($"expanded tree exceeds {LcObjectReader.MaxNestingDepth} levels");
             }
 
-            return (size, height);
+            return (size, propertyReferences, height);
         }
 
         private Username ReadUsername() => (Username)_reader.ReadPointer(UsernameClasses, _readBody, allowNull: false)!;
@@ -218,16 +249,17 @@ internal static class HierarchyParser
         }
 
         // Class 86 (RS §3.4): [str name][ptr username][i32 flags][i32 n] n x ([ptr key][i32 type][value]); one record per item.
-        private NwcPropertyRecord[] ReadPropertyTab()
+        private List<NwcPropertyRecord> ReadPropertyTab()
         {
             string? name = _reader.ReadString();
             var username = ReadUsername();
             _reader.ReadInt32();
             string tab = name ?? username.Display ?? "";
 
-            // An item is at least a back-referenced key and the type.
-            var records = new NwcPropertyRecord[_reader.ReadCount(12)];
-            for (int i = 0; i < records.Length; i++)
+            // An item is at least a back-referenced key and the type; the list grows as items are read, not from the count.
+            int count = _reader.ReadCount(12);
+            var records = new List<NwcPropertyRecord>();
+            for (int i = 0; i < count; i++)
             {
                 var key = ReadUsername();
                 int type = _reader.ReadInt32();
@@ -242,7 +274,7 @@ internal static class HierarchyParser
                     8 => ReadUsername().Display,
                     _ => throw _reader.Fail($"property value type {type} is unknown"),
                 };
-                records[i] = new NwcPropertyRecord
+                records.Add(new NwcPropertyRecord
                 {
                     FirstInt = key.Id,
                     Tag = 52,
@@ -250,7 +282,7 @@ internal static class HierarchyParser
                     Class = tab,
                     ValueType = type,
                     Value = value,
-                };
+                });
             }
 
             return records;
