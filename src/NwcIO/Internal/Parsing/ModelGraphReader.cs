@@ -98,7 +98,7 @@ internal static class ModelGraphReader
         {
             preorder = segments.Hierarchy is null
                 ? [new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 }]
-                : HierarchyParser.Read(segments.Hierarchy.Data, rootName);
+                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords);
         }
 
         var meshes = new List<NwcMesh>();

@@ -284,6 +284,9 @@ public class HierarchyParserTests
         return End(w);
     }
 
+    // A group whose one leaf holds a three-item class-86 tab.
+    internal static byte[] PropertyLeafHierarchy() => GroupWithLeaf(1, w => PropertyTab(w, 3));
+
     // [k][k zero ints][root 100][n]; the n top-level objects follow.
     private static LcGraphWriter Begin(int k = 1, int n = 1)
     {

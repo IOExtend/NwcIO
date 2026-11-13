@@ -145,6 +145,17 @@ public class ModelGraphReaderTests
         Assert.All(doc.Meshes, m => Assert.Null(m.Node));
     }
 
+    [Theory]
+    [InlineData(true, 3)]
+    [InlineData(false, 0)]
+    public void Open_ReadPropertyRecords_ControlsLeafProperties(bool readProperties, int expected)
+    {
+        var file = SyntheticNwcFile.Build(HierarchyParserTests.PropertyLeafHierarchy(), null, [], []);
+        var doc = NwcDocument.Open(new MemoryStream(file), new NwcReaderOptions { ReadPropertyRecords = readProperties });
+        var leaf = doc.RootNode!.Children[0].Children[0];
+        Assert.Equal(expected, leaf.Properties.Count);
+    }
+
     [Fact]   // Review Focus 4
     public void Save_StrictlyReadMeshesAndTransforms_ReopenWithSamePlacement()
     {

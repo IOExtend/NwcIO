@@ -33,11 +33,12 @@ internal static class HierarchyParser
 
     private static ReadOnlySpan<int> KnownClasses => [53, 22, 32, 52, 86, 31, 40, 41, 39, 79, 200, 185];
 
+    /// <param name="includeProperties">False leaves every node's properties empty; the class-86 bodies are still read and checked.</param>
     /// <returns>The nodes in preorder; [0] is the synthetic root (Id 0, Name <paramref name="rootName"/>, Class "Model", Tag 0).</returns>
-    public static IReadOnlyList<NwcNode> Read(byte[] data, string rootName)
+    public static IReadOnlyList<NwcNode> Read(byte[] data, string rootName, bool includeProperties = true)
     {
         var (top, total) = new Parser(new LcObjectReader(data, Segment)).ReadStream();
-        return Expand(top, rootName, total);
+        return Expand(top, rootName, total, includeProperties);
     }
 
     /// <summary>Reads a class-185 body (material JSON with embedded files, RS §3.4), which the fragments stream holds too.</summary>
@@ -67,7 +68,7 @@ internal static class HierarchyParser
     }
 
     // Preorder with an explicit stack: children in stored order, a back-referenced subtree walked again in full.
-    private static List<NwcNode> Expand(Node[] top, string rootName, long total)
+    private static List<NwcNode> Expand(Node[] top, string rootName, long total, bool includeProperties)
     {
         var root = new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 };
         var nodes = new List<NwcNode>((int)total) { root };
@@ -81,10 +82,13 @@ internal static class HierarchyParser
         {
             var (node, parent) = item;
             var occurrence = new NwcNode { Id = nodes.Count, Name = node.Name, Class = node.Class, Tag = node.Tag, Parent = parent };
-            occurrence.Properties.EnsureCapacity((int)node.OwnProperties);
-            foreach (var tab in node.Tabs)
+            if (includeProperties)
             {
-                occurrence.Properties.AddRange(tab);
+                occurrence.Properties.EnsureCapacity((int)node.OwnProperties);
+                foreach (var tab in node.Tabs)
+                {
+                    occurrence.Properties.AddRange(tab);
+                }
             }
 
             parent.Children.Add(occurrence);
