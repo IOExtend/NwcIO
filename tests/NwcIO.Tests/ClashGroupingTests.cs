@@ -3,12 +3,182 @@ using System.Text;
 using System.Xml.Linq;
 using NwcIO.Model;
 using NwcIO.Model.Clash;
+using NwcIO.Model.Sets;
 using Xunit;
 
 namespace NwcIO.Tests;
 
 public sealed class ClashGroupingTests
 {
+    [Fact]
+    public void NwcXmlClashSerializer_PreservesIdentitiesRulesDatesAndSelections()
+    {
+        var date = new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.FromHours(3)).AddTicks(1234567);
+        var test = new NwcClashTest("Roundtrip", NwcClashTestType.Clearance, 0.125)
+        {
+            SelectionA = NwcClashSelection.FromSet("Set A"),
+            SelectionB = NwcClashSelection.FromCondition("Filtered",
+                new NwcSearchCondition("Item", "Name", NwcSearchOperator.Contains, "Pipe")),
+        };
+        test.SelectionA.SetNames.Add("Set B");
+        test.SelectionA.ExplicitNodeIds.AddRange([17, 42]);
+        test.SelectionB.ExplicitNodeIds.Add(99);
+        foreach (var type in Enum.GetValues<NwcClashRuleType>())
+        {
+            test.Rules.Add(new NwcClashRule(type.ToString(), type, type != NwcClashRuleType.Custom)
+            {
+                Threshold = 0.123456789123,
+                SetA = "Set A",
+                SetB = "Set B",
+                PropertyName = "Material",
+                PropertyValue = "Steel",
+            });
+        }
+        var group = new NwcClashGroup("Group", NwcClashStatus.Reviewed)
+        {
+            Description = "Grouped clashes",
+            AssignedTo = "alice",
+            ApprovedBy = "carol",
+            GridLocation = "B-2",
+            CreatedDate = date,
+        };
+        var grouped = CreateClash("Grouped", new Vector3d(1, 2, 3), -0.02);
+        var standalone = CreateClash("Standalone", new Vector3d(4, 5, 6), -0.03);
+        foreach (var result in new[] { grouped, standalone })
+        {
+            result.CreatedDate = date.AddDays(1);
+            result.AssignedTo = "bob";
+            result.ApprovedBy = "dave";
+            result.GridLocation = "A-1";
+            result.Description = "Result description";
+            result.Comments.Add(new NwcClashComment("Resolved independently", "erin", NwcClashStatus.Resolved)
+            {
+                Id = 37,
+                Date = date.AddHours(2),
+            });
+        }
+        group.Comments.Add(new NwcClashComment("Group comment", "frank", NwcClashStatus.Approved)
+        {
+            Id = 81,
+            Date = date.AddHours(4),
+        });
+        group.AddClash(grouped);
+        test.Groups.Add(group);
+        test.AddResult(standalone);
+
+        using var stream = new MemoryStream();
+        NwcXmlClashSerializer.Write(stream, [test]);
+        stream.Position = 0;
+        var loaded = Assert.Single(NwcXmlClashSerializer.Read(stream));
+
+        Assert.Equal(test.TestGuid, loaded.TestGuid);
+        Assert.Equal(test.Name, loaded.Name);
+        Assert.Equal(test.TestType, loaded.TestType);
+        Assert.Equal(test.Tolerance, loaded.Tolerance);
+        Assert.Equal(test.Status, loaded.Status);
+        foreach (var pair in new[] { (test.SelectionA, loaded.SelectionA), (test.SelectionB, loaded.SelectionB) })
+        {
+            Assert.Equal(pair.Item1.Name, pair.Item2.Name);
+            Assert.Equal(pair.Item1.SetNames, pair.Item2.SetNames);
+            Assert.Equal(pair.Item1.ExplicitNodeIds, pair.Item2.ExplicitNodeIds);
+        }
+        var condition = Assert.IsType<NwcSearchCondition>(loaded.SelectionB.FilterCondition);
+        Assert.Equal("Item", condition.Category);
+        Assert.Equal("Name", condition.Property);
+        Assert.Equal(NwcSearchOperator.Contains, condition.Operator);
+        Assert.Equal("Pipe", condition.Value);
+        Assert.Equal(test.Rules.Count, loaded.Rules.Count);
+        for (var i = 0; i < test.Rules.Count; i++)
+        {
+            var expected = test.Rules[i];
+            var actual = loaded.Rules[i];
+            Assert.Equal(expected.Name, actual.Name);
+            Assert.Equal(expected.RuleType, actual.RuleType);
+            Assert.Equal(expected.Enabled, actual.Enabled);
+            Assert.Equal(expected.Threshold, actual.Threshold);
+            Assert.Equal(expected.SetA, actual.SetA);
+            Assert.Equal(expected.SetB, actual.SetB);
+            Assert.Equal(expected.PropertyName, actual.PropertyName);
+            Assert.Equal(expected.PropertyValue, actual.PropertyValue);
+        }
+        Assert.True(loaded.Rules.Single(r => r.RuleType == NwcClashRuleType.IgnoreMinPenetration).ShouldIgnore(standalone));
+        var loadedGroup = Assert.Single(loaded.Groups);
+        Assert.Equal(group.GroupGuid, loadedGroup.GroupGuid);
+        Assert.Equal(group.Name, loadedGroup.Name);
+        Assert.Equal(group.Status, loadedGroup.Status);
+        Assert.Equal(group.Description, loadedGroup.Description);
+        Assert.Equal(group.AssignedTo, loadedGroup.AssignedTo);
+        Assert.Equal(group.ApprovedBy, loadedGroup.ApprovedBy);
+        Assert.Equal(group.GridLocation, loadedGroup.GridLocation);
+        Assert.True(group.CreatedDate.EqualsExact(loadedGroup.CreatedDate));
+        AssertComment(Assert.Single(group.Comments), Assert.Single(loadedGroup.Comments));
+        foreach (var pair in new[] { (grouped, Assert.Single(loadedGroup.Clashes)), (standalone, Assert.Single(loaded.Results)) })
+        {
+            Assert.Equal(pair.Item1.ResultGuid, pair.Item2.ResultGuid);
+            Assert.Equal(pair.Item1.Name, pair.Item2.Name);
+            Assert.Equal(pair.Item1.Status, pair.Item2.Status);
+            Assert.Equal(pair.Item1.Description, pair.Item2.Description);
+            Assert.Equal(pair.Item1.AssignedTo, pair.Item2.AssignedTo);
+            Assert.Equal(pair.Item1.ApprovedBy, pair.Item2.ApprovedBy);
+            Assert.Equal(pair.Item1.GridLocation, pair.Item2.GridLocation);
+            Assert.Equal(pair.Item1.ClashPoint, pair.Item2.ClashPoint);
+            Assert.Equal(pair.Item1.Distance, pair.Item2.Distance);
+            Assert.True(pair.Item1.CreatedDate.EqualsExact(pair.Item2.CreatedDate));
+            AssertComment(Assert.Single(pair.Item1.Comments), Assert.Single(pair.Item2.Comments));
+        }
+        using var bcf = new MemoryStream();
+        NwcClashBcfExporter.Write(bcf, loaded);
+        bcf.Position = 0;
+        using var zip = new ZipArchive(bcf, ZipArchiveMode.Read);
+        Assert.NotNull(zip.GetEntry($"{group.GroupGuid:D}/markup.bcf"));
+        Assert.NotNull(zip.GetEntry($"{standalone.ResultGuid:D}/markup.bcf"));
+    }
+
+    private static void AssertComment(NwcClashComment expected, NwcClashComment actual)
+    {
+        Assert.Equal(expected.Id, actual.Id);
+        Assert.Equal(expected.Author, actual.Author);
+        Assert.Equal(expected.Body, actual.Body);
+        Assert.Equal(expected.Status, actual.Status);
+        Assert.True(expected.Date.EqualsExact(actual.Date));
+    }
+
+    [Fact]
+    public void NwcXmlClashSerializer_ReadsLegacyDefaultsAndComponentDates()
+    {
+        var before = DateTimeOffset.UtcNow;
+        var loaded = Assert.Single(NwcXmlClashSerializer.ParseDocument(XDocument.Parse("""
+            <exchange><batchtest><classtests><classtest name="Legacy">
+              <rules><rule name="Old" enabled="1"/><rule name="Unknown" type="999" enabled="0"/></rules>
+              <clashresults>
+                <clashgroup name="Old group"><clashresults/></clashgroup>
+                <clashresult status="reviewed" guid="invalid">
+                  <createddate><date year="2020" month="1" day="2" hour="3" minute="4" second="5"/></createddate>
+                  <comments><comment><body>Old comment</body></comment></comments>
+                </clashresult>
+              </clashresults>
+            </classtest></classtests></batchtest></exchange>
+            """)));
+        Assert.NotEqual(Guid.Empty, loaded.TestGuid);
+        Assert.Equal("All", loaded.SelectionA.Name);
+        Assert.Equal("All", loaded.SelectionB.Name);
+        Assert.All(loaded.Rules, r =>
+        {
+            Assert.Equal(NwcClashRuleType.Custom, r.RuleType);
+            Assert.Equal(0.001, r.Threshold);
+        });
+        var group = Assert.Single(loaded.Groups);
+        Assert.InRange(group.CreatedDate, before, DateTimeOffset.UtcNow);
+        Assert.NotEqual(Guid.Empty, group.GroupGuid);
+        var result = Assert.Single(loaded.Results);
+        Assert.NotEqual(Guid.Empty, result.ResultGuid);
+        Assert.Equal(new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.Zero), result.CreatedDate);
+        var comment = Assert.Single(result.Comments);
+        Assert.Equal(1, comment.Id);
+        Assert.Equal(NwcClashStatus.Reviewed, comment.Status);
+        Assert.InRange(comment.Date, before, DateTimeOffset.UtcNow);
+    }
+
     [Fact]
     public void GroupByProximity_ClustersNearbyClashesIntoGroups()
     {
