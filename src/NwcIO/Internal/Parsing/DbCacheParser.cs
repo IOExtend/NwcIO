@@ -53,7 +53,7 @@ public static class DbCacheParser
 
         int nameLen = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos));
         pos += 4;
-        if (nameLen <= 0 || pos + nameLen > data.Length)
+        if (nameLen <= 0 || nameLen > data.Length - pos)
         {
             return null;
         }
@@ -69,7 +69,7 @@ public static class DbCacheParser
         {
             int entryNameLen = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos));
             pos += 4;
-            if (entryNameLen <= 0 || entryNameLen > 1024 || pos + entryNameLen > data.Length)
+            if (entryNameLen <= 0 || entryNameLen > 1024 || entryNameLen > data.Length - pos)
             {
                 break;
             }

@@ -8,6 +8,33 @@ namespace NwcIO.Tests;
 
 public class SelectionSetTests
 {
+    [Theory]
+    [InlineData(5)]
+    [InlineData(int.MaxValue)]
+    [InlineData(-1)]
+    [InlineData(0)]
+    public void Open_MalformedBinarySelectionXml_SkipsSets(int xmlLength)
+    {
+        using var payload = new MemoryStream();
+        using var writer = new BinaryWriter(payload);
+        writer.Write(100);
+        writer.Write(105);
+        writer.Write(1);
+        writer.Write(xmlLength);
+        writer.Write(Encoding.UTF8.GetBytes("<abc "));
+        using var file = new MemoryStream(NwcContainerWriter.Write([payload.ToArray()]));
+
+        Assert.Empty(NwcDocument.Open(file).SelectionSets);
+    }
+
+    [Fact]
+    public void Open_MalformedDirectSelectionXml_SkipsSets()
+    {
+        using var file = new MemoryStream(NwcContainerWriter.Write([Encoding.UTF8.GetBytes("<selectionsets><x")]));
+
+        Assert.Empty(NwcDocument.Open(file).SelectionSets);
+    }
+
     private static NwcDocument CreateSampleDocumentWithTree()
     {
         var root = new NwcNode { Id = 1, Name = "RootModel", Class = "LcOaModel" };

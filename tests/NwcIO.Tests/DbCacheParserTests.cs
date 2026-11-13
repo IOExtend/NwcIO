@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using NwcIO.Internal.Parsing;
+using NwcIO.Internal.Container;
 using NwcIO.Model;
 using Xunit;
 
@@ -8,6 +9,20 @@ namespace NwcIO.Tests;
 
 public class DbCacheParserTests
 {
+    [Fact]
+    public void Open_OverflowingDbCacheNameLength_SkipsDirectory()
+    {
+        var data = new byte[32];
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), int.MaxValue);
+        Encoding.ASCII.GetBytes("LcOpDBCache").CopyTo(data, 12);
+        using var file = new MemoryStream(NwcContainerWriter.Write([data]));
+
+        var doc = NwcDocument.Open(file);
+
+        Assert.Null(doc.DbCache);
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]

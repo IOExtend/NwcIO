@@ -59,7 +59,7 @@ public static class MeshParser
         }
 
         int tocOffset = 8 + 4 * chunkCount;
-        if (tocOffset + 4 * recordCount > tocData.Length)
+        if (tocOffset > tocData.Length || recordCount > (tocData.Length - tocOffset) / 4)
         {
             return;
         }
@@ -82,7 +82,13 @@ public static class MeshParser
         int totalBytes = 0;
         for (int i = startChunkIdx; i < endChunkIdx; i++)
         {
-            totalBytes += container.Streams[i].Data.Length;
+            var chunkLength = container.Streams[i].Data.Length;
+            if (chunkLength > int.MaxValue - totalBytes)
+            {
+                return;
+            }
+
+            totalBytes += chunkLength;
         }
 
         if (totalBytes == 0)
@@ -103,7 +109,16 @@ public static class MeshParser
         for (int r = 0; r < recordCount; r++)
         {
             int rLen = recordLengths[r];
-            if (rLen >= 24 && curPos + 24 <= combined.Length)
+            if (rLen < 0)
+            {
+                break;
+            }
+
+            // A final record may declare trailing bytes absent from the geometry chunks.
+            // Bound both header and vertex reads by the bytes actually available.
+            rLen = Math.Min(rLen, combined.Length - curPos);
+
+            if (rLen >= 24)
             {
                 int recTag = BinaryPrimitives.ReadInt32LittleEndian(combined.AsSpan(curPos + 4));
                 int subTag = BinaryPrimitives.ReadInt32LittleEndian(combined.AsSpan(curPos + 12));
@@ -114,11 +129,11 @@ public static class MeshParser
                     int p2 = BinaryPrimitives.ReadInt32LittleEndian(combined.AsSpan(curPos + 20));
 
                     int vCount = -1;
-                    if (p2 > 0 && p2 % 3 == 0 && (p2 / 3) * 12 + 24 <= rLen)
+                    if (p2 > 0 && p2 % 3 == 0 && p2 / 3 <= (rLen - 24) / 12)
                     {
                         vCount = p2 / 3;
                     }
-                    else if (p1 > 0 && p1 * 12 + 24 <= rLen)
+                    else if (p1 > 0 && p1 <= (rLen - 24) / 12)
                     {
                         vCount = p1;
                     }

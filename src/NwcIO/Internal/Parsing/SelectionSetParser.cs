@@ -13,22 +13,24 @@ internal static class SelectionSetParser
         var data = stream.Data;
         if (data.Length < 8) return Array.Empty<NwcSetItem>();
 
-        // Binary header [100][105][count][length][xml bytes]
-        if (BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(0)) == 100 &&
-            BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(4)) == 105 &&
-            data.Length >= 16)
-        {
-            int xmlLen = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(12));
-            if (xmlLen > 0 && 16 + xmlLen <= data.Length)
-            {
-                using var ms = new MemoryStream(data, 16, xmlLen, writable: false);
-                return NwcXmlSetSerializer.Read(ms);
-            }
-        }
-
-        // Direct XML payload
         try
         {
+            // Binary header [100][105][count][length][xml bytes]
+            if (BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(0)) == 100 &&
+                BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(4)) == 105 &&
+                data.Length >= 16)
+            {
+                var xmlLen = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(12));
+                if (xmlLen <= 0 || xmlLen > data.Length - 16)
+                {
+                    return Array.Empty<NwcSetItem>();
+                }
+
+                using var xml = new MemoryStream(data, 16, xmlLen, writable: false);
+                return NwcXmlSetSerializer.Read(xml);
+            }
+
+            // Direct XML payload
             using var ms = new MemoryStream(data, writable: false);
             return NwcXmlSetSerializer.Read(ms);
         }
