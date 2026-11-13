@@ -62,6 +62,21 @@ public class DbCacheParserTests
     }
 
     [Fact]
+    public void Parse_NegativeExtraLowWord_IsSignedSum()
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        writer.Write(-1);
+        writer.Write(1);
+        WriteEntry(writer, "LcOpDBCache", 1, 52L, 674L, -1, 0);
+
+        var db = DbCacheParser.Parse(ms.ToArray());
+
+        Assert.NotNull(db);
+        Assert.Equal(-1L, db.Entries[0].Extra);
+    }
+
+    [Fact]
     public void Parse_WrittenDirectory_KeepsExtraAndPrefixedNames()
     {
         using var ms = new MemoryStream();

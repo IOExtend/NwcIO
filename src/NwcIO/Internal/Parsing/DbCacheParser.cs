@@ -116,7 +116,7 @@ public static class DbCacheParser
                 return false;
             }
 
-            entries.Add(new NwcDbCacheEntry(name, flags, offset, length, ((long)b << 32) | (uint)a));
+            entries.Add(new NwcDbCacheEntry(name, flags, offset, length, (long)a + ((long)b << 32)));
         }
 
         if (pos != data.Length)
