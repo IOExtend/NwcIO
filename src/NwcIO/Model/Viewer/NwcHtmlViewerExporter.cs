@@ -468,6 +468,16 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(m.indices), gl.STATIC_DRAW);
 
+    // Each triangle contributes its three edges, without joining adjacent triangles.
+    const lineIndices = new Uint16Array(Math.floor(m.indices.length / 3) * 6);
+    for (let i = 0; i + 2 < m.indices.length; i += 3) {
+      const a = m.indices[i], b = m.indices[i + 1], c = m.indices[i + 2];
+      lineIndices.set([a, b, b, c, c, a], i * 2);
+    }
+    const lineIbo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lineIbo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lineIndices, gl.STATIC_DRAW);
+
     let mbMin = [Infinity, Infinity, Infinity];
     let mbMax = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < m.vertices.length; i += 3) {
@@ -478,7 +488,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     }
     const meshBounds = (mbMin[0] <= mbMax[0]) ? { min: mbMin, max: mbMax } : null;
 
-    return { vbo, nbo, cbo, ibo, count: m.indices.length, raw: m, index: idx, bounds: meshBounds };
+    return { vbo, nbo, cbo, ibo, lineIbo, lineCount: lineIndices.length, count: m.indices.length, raw: m, index: idx, bounds: meshBounds };
   });
 
   // Matrix Math
@@ -569,7 +579,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       gl.vertexAttribPointer(loc.aCol, 4, gl.FLOAT, false, 0, 0);
       gl.enableVertexAttribArray(loc.aCol);
 
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gm.ibo);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, wireframeMode ? gm.lineIbo : gm.ibo);
 
       if (gm.index === selectedMeshIndex) {
         gl.uniform4f(loc.uHigh, 1.0, 0.75, 0.0, 0.7);
@@ -582,7 +592,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       }
 
       const mode = wireframeMode ? gl.LINES : gl.TRIANGLES;
-      gl.drawElements(mode, gm.count, gl.UNSIGNED_SHORT, 0);
+      gl.drawElements(mode, wireframeMode ? gm.lineCount : gm.count, gl.UNSIGNED_SHORT, 0);
     }
 
     drawOverlay(pMat, vMat);
@@ -1437,6 +1447,60 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
 
+    // WebGL1 supports unsigned short indices without requiring an extension.
+    private static IEnumerable<(IReadOnlyList<Vector3d> Vertices, IReadOnlyList<int> Indices)> SplitMesh(NwcMesh mesh)
+    {
+        const int maxVertices = 65535;
+        if (mesh.Vertices.Count <= maxVertices)
+        {
+            yield return (mesh.Vertices, mesh.Indices);
+            yield break;
+        }
+
+        var remap = new Dictionary<int, int>();
+        var vertices = new List<Vector3d>();
+        var indices = new List<int>();
+        for (var i = 0; i + 2 < mesh.Indices.Count; i += 3)
+        {
+            // Reject the whole triangle before adding vertices or splitting a chunk.
+            var a = mesh.Indices[i];
+            var b = mesh.Indices[i + 1];
+            var c = mesh.Indices[i + 2];
+            if (a < 0 || a >= mesh.Vertices.Count ||
+                b < 0 || b >= mesh.Vertices.Count ||
+                c < 0 || c >= mesh.Vertices.Count)
+            {
+                continue;
+            }
+
+            // Reserve room for a complete triangle so no face straddles chunks.
+            if (remap.Count + 3 > maxVertices)
+            {
+                yield return (vertices, indices);
+                remap.Clear();
+                vertices = [];
+                indices = [];
+            }
+
+            for (var j = 0; j < 3; j++)
+            {
+                var sourceIndex = mesh.Indices[i + j];
+                if (!remap.TryGetValue(sourceIndex, out var index))
+                {
+                    index = vertices.Count;
+                    remap.Add(sourceIndex, index);
+                    vertices.Add(mesh.Vertices[sourceIndex]);
+                }
+                indices.Add(index);
+            }
+        }
+
+        if (indices.Count > 0)
+        {
+            yield return (vertices, indices);
+        }
+    }
+
     private static string BuildJsonPayload(
         IReadOnlyList<NwcMesh> meshes,
         IReadOnlyList<NwcSavedViewpoint> viewpoints,
@@ -1474,64 +1538,67 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         {
             if (totalVerts >= options.MaxMeshVertices) break;
 
-            writer.WriteStartObject();
-            writer.WriteNumber("id", mesh.Id);
-            if (mesh.Node is not null)
+            foreach (var chunk in SplitMesh(mesh))
             {
-                writer.WriteNumber("nodeId", mesh.Node.Id);
-            }
-            writer.WriteString("name", mesh.Name ?? $"Mesh {mesh.Id}");
-            writer.WriteString("layer", mesh.Node?.Class ?? "Default");
-
-            // RGBA color
-            var col = mesh.Material?.Color ?? new RgbaColor(200, 200, 200);
-            writer.WriteStartArray("color");
-            writer.WriteNumberValue(col.R / 255.0);
-            writer.WriteNumberValue(col.G / 255.0);
-            writer.WriteNumberValue(col.B / 255.0);
-            writer.WriteNumberValue(col.A / 255.0);
-            writer.WriteEndArray();
-
-            // Vertices
-            writer.WriteStartArray("vertices");
-            foreach (var v in mesh.Vertices)
-            {
-                // JSON has no non-finite numbers; writing 0 keeps the vertex count the indices refer to
-                writer.WriteNumberValue(double.IsFinite(v.X) ? v.X : 0);
-                writer.WriteNumberValue(double.IsFinite(v.Y) ? v.Y : 0);
-                writer.WriteNumberValue(double.IsFinite(v.Z) ? v.Z : 0);
-            }
-            writer.WriteEndArray();
-
-            // Indices
-            writer.WriteStartArray("indices");
-            foreach (var idx in mesh.Indices)
-            {
-                writer.WriteNumberValue(idx);
-            }
-            writer.WriteEndArray();
-
-            // Properties
-            if (options.IncludeProperties && mesh.Node is not null && mesh.Node.Properties.Count > 0)
-            {
-                writer.WriteStartObject("properties");
-                var groupedProps = mesh.Node.Properties.GroupBy(p => string.IsNullOrEmpty(p.Class) ? "General" : p.Class);
-                foreach (var group in groupedProps)
+                writer.WriteStartObject();
+                writer.WriteNumber("id", mesh.Id);
+                if (mesh.Node is not null)
                 {
-                    writer.WriteStartObject(group.Key);
-                    foreach (var prop in group)
+                    writer.WriteNumber("nodeId", mesh.Node.Id);
+                }
+                writer.WriteString("name", mesh.Name ?? $"Mesh {mesh.Id}");
+                writer.WriteString("layer", mesh.Node?.Class ?? "Default");
+
+                // RGBA color
+                var col = mesh.Material?.Color ?? new RgbaColor(200, 200, 200);
+                writer.WriteStartArray("color");
+                writer.WriteNumberValue(col.R / 255.0);
+                writer.WriteNumberValue(col.G / 255.0);
+                writer.WriteNumberValue(col.B / 255.0);
+                writer.WriteNumberValue(col.A / 255.0);
+                writer.WriteEndArray();
+
+                // Vertices
+                writer.WriteStartArray("vertices");
+                foreach (var v in chunk.Vertices)
+                {
+                    // JSON has no non-finite numbers; writing 0 keeps the vertex count the indices refer to
+                    writer.WriteNumberValue(double.IsFinite(v.X) ? v.X : 0);
+                    writer.WriteNumberValue(double.IsFinite(v.Y) ? v.Y : 0);
+                    writer.WriteNumberValue(double.IsFinite(v.Z) ? v.Z : 0);
+                }
+                writer.WriteEndArray();
+
+                // Indices
+                writer.WriteStartArray("indices");
+                foreach (var idx in chunk.Indices)
+                {
+                    writer.WriteNumberValue(idx);
+                }
+                writer.WriteEndArray();
+
+                // Properties
+                if (options.IncludeProperties && mesh.Node is not null && mesh.Node.Properties.Count > 0)
+                {
+                    writer.WriteStartObject("properties");
+                    var groupedProps = mesh.Node.Properties.GroupBy(p => string.IsNullOrEmpty(p.Class) ? "General" : p.Class);
+                    foreach (var group in groupedProps)
                     {
-                        if (!string.IsNullOrEmpty(prop.Name) && !string.IsNullOrEmpty(prop.Value))
+                        writer.WriteStartObject(group.Key);
+                        foreach (var prop in group)
                         {
-                            writer.WriteString(prop.Name, prop.Value);
+                            if (!string.IsNullOrEmpty(prop.Name) && !string.IsNullOrEmpty(prop.Value))
+                            {
+                                writer.WriteString(prop.Name, prop.Value);
+                            }
                         }
+                        writer.WriteEndObject();
                     }
                     writer.WriteEndObject();
                 }
+
                 writer.WriteEndObject();
             }
-
-            writer.WriteEndObject();
             totalVerts += mesh.Vertices.Count;
         }
         writer.WriteEndArray(); // meshes
