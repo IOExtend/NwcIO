@@ -951,11 +951,16 @@ public sealed class ClashDetectiveTests
         Assert.Same(other, Assert.Single(test.Results).Item1.Mesh);
     }
 
-    [Fact]
-    public void MeshClashDetection_LineMeshCrossingBox_ReportsNoClash()
+    // Two points take the bounding-box fallback; three would be read as one default triangle that crosses the box.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MeshClashDetection_LineMeshCrossingBox_ReportsNoClash(bool threeVertices)
     {
         var box = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
-        var line = new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
+        var line = threeVertices
+            ? new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5), new(0.5, 0.5, 2)], Indices = [], LineIndices = [0, 1, 1, 2] }
+            : new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
         var doc = new NwcDocumentBuilder().AddMesh(box).AddMesh(line).Build();
         var test = new NwcClashTest("Lines", NwcClashTestType.Hard, tolerance: 0.001);
         doc.RunClashDetection(test);

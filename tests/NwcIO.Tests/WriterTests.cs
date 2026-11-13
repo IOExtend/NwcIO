@@ -176,6 +176,7 @@ public class WriterTests
     [Theory]
     [InlineData(-1.0)]
     [InlineData(100.0)]
+    [InlineData(double.NaN)]
     public void Writer_RejectsScaledTransform_WithoutChangingDestination(double scale)
     {
         var transform = new NwcTransform { Id = 7, Scale = scale };

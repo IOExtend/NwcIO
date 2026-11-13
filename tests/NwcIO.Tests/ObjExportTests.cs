@@ -11,10 +11,12 @@ public class ObjExportTests
     [InlineData(false, "f 1 2 3", "f 3 2 4")]
     public void Write_MirroredTransform_ReversesOnlyWorldFaces(bool world, string first, string second)
     {
+        var mesh = TestMeshes.MirroredQuad();
         using var sw = new StringWriter();
-        ObjExporter.Write([TestMeshes.MirroredQuad()], sw, worldCoordinates: world);
+        ObjExporter.Write([mesh], sw, worldCoordinates: world);
         Assert.Contains(first, sw.ToString());
         Assert.Contains(second, sw.ToString());
+        Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
     }
 
     [Fact]

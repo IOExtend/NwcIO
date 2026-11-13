@@ -227,6 +227,14 @@ public class MeshParserTests
     }
 
     [Fact]
+    public void Mesh_GetWorldIndices_LeavesAnIncompleteTrailingTriple()
+    {
+        var mesh = new NwcMesh { Id = 1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = [0, 1, 2, 3],
+            Transform = new NwcTransform { Id = 1, Scale = -1 } };
+        Assert.Equal([0, 2, 1, 3], mesh.GetWorldIndices());
+    }
+
+    [Fact]
     public void Mesh_NewMembers_DefaultToEmpty()
     {
         var mesh = new NwcMesh { Id = 1, Vertices = [], Indices = [] };
