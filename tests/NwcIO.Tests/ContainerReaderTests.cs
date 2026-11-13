@@ -72,6 +72,49 @@ public class ContainerReaderTests
         Assert.Equal(trailingGap, container.TrailingGap);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(200000)]
+    public void Read_CompleteZlibStream_PreservesPayloadAndLength(int payloadLength)
+    {
+        var payload = new byte[payloadLength];
+        Array.Fill(payload, (byte)'A');
+        var compressed = CompressZlib(payload);
+        using var ms = new MemoryStream();
+        var headerBytes = System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n");
+        ms.Write(headerBytes);
+        ms.Write(compressed);
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        var stream = Assert.Single(container.Streams);
+        Assert.Equal(payload, stream.Data);
+        Assert.Equal(headerBytes.Length, stream.FileOffset);
+        Assert.Equal(compressed.Length, stream.CompressedLength);
+        Assert.Equal(0, container.TrailingGap);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Read_TruncatedZlibStream_RejectsStreamAndAccountsForTrailingGap(bool truncateBody)
+    {
+        var payload = new byte[200000];
+        Array.Fill(payload, (byte)'A');
+        var compressed = CompressZlib(payload);
+        var truncatedLength = truncateBody ? compressed.Length / 2 : compressed.Length - 4;
+        using var ms = new MemoryStream();
+        var headerBytes = System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n");
+        ms.Write(headerBytes);
+        ms.Write(compressed, 0, truncatedLength);
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        Assert.Single(container.Sections);
+        Assert.Empty(container.Streams);
+        Assert.Equal(truncatedLength, container.TrailingGap);
+    }
+
     [Fact]
     public void Read_InvalidHeader_ThrowsInvalidDataException()
     {
