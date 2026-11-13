@@ -256,6 +256,58 @@ public sealed class DiffEngineTests
         return NwcDocument.Create(rootNode: root);
     }
 
+    private static NwcDocument CreateWallDocument(string sourcePath, double x, Guid? guid)
+    {
+        var mesh = CreateBoxMesh(1, "Wall", new Vector3d(x, 0, 0));
+        return NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = sourcePath },
+            meshes: [mesh],
+            rootNode: guid.HasValue
+                ? new NwcNode { Id = 1, Name = "Wall", Class = "LcRevitData_Element", ElementGuid = guid, Mesh = mesh }
+                : null);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Compare_FirstAssemblyModelRemoved_MatchesContributingModel(bool sharedGuid)
+    {
+        Guid? guid = sharedGuid ? Guid.NewGuid() : null;
+        var docA = CreateWallDocument("A.rvt", 0, guid);
+        var docB = CreateWallDocument("B.rvt", 100, guid);
+        var baseline = NwcAssembly.Create("Baseline", docA, docB);
+        var revision = NwcAssembly.Create("Revision", CreateWallDocument("B.rvt", 100, guid));
+
+        var report = baseline.Compare(revision);
+
+        Assert.Empty(report.Added);
+        Assert.Empty(report.Modified);
+        Assert.Same(docB.Meshes[0], Assert.Single(report.Unchanged).BaselineMesh);
+        Assert.Same(docA.Meshes[0], Assert.Single(report.Deleted).BaselineMesh);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Compare_AssemblyModelsReordered_MatchesContributingModel(bool sharedGuid)
+    {
+        Guid? guid = sharedGuid ? Guid.NewGuid() : null;
+        var docA = CreateWallDocument("A.rvt", 0, guid);
+        var docB = CreateWallDocument("B.rvt", 100, guid);
+        var baseline = NwcAssembly.Create("Baseline", docA, docB);
+        var revision = NwcAssembly.Create("Revision",
+            CreateWallDocument("B.rvt", 100, guid), CreateWallDocument("A.rvt", 0, guid));
+
+        var report = baseline.Compare(revision);
+
+        Assert.Empty(report.Added);
+        Assert.Empty(report.Deleted);
+        Assert.Empty(report.Modified);
+        Assert.Equal(2, report.Unchanged.Count);
+        Assert.Same(docB.Meshes[0], report.Unchanged[0].BaselineMesh);
+        Assert.Same(docA.Meshes[0], report.Unchanged[1].BaselineMesh);
+    }
+
     [Fact]
     public void Compare_DuplicateGuidsInDocument_MatchesEachElementOnce()
     {
