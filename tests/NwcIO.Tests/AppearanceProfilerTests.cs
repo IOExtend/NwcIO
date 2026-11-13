@@ -284,4 +284,26 @@ public sealed class AppearanceProfilerTests
         using var invalid = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml.Replace("equals", "regex")));
         Assert.Throws<FormatException>(() => NwcXmlAppearanceProfilerSerializer.Read(invalid));
     }
+
+    [Fact]
+    public void ApplyAppearanceProfiler_NodeWithSeveralMeshes_ColorsEveryMesh()
+    {
+        var m1 = new NwcMesh { Id = 1, Name = "Duct_1", Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] };
+        var m2 = new NwcMesh { Id = 2, Name = "Duct_1", Vertices = [new(0, 0, 1), new(1, 0, 1), new(0, 1, 1)], Indices = [0, 1, 2] };
+        var node = new NwcNode { Id = 1, Name = "Duct_1", Class = "LcRevitData_Element", Mesh = m1 };
+        node.Meshes.Add(m1);
+        node.Meshes.Add(m2);
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 1, Class = "Item", Name = "Type", Value = "HVAC Duct" });
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "LcOpModelFile" };
+        root.Children.Add(node);
+        var doc = NwcDocument.Create(meshes: [m1, m2], rootNode: root);
+
+        var profiler = new NwcAppearanceProfiler();
+        profiler.AddRule("HVAC Blue", "Item", "Type", NwcSearchOperator.Contains, "HVAC", new RgbaColor(0.1f, 0.2f, 0.9f, 1.0f), 0.3f);
+
+        Assert.Equal(1, doc.ApplyAppearanceProfiler(profiler));
+        Assert.NotNull(node.Material);
+        Assert.Same(node.Material, m1.Material);
+        Assert.Same(node.Material, m2.Material);
+    }
 }

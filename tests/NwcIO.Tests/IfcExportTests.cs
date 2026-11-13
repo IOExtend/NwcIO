@@ -6,6 +6,35 @@ namespace NwcIO.Tests;
 
 public class IfcExportTests
 {
+    [Theory]
+    [InlineData(true, "((1,3,2),(3,4,2))")]
+    [InlineData(false, "((1,2,3),(3,2,4))")]
+    public void SaveIfc_MirroredTransform_ReversesOnlyWorldFaces(bool world, string coordIndex)
+    {
+        var mesh = TestMeshes.MirroredQuad();
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+            { SchemaVersion = NwcIfcSchemaVersion.Ifc4, UseTessellationInIfc4 = true, WorldCoordinates = world });
+        Assert.Contains(coordIndex, ifc);
+        Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
+    }
+
+    [Theory]
+    [InlineData(true, new[] { 0, 2, 1, 2, 3, 1 })]
+    [InlineData(false, new[] { 0, 1, 2, 2, 1, 3 })]
+    public void SaveIfc2x3_MirroredTransform_ReversesOnlyWorldBrepFaces(bool world, int[] expected)
+    {
+        var mesh = TestMeshes.MirroredQuad();
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+            { SchemaVersion = NwcIfcSchemaVersion.Ifc2x3, WorldCoordinates = world });
+
+        // With shared vertices the quad's points are consecutive entities, so a loop's point ids minus the first one are its corners.
+        var corners = System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCPOLYLOOP\(\(#(\d+),#(\d+),#(\d+)\)\)")
+            .SelectMany(m => m.Groups.Values.Skip(1).Select(g => int.Parse(g.Value, System.Globalization.CultureInfo.InvariantCulture)))
+            .ToArray();
+        Assert.Equal(expected, corners.Select(id => id - corners.Min()));
+        Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]

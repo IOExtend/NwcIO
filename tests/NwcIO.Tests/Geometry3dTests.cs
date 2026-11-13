@@ -176,4 +176,16 @@ public class Geometry3dTests
         Assert.Equal(1.0, camera.Direction.Length, 10);
         Assert.Equal(1.0, camera.Up.Length, 10);
     }
+
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(100.0)]
+    public void ToMatrix4x4_Scale_ScalesRotationRowsOnly(double scale)
+    {
+        double h = Math.Sqrt(0.5); // 90° about Z
+        var t = new NwcTransform { Id = 1, Translation = new(1, 2, 3), Rotation = new(0, 0, h, h), Scale = scale };
+        double[] expected = [0, scale, 0, 0, -scale, 0, 0, 0, 0, 0, scale, 0, 1, 2, 3, 1];
+        double[] m = t.ToMatrix4x4();
+        for (int i = 0; i < 16; i++) Assert.Equal(expected[i], m[i], 12);
+    }
 }

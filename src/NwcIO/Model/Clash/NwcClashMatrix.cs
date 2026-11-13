@@ -200,7 +200,7 @@ public sealed class NwcClashMatrix
                 for (int j = startJ; j < meshesB.Count; j++)
                 {
                     var (mB, docB) = meshesB[j];
-                    if (mA.Id == mB.Id && docA == docB) continue;
+                    if ((mA.Id == mB.Id && docA == docB) || NwcClashDetector.IsSameElement(mA, mB)) continue;
 
                     var boxB = mB.GetWorldBoundingBox();
                     var interBox = boxA.Intersect(boxB);

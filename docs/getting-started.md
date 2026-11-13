@@ -31,7 +31,8 @@ dotnet tool install --global NwcIO.Cli
 ```csharp
 using NwcIO;
 
-// Open any .nwc or .nwd file directly from disk
+// Open a .nwc file directly from disk. A .nwd whose scene tree holds partition nodes needs
+// new NwcReaderOptions { BuildSceneTree = false }, because that tree is not decoded yet.
 var doc = NwcDocument.Open("model.nwc");
 
 Console.WriteLine($"Source: {doc.FileInfo?.SourcePath}");
@@ -103,7 +104,8 @@ matrix.SaveBcf("CoordinationIssues.bcfzip");
 using NwcIO;
 using NwcIO.Model.Viewer;
 
-var doc = NwcDocument.Open("construction_site.nwd");
+// A .nwd is opened without its scene tree: partition nodes in the tree are not decoded yet.
+var doc = NwcDocument.Open("construction_site.nwd", new NwcReaderOptions { BuildSceneTree = false });
 
 // Export self-contained single-file HTML WebGL viewer with 4D schedule playback
 doc.SaveHtmlViewer("interactive_site.html", new NwcHtmlViewerOptions

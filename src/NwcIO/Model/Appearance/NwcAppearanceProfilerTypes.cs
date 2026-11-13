@@ -82,6 +82,11 @@ public sealed class NwcAppearanceProfiler
                     };
 
                     node.Material = mat;
+                    foreach (var nodeMesh in node.Meshes)
+                    {
+                        nodeMesh.Material = mat;
+                    }
+
                     if (node.Mesh is not null)
                     {
                         node.Mesh.Material = mat;

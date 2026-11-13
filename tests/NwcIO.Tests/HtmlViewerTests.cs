@@ -72,6 +72,14 @@ public sealed class HtmlViewerTests
         Assert.Contains("clipBox.max = [...b.max]", html);
     }
 
+    [Fact]
+    public void Write_SelectionSetClick_MatchesMeshesByNodeIdBeforeMeshId()
+    {
+        var html = ExportMesh(new NwcMesh { Id = 68, Vertices = [], Indices = [] });
+        Assert.Contains("const nid = gm.raw.nodeId !== undefined ? gm.raw.nodeId : gm.raw.id;\n                if (idSet.has(nid))", html.Replace("\r\n", "\n", StringComparison.Ordinal));
+        Assert.DoesNotContain("|| idSet.has(gm.raw.id)", html);
+    }
+
     [Theory]
     [InlineData(65535)]
     [InlineData(65536)]

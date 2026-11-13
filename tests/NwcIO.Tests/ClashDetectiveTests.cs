@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using NwcIO.Model;
 using NwcIO.Model.Clash;
 using NwcIO.Model.Appearance;
+using NwcIO.Model.Sectioning;
 using NwcIO.Model.Sets;
 using Xunit;
 
@@ -857,4 +858,176 @@ public sealed class ClashDetectiveTests
             BoundingBox = new BoundingBox3d(min, max),
         };
     }
+
+    [Theory]
+    [InlineData(false, true, 0)]
+    [InlineData(false, false, 1)]
+    [InlineData(true, true, 0)]
+    [InlineData(true, false, 1)]
+    public void ClashDetection_FragmentsOfOneElement_DoNotClash(bool federated, bool sharedNode, int expectedCount)
+    {
+        var meshA = CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2));
+        var meshB = CreateBoxMesh(2, new(1, 1, 1), new(3, 3, 3));
+        meshA.Node = new NwcNode { Id = 10, Name = "Wall", Class = "LcOaNode" };
+        meshB.Node = sharedNode ? meshA.Node : new NwcNode { Id = 11, Name = "Wall", Class = "LcOaNode" };
+        var doc = new NwcDocumentBuilder().SetFileInfo("Model.nwc").AddMesh(meshA).AddMesh(meshB).Build();
+        var test = new NwcClashTest("Fragments", NwcClashTestType.Hard);
+
+        if (federated)
+        {
+            NwcClashDetector.Run(NwcAssembly.Create("Federated", doc), test);
+        }
+        else
+        {
+            NwcClashDetector.Run(doc, test);
+        }
+
+        Assert.Equal(expectedCount, test.TotalClashCount);
+    }
+
+    [Theory]
+    [InlineData("Level 2", 1)]
+    [InlineData("Level 1", 0)]
+    public void AssemblyClashDetection_IgnoreSameLayer_ComparesParentLayers(string secondLayer, int expectedCount)
+    {
+        var meshA = CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2));
+        meshA.Node = new NwcNode
+        {
+            Id = 10, Name = "Basic Wall", Class = "LcOaNode",
+            Parent = new NwcNode { Id = 9, Name = "Level 1", Class = "LcOaLayer" },
+        };
+        var meshB = CreateBoxMesh(2, new(1, 1, 1), new(3, 3, 3));
+        meshB.Node = new NwcNode
+        {
+            Id = 20, Name = "Basic Wall", Class = "LcOaNode",
+            Parent = new NwcNode { Id = 19, Name = secondLayer, Class = "LcOaLayer" },
+        };
+        var architecture = new NwcDocumentBuilder().SetFileInfo("Architecture.nwc").AddMesh(meshA).Build();
+        var structure = new NwcDocumentBuilder().SetFileInfo("Structure.nwc").AddMesh(meshB).Build();
+        var test = new NwcClashTest("Layers", NwcClashTestType.Hard);
+        test.Rules.Add(NwcClashRule.SameLayer(enabled: true));
+
+        NwcClashDetector.Run(NwcAssembly.Create("Federated", architecture, structure), test);
+
+        Assert.Equal(expectedCount, test.TotalClashCount);
+        Assert.All(test.Results, clash =>
+        {
+            Assert.Equal("Level 1", clash.Item1.Layer);
+            Assert.Equal(secondLayer, clash.Item2.Layer);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitNodeIds_MatchNodeIdsAndFallBackToMeshIds(bool federated)
+    {
+        // The fragment's mesh id 5 equals the other element's node id; only node ids select meshes with nodes.
+        var fragment = CreateBoxMesh(5, new(0, 0, 0), new(2, 2, 2));
+        fragment.Node = new NwcNode { Id = 100, Name = "Pipe", Class = "LcOaNode" };
+        var other = CreateBoxMesh(6, new(1, 1, 1), new(3, 3, 3));
+        other.Node = new NwcNode { Id = 5, Name = "Duct", Class = "LcOaNode" };
+        var loose = CreateBoxMesh(7, new(1.5, 1.5, 1.5), new(4, 4, 4));
+        var doc = new NwcDocumentBuilder().SetFileInfo("Model.nwc").AddMesh(fragment).AddMesh(other).AddMesh(loose).Build();
+        var test = new NwcClashTest("Explicit");
+        test.SelectionA.ExplicitNodeIds.Add(100);
+        test.SelectionB.ExplicitNodeIds.Add(7);
+
+        if (federated)
+        {
+            NwcClashDetector.Run(NwcAssembly.Create("Federated", doc), test);
+        }
+        else
+        {
+            NwcClashDetector.Run(doc, test);
+        }
+
+        var clash = Assert.Single(test.Results);
+        Assert.Same(fragment, clash.Item1.Mesh);
+        Assert.Same(loose, clash.Item2.Mesh);
+
+        test.Results.Clear();
+        test.SelectionA.ExplicitNodeIds[0] = 5;
+        NwcClashDetector.Run(doc, test);
+        Assert.Same(other, Assert.Single(test.Results).Item1.Mesh);
+    }
+
+    // Two points take the bounding-box fallback; three would be read as one default triangle that crosses the box.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MeshClashDetection_LineMeshCrossingBox_ReportsNoClash(bool threeVertices)
+    {
+        var box = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var line = threeVertices
+            ? new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5), new(0.5, 0.5, 2)], Indices = [], LineIndices = [0, 1, 1, 2] }
+            : new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
+        var doc = new NwcDocumentBuilder().AddMesh(box).AddMesh(line).Build();
+        var test = new NwcClashTest("Lines", NwcClashTestType.Hard, tolerance: 0.001);
+        doc.RunClashDetection(test);
+        Assert.Empty(test.Results);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Clash_SiblingFragmentsOfOneLeaf_NoClashWithOrWithoutTree(bool tree)
+    {
+        var doc = NwcDocument.Open(new MemoryStream(QuadFile(2, 2)), new NwcReaderOptions { BuildSceneTree = tree });
+        var test = new NwcClashTest("Siblings", NwcClashTestType.Hard);
+        NwcClashDetector.Run(doc, test);
+        Assert.Empty(test.Results);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Clash_FragmentsOfDifferentLeaves_ClashWithOrWithoutTree(bool tree)
+    {
+        var doc = NwcDocument.Open(new MemoryStream(QuadFile(2, 3)), new NwcReaderOptions { BuildSceneTree = tree });
+        var test = new NwcClashTest("Leaves", NwcClashTestType.Hard);
+        NwcClashDetector.Run(doc, test);
+        Assert.Single(test.Results);
+    }
+
+    [Fact]
+    public void Clash_ClippedMeshKeepsElementKey_NoClashWithSiblingWithoutTree()
+    {
+        var options = new NwcReaderOptions { BuildSceneTree = false };
+        var plane = new NwcSectionPlane { Normal = new Vector3d(1, 0, 0), Distance = -1e6, IsEnabled = true };
+
+        var siblings = NwcDocument.Open(new MemoryStream(QuadFile(2, 2)), options).Meshes;
+        var sameLeaf = NwcDocument.Create(meshes: [NwcMeshClipper.Clip(siblings[0], [plane]), siblings[1]]);
+        var sameTest = new NwcClashTest("Clipped sibling", NwcClashTestType.Hard);
+        NwcClashDetector.Run(sameLeaf, sameTest);
+        Assert.Empty(sameTest.Results);
+
+        var leaves = NwcDocument.Open(new MemoryStream(QuadFile(2, 3)), options).Meshes;
+        var otherLeaf = NwcDocument.Create(meshes: [NwcMeshClipper.Clip(leaves[0], [plane]), leaves[1]]);
+        var otherTest = new NwcClashTest("Clipped other leaf", NwcClashTestType.Hard);
+        NwcClashDetector.Run(otherLeaf, otherTest);
+        Assert.Single(otherTest.Results);
+    }
+
+    [Fact]
+    public void FederatedClash_SameLeafSeqInTwoDocuments_Clash()
+    {
+        byte[] file = QuadFile(2, 2);
+        var options = new NwcReaderOptions { BuildSceneTree = false };
+        var first = NwcDocument.Open(new MemoryStream(file), options);
+        var second = NwcDocument.Open(new MemoryStream(file), options);
+        var test = new NwcClashTest("Federated", NwcClashTestType.Hard);
+        NwcClashDetector.Run(NwcAssembly.Create("Federated", first, second), test);
+
+        // Every pair across the documents clashes; the sibling pair inside each document does not.
+        Assert.Equal(4, test.Results.Count);
+        Assert.All(test.Results, clash => Assert.NotEqual(first.Meshes.Contains(clash.Item1.Mesh!), first.Meshes.Contains(clash.Item2.Mesh!)));
+    }
+
+    /// <summary>H1 + [R1] with one identity-posed class-15 fragment per seq, so every two of its quads overlap exactly.</summary>
+    internal static byte[] QuadFile(params int[] seqs) => SyntheticNwcFile.Build(
+        FormatVectors.H1,
+        ModelGraphReaderTests.Fragments(seqs.Select(seq => new ModelGraphReaderTests.Frag(seq, Vector3d.Zero, 1, 2, 4, Rec: 1)).ToArray()),
+        [FormatVectors.R1],
+        [120]);
 }

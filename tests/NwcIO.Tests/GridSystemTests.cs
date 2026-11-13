@@ -171,4 +171,22 @@ public sealed class GridSystemTests
         Assert.Equal(3.5, l1.Elevation, 3);
         Assert.Equal("Tower A", l1.SystemName);
     }
+
+    [Fact]
+    public void ExtractFromDocument_GridNodeWithTriangleMeshFirst_UsesPolyline()
+    {
+        var tri = new NwcMesh { Id = 1, Vertices = [new(5, 5, 0), new(6, 5, 0), new(5, 6, 0)], Indices = [0, 1, 2] };
+        var line = new NwcMesh { Id = 2, Vertices = [new(0, 0, 0), new(10, 0, 0)], Indices = [], LineIndices = [0, 1] };
+        var gridNode = new NwcNode { Id = 2, Name = "Grid A", Class = "LcRevitGrid", Mesh = tri };
+        gridNode.Meshes.Add(tri);
+        gridNode.Meshes.Add(line);
+        var root = new NwcNode { Id = 1, Name = "Model", Class = "LcOpModelFile" };
+        root.Children.Add(gridNode);
+
+        var system = NwcGridSystem.ExtractFromDocument(NwcDocument.Create(meshes: [tri, line], rootNode: root));
+
+        var gridLine = Assert.Single(system.Lines);
+        Assert.Equal(new Vector3d(0, 0, 0), gridLine.Start);
+        Assert.Equal(new Vector3d(10, 0, 0), gridLine.End);
+    }
 }

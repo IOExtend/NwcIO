@@ -4,14 +4,36 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Strict geometry reader for Navisworks model files. It runs when section 1 of the container holds exactly one stream that parses as a DbCache directory naming `LcOpNwdLogicalHierarchy`, `LcOpNwdFragments` or `LcOpNwdGeometry`; every other container, including files written by NwcIO, keeps the previous reader. A malformed model file throws `InvalidDataException` naming the segment instead of returning a partial document.
+- Triangle strips, polylines and stored normals are decoded from geometry records; node links, scaled poses and mirrored placements are read from the hierarchy and fragments.
+- New public members: `NwcTransform.Scale`, `NwcMesh.Normals`, `NwcMesh.LineIndices` and `NwcNode.Meshes`.
+- Node properties are read on the strict path: `Class` is the property tab name (category, for example `Element`), `Name` the property name and `FirstInt` the key object id.
+
+### Changed
+- Model files now produce one `NwcMesh` and one `NwcTransform` per fragment. `Id` of both is the fragment index; node ids are depth-first preorder indices; `NwcMesh.Node` is its leaf, `NwcNode.Meshes` holds every placed mesh and `NwcNode.Mesh` the first. Records shared between fragments share arrays. Persisted ids and IFC/BCF GUIDs derived from them change for these files.
+- `NwcNode.Transform` and `NwcNode.ElementGuid` are null on the strict path.
+- Opening a `.nwd` whose hierarchy holds partition nodes (class 32) throws `NotSupportedException` unless `BuildSceneTree` is false. The CLI appends a `--no-tree` hint and still exits with code 3, and passes `--no-tree` when loading `.nwf` files. `--no-tree` skips reading the scene tree and is required to open a `.nwd` with partition nodes; it now also applies to the `--diff` baseline and to folder input.
+- `NwcWriter` rejects, before writing, transforms with a scale other than 1, meshes that hold line segments and meshes whose triangles differ from the single strip the reader rebuilds over the positions, with `ArgumentException`.
+- GLB, OBJ and IFC export reverse triangles of mirrored placements, only when baking world coordinates. The triangle clash detector never tests line-only meshes as triangles; diff and appearance rules use every mesh of a node; grids take the first line mesh of a node.
+- Clash detection skips pairs of fragments that belong to the same element, with or without the scene tree, and so does the box-only clash matrix; federated clash items take the parent layer name as `Layer`, as single-document runs do; `ExplicitNodeIds` match node ids (mesh ids for meshes without a node).
+- The JSON `transforms` block writes `"scale"` when the pose scale is not 1; unscaled output is unchanged. HTML viewer selection-set clicks match meshes by node id, and diff geometry counts cover every fragment of a node.
+- `NwcReaderOptions.ReadPropertyRecords = false` leaves node properties empty on the strict path as well.
+- Non-finite position floats and non-finite geometry box floats make a model file fail with `InvalidDataException`.
+- The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property references, and at most one render vertex or corner per geometry-record byte. Input beyond these limits fails with `InvalidDataException`.
+- `NwcDbCacheEntry.Offset` is an absolute file offset, `Extra` is `a + b*2^32`, and `NwcDbCacheDirectory.DatabaseName` is the name of the `LcOpDBCache` entry or `""`.
+
 ### Fixed
 - Import and link TimeLiner schedules before single-document CLI exports, including primary CSV output and `--timeliner-csv`.
 - Count each mesh pair once when a federated clash test uses identical selections on both sides.
 - Correct the README and getting-started API/CLI examples and the discipline-pair tolerance assignments.
+- Read every DbCache directory entry; the parser stopped at the first entry that was not 8-byte aligned.
+- Read `.nwd` geometry with more than 5000 chunks.
 
 ### Documentation
 
 - **Documentation**: Added a "Scope and frozen features" section to the README listing the extras that now receive bug fixes only and their planned replacements.
+- **Documentation**: Rewrote the format notes for the logical hierarchy, fragments, table of contents, geometry records and DbCache directory, and updated the README and public API notes for the new reader and the `.nwd` scene-tree limitation.
 
 ## [0.10.0] - 2026-11-11
 

@@ -237,7 +237,46 @@ public static class MeshParser
             if (z > maxZ) maxZ = z;
         }
 
-        // Generate triangle strip indices: (vCount - 2) triangles with alternating orientation
+        return new NwcMesh
+        {
+            Id = meshId,
+            Name = $"Mesh_{meshId}",
+            Vertices = vertices,
+            Indices = BuildStripIndices(vertexCount),
+            BoundingBox = new BoundingBox3d(new Vector3d(minX, minY, minZ), new Vector3d(maxX, maxY, maxZ)),
+        };
+    }
+
+    /// <summary>
+    /// Whether <paramref name="indices"/> is exactly the strip <see cref="BuildStripIndices"/> builds for <paramref name="vertexCount"/>:
+    /// triangle i of vertexCount - 2 is (i, i + 1, i + 2) for even i and (i + 1, i, i + 2) for odd i. Compares in place, without building it.
+    /// </summary>
+    internal static bool IsStrip(IReadOnlyList<int> indices, int vertexCount)
+    {
+        int triangleCount = vertexCount - 2;
+        if (indices.Count != triangleCount * 3)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < triangleCount; i++)
+        {
+            int a = (i & 1) == 0 ? i : i + 1;
+            int b = (i & 1) == 0 ? i + 1 : i;
+            if (indices[3 * i] != a || indices[3 * i + 1] != b || indices[3 * i + 2] != i + 2)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The single triangle strip rebuilt over the vertices: (vertexCount - 2) triangles with alternating orientation.
+    /// </summary>
+    internal static int[] BuildStripIndices(int vertexCount)
+    {
         int triangleCount = vertexCount - 2;
         var indices = new int[triangleCount * 3];
         int idx = 0;
@@ -258,13 +297,6 @@ public static class MeshParser
             }
         }
 
-        return new NwcMesh
-        {
-            Id = meshId,
-            Name = $"Mesh_{meshId}",
-            Vertices = vertices,
-            Indices = indices,
-            BoundingBox = new BoundingBox3d(new Vector3d(minX, minY, minZ), new Vector3d(maxX, maxY, maxZ)),
-        };
+        return indices;
     }
 }

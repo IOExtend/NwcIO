@@ -163,12 +163,12 @@ internal static class IfcExporter
             string repType;
             if (useTessellation)
             {
-                geomId = WriteMeshTriangulatedFaceSet(w, vertices, mesh.Indices, scale);
+                geomId = WriteMeshTriangulatedFaceSet(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale);
                 repType = "Tessellation";
             }
             else
             {
-                geomId = WriteMeshFacetedBrep(w, vertices, mesh.Indices, scale, options.SharedVertices);
+                geomId = WriteMeshFacetedBrep(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale, options.SharedVertices);
                 repType = "Brep";
             }
 
@@ -391,12 +391,12 @@ internal static class IfcExporter
                 string repType;
                 if (useTessellation)
                 {
-                    geomId = WriteMeshTriangulatedFaceSet(w, vertices, mesh.Indices, scale);
+                    geomId = WriteMeshTriangulatedFaceSet(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale);
                     repType = "Tessellation";
                 }
                 else
                 {
-                    geomId = WriteMeshFacetedBrep(w, vertices, mesh.Indices, scale, options.SharedVertices);
+                    geomId = WriteMeshFacetedBrep(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale, options.SharedVertices);
                     repType = "Brep";
                 }
 

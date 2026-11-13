@@ -242,9 +242,10 @@ public sealed class NwcGridSystem
                     name = name.Substring(4).Trim(' ', ':', '-');
                 }
 
-                if (node.Mesh is not null && node.Mesh.Vertices.Count >= 2)
+                var gridMesh = node.Meshes.FirstOrDefault(m => m.LineIndices.Count > 0) ?? node.Mesh;
+                if (gridMesh is not null && gridMesh.Vertices.Count >= 2)
                 {
-                    var worldVerts = node.Mesh.GetWorldVertices();
+                    var worldVerts = gridMesh.GetWorldVertices();
                     if (worldVerts.Count >= 2)
                     {
                         var start = worldVerts[0];

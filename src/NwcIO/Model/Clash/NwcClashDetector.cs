@@ -47,13 +47,13 @@ public static class NwcClashDetector
             var selA = ResolveSelection(doc, test.SelectionA);
             for (int i = 0; i < selA.Count; i++)
             {
-                itemsA.Add((selA[i], docName, selA[i].Node?.Name));
+                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name));
             }
 
             var selB = ResolveSelection(doc, test.SelectionB);
             for (int i = 0; i < selB.Count; i++)
             {
-                itemsB.Add((selB[i], docName, selB[i].Node?.Name));
+                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name));
             }
         }
 
@@ -94,7 +94,7 @@ public static class NwcClashDetector
             for (var j = sameSelection ? i + 1 : 0; j < meshesB.Count; j++)
             {
                 var meshB = meshesB[j];
-                if (ReferenceEquals(meshA, meshB) || meshA.Id == meshB.Id) continue;
+                if (ReferenceEquals(meshA, meshB) || meshA.Id == meshB.Id || IsSameElement(meshA, meshB)) continue;
                 // The reverse pair was already visited from the earlier mesh in A.
                 if (canVisitReverse && firstIndexA!.TryGetValue(meshB, out int firstIndex) && firstIndex < i)
                 {
@@ -195,7 +195,7 @@ public static class NwcClashDetector
             for (var j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
             {
                 var itemB = itemsB[j];
-                if (ReferenceEquals(itemA.Mesh, itemB.Mesh)) continue;
+                if (ReferenceEquals(itemA.Mesh, itemB.Mesh) || IsSameElement(itemA.Mesh, itemB.Mesh)) continue;
                 // Mesh IDs can repeat across models; only references identify pairs.
                 if (canVisitReverse && firstIndexA!.TryGetValue(itemB.Mesh, out int firstIndex) && firstIndex < i)
                 {
@@ -272,6 +272,12 @@ public static class NwcClashDetector
         clashPoint = Vector3d.Zero;
         penetrationDepth = 0.0;
 
+        // A line mesh has no triangles; its points must not trigger the bounding-box fallback.
+        if ((a.Indices.Count < 3 && a.LineIndices.Count > 0) || (b.Indices.Count < 3 && b.LineIndices.Count > 0))
+        {
+            return false;
+        }
+
         var vertsA = a.GetWorldVertices();
         var vertsB = b.GetWorldVertices();
 
@@ -347,6 +353,12 @@ public static class NwcClashDetector
         return false;
     }
 
+    // Fragments of one element are separate meshes and never clash with each other. The element key works without
+    // the scene tree; the node rule covers documents built in code.
+    internal static bool IsSameElement(NwcMesh a, NwcMesh b) =>
+        (a.ElementKey is not null && ReferenceEquals(a.ElementKey, b.ElementKey)) ||
+        (a.Node is not null && ReferenceEquals(a.Node, b.Node));
+
     private static List<int> CreateDefaultIndices(int count)
     {
         var indices = new List<int>(count);
@@ -359,7 +371,8 @@ public static class NwcClashDetector
         if (sel.ExplicitNodeIds.Count > 0)
         {
             var idSet = new HashSet<int>(sel.ExplicitNodeIds);
-            return document.Meshes.Where(m => idSet.Contains(m.Id)).ToList();
+            // Node ids and mesh ids are separate number spaces; a mesh without a node keeps its mesh id.
+            return document.Meshes.Where(m => m.Node is not null ? idSet.Contains(m.Node.Id) : idSet.Contains(m.Id)).ToList();
         }
 
         if (sel.FilterCondition is not null)

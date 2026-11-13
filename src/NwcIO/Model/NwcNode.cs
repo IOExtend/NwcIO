@@ -34,8 +34,11 @@ public sealed class NwcNode
     /// <summary>Material assigned to this node.</summary>
     public NwcMaterial? Material { get; set; }
 
-    /// <summary>Associated 3D mesh geometry if this node represents a geometric element.</summary>
+    /// <summary>The first of <see cref="Meshes"/> for Navisworks model files read through their DbCache directory (files written by <c>NwcWriter</c> and other containers leave <see cref="Meshes"/> empty); null when the node has no geometry.</summary>
     public NwcMesh? Mesh { get; set; }
+
+    /// <summary>Every mesh instance placed at this node; <see cref="Mesh"/> is the first of them. Only Navisworks model files read through their DbCache directory fill it (files written by <c>NwcWriter</c> and other containers leave it empty).</summary>
+    public List<NwcMesh> Meshes { get; } = [];
 
     public override string ToString() => $"{Name} ({Class}) [Children: {Children.Count}, Props: {Properties.Count}]";
 }

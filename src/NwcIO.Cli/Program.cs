@@ -65,7 +65,7 @@ internal static class Program
           --no-materials     Disable material and surface color extraction
           --catalog          Include raw container stream catalog (offsets, sizes, kinds)
           --no-transforms    Exclude 3D transform matrices from JSON export
-          --no-tree          Exclude hierarchical scene graph tree from JSON export
+          --no-tree          Skip reading the scene tree and exclude it from JSON export (required to open a .nwd)
           --no-indent        Write compact JSON instead of pretty-printed indented JSON
           --bvh-stats        Include Bounding Volume Hierarchy (BVH) spatial index statistics
           --raycast <coords> Perform 3D raycast test: "originX,originY,originZ,dirX,dirY,dirZ"
@@ -80,6 +80,9 @@ internal static class Program
           2  File or folder not found
           3  Data format error or parsing failure
         """;
+
+    // The reader throws NotSupportedException only for a scene tree it cannot decode (class-32 partition nodes).
+    private const string NoTreeHint = " Use --no-tree to read geometry and placement without the scene tree.";
 
     public static int Main(string[] args)
     {
@@ -546,7 +549,7 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
             }
 
             if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
@@ -557,12 +560,12 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
+            Console.Error.WriteLine($"Error: {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
         }
 
@@ -590,7 +593,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error reading '{inputPath}': {ex.Message}");
+            Console.Error.WriteLine($"Error reading '{inputPath}': {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return 3;
         }
 
@@ -906,7 +909,7 @@ internal static class Program
                     Console.Error.WriteLine($"Error: Baseline file '{explicitDiffBaseline}' not found.");
                     return 2;
                 }
-                var baseDoc = NwcDocument.Open(explicitDiffBaseline);
+                var baseDoc = NwcDocument.Open(explicitDiffBaseline, new NwcReaderOptions { BuildSceneTree = includeTree });
                 var diffReport = baseDoc.Compare(doc, new Model.Diff.NwcDiffOptions { GeometricTolerance = diffTolerance });
 
                 if (!string.IsNullOrEmpty(explicitDiffJsonPath))
@@ -1101,11 +1104,12 @@ internal static class Program
         string? explicitClashMatrixMdPath = null,
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
-        string? explicitTimeLinerPrimaveraPath = null)
+        string? explicitTimeLinerPrimaveraPath = null,
+        bool includeTree = true)
     {
         outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
 
-        var assembly = NwcAssembly.LoadFromDirectory(dirPath);
+        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1376,10 +1380,11 @@ internal static class Program
         string? explicitClashMatrixMdPath = null,
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
-        string? explicitTimeLinerPrimaveraPath = null)
+        string? explicitTimeLinerPrimaveraPath = null,
+        bool includeTree = true)
     {
         outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
-        var assembly = NwcAssembly.OpenNwf(nwfPath);
+        var assembly = NwcAssembly.OpenNwf(nwfPath, new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {

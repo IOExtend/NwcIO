@@ -157,15 +157,7 @@ public static class NwcDiffEngine
                     }
                 }
 
-                if (baseItem.Mesh is not null && rev.Mesh is not null)
-                {
-                    if (baseItem.Mesh.Vertices.Count != rev.Mesh.Vertices.Count ||
-                        baseItem.Mesh.Indices.Count != rev.Mesh.Indices.Count)
-                    {
-                        geomChanged = true;
-                    }
-                }
-                else if ((baseItem.Mesh is null) != (rev.Mesh is null))
+                if (GeometryCounts(baseItem) != GeometryCounts(rev))
                 {
                     geomChanged = true;
                 }
@@ -310,6 +302,23 @@ public static class NwcDiffEngine
         }
     }
 
+    // Totals over every fragment of the node, like the bounds; null when the item has no geometry.
+    private static (long Vertices, long Indices)? GeometryCounts(DiffItem item)
+    {
+        if (item.Node is { Meshes.Count: > 0 } node)
+        {
+            long vertices = 0, indices = 0;
+            foreach (var mesh in node.Meshes)
+            {
+                vertices += mesh.Vertices.Count;
+                indices += (long)mesh.Indices.Count + mesh.LineIndices.Count;
+            }
+            return (vertices, indices);
+        }
+
+        return item.Mesh is null ? null : (item.Mesh.Vertices.Count, item.Mesh.Indices.Count);
+    }
+
     private static List<DiffItem> CollectItems(NwcDocument doc)
     {
         var items = new List<DiffItem>();
@@ -324,12 +333,20 @@ public static class NwcDiffEngine
                 // An item represents an element if it has GUID, Mesh, or properties and is a leaf or designated category
                 bool isElement = node.ElementGuid.HasValue ||
                                  node.Mesh is not null ||
+                                 node.Meshes.Count > 0 ||
                                  (node.Children.Count == 0 && (node.Properties.Count > 0 || !string.IsNullOrEmpty(node.Name)));
 
                 if (isElement)
                 {
                     var bounds = BoundingBox3d.Empty;
-                    if (node.Mesh is not null)
+                    if (node.Meshes.Count > 0)
+                    {
+                        foreach (var nodeMesh in node.Meshes)
+                        {
+                            bounds = bounds.Union(nodeMesh.GetWorldBoundingBox());
+                        }
+                    }
+                    else if (node.Mesh is not null)
                     {
                         bounds = node.Mesh.GetWorldBoundingBox();
                     }

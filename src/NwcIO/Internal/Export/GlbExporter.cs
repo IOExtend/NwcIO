@@ -86,12 +86,13 @@ public static class GlbExporter
             }
 
             // Keep only complete triangles that reference existing vertices.
+            var faces = worldCoordinates ? mesh.GetWorldIndices() : mesh.Indices;
             var indices = new List<int>();
-            for (int i = 0; i <= mesh.Indices.Count - 3; i += 3)
+            for (int i = 0; i <= faces.Count - 3; i += 3)
             {
-                int i0 = mesh.Indices[i];
-                int i1 = mesh.Indices[i + 1];
-                int i2 = mesh.Indices[i + 2];
+                int i0 = faces[i];
+                int i1 = faces[i + 1];
+                int i2 = faces[i + 2];
                 if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount || i2 < 0 || i2 >= vCount)
                 {
                     continue;

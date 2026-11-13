@@ -48,6 +48,73 @@ public class CliExitCodeTests
     }
 
     [Fact]
+    public void PartitionHierarchyNwc_Exits3WithoutNoTreeAndOpensWithIt()
+    {
+        string root = TempRoot();
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "p.nwc");
+        string json = Path.Combine(root, "out.json");
+        File.WriteAllBytes(path, ModelGraphReaderTests.PartitionFile());
+        using var error = new StringWriter();
+        var originalError = Console.Error;
+        try
+        {
+            Console.SetError(error);
+            Assert.Equal(3, NwcIO.Cli.Program.Main([path, json]));
+            Console.SetError(originalError);
+            Assert.Contains("Use --no-tree", error.ToString());
+            Assert.False(File.Exists(json));
+
+            Assert.Equal(0, NwcIO.Cli.Program.Main([path, json, "--no-tree"]));
+            Assert.True(File.Exists(json));
+        }
+        finally
+        {
+            Console.SetError(originalError);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void PartitionHierarchyFolder_Exits3WithoutNoTreeAndOpensWithIt()
+    {
+        string root = TempRoot();
+        string dir = Path.Combine(root, "models");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "p.nwc"), ModelGraphReaderTests.PartitionFile());
+        string glb = Path.Combine(root, "out.glb");
+        try
+        {
+            Assert.Equal(3, NwcIO.Cli.Program.Main([dir, glb]));
+            Assert.Equal(0, NwcIO.Cli.Program.Main([dir, glb, "--no-tree"]));
+            Assert.True(File.Exists(glb));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void PartitionHierarchyDiffBaseline_OpensWithNoTree()
+    {
+        string root = TempRoot();
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "p.nwc");
+        File.WriteAllBytes(path, ModelGraphReaderTests.PartitionFile());
+        string diff = Path.Combine(root, "diff.json");
+        try
+        {
+            Assert.Equal(0, NwcIO.Cli.Program.Main([path, Path.Combine(root, "out.json"), "--no-tree", "--diff", path, "--diff-json", diff]));
+            Assert.True(File.Exists(diff));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void CorruptNwfFile_Exits3WithoutThrowing()
     {
         string root = TempRoot();

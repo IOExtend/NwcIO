@@ -1108,7 +1108,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             if (item.nodeIds && item.nodeIds.length > 0) {
               const idSet = new Set(item.nodeIds);
               gpuMeshes.forEach(gm => {
-                if ((gm.raw.nodeId !== undefined && idSet.has(gm.raw.nodeId)) || idSet.has(gm.raw.id)) {
+                const nid = gm.raw.nodeId !== undefined ? gm.raw.nodeId : gm.raw.id;
+                if (idSet.has(nid)) {
                   selectedSetMeshIndices.add(gm.index);
                 }
               });

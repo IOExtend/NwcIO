@@ -19,6 +19,18 @@ public sealed class NwcMesh
     /// </summary>
     public required IReadOnlyList<int> Indices { get; init; }
 
+    /// <summary>
+    /// Unit normal per entry of <see cref="Vertices"/>, local space; null when none stored;
+    /// <see cref="Vector3d.Zero"/> = no normal; world normal = normalize(sign(Scale)·R·n).
+    /// </summary>
+    public IReadOnlyList<Vector3d>? Normals { get; init; }
+
+    /// <summary>
+    /// Segment index pairs into <see cref="Vertices"/>; a closed polyline repeats its first vertex;
+    /// empty for triangle meshes.
+    /// </summary>
+    public IReadOnlyList<int> LineIndices { get; init; } = [];
+
     /// <summary>Axis-aligned bounding box of the mesh in local coordinates.</summary>
     public BoundingBox3d? BoundingBox { get; init; }
 
@@ -38,6 +50,12 @@ public sealed class NwcMesh
 
     /// <summary>Owning scene hierarchy node associated with this mesh.</summary>
     public NwcNode? Node { get; set; }
+
+    /// <summary>
+    /// Identity of the element this mesh belongs to, shared by every fragment of one leaf of one document;
+    /// null when unknown.
+    /// </summary>
+    internal object? ElementKey { get; init; }
 
     /// <summary>Number of triangle faces in this mesh.</summary>
     public int TriangleCount => Indices.Count / 3;
@@ -116,6 +134,30 @@ public sealed class NwcMesh
             }
 
             world[i] = new Vector3d(wx, wy, wz);
+        }
+
+        return world;
+    }
+
+    /// <summary>
+    /// <see cref="Indices"/> for world-space output: triangles are reversed when the transform mirrors (negative scale).
+    /// </summary>
+    internal IReadOnlyList<int> GetWorldIndices()
+    {
+        if (Transform is not { Scale: < 0 })
+        {
+            return Indices;
+        }
+
+        var world = new int[Indices.Count];
+        for (int i = 0; i < world.Length; i++)
+        {
+            world[i] = Indices[i];
+        }
+
+        for (int i = 0; i + 2 < world.Length; i += 3)
+        {
+            (world[i + 1], world[i + 2]) = (world[i + 2], world[i + 1]);
         }
 
         return world;

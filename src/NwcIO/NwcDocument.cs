@@ -101,7 +101,8 @@ public sealed class NwcDocument
 
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
-    /// <exception cref="InvalidDataException">The file is not an LcUStream container.</exception>
+    /// <exception cref="InvalidDataException">The file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
     {
         if (!File.Exists(path))
@@ -116,7 +117,8 @@ public sealed class NwcDocument
     }
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>
-    /// <exception cref="InvalidDataException">The stream is not an LcUStream container.</exception>
+    /// <exception cref="InvalidDataException">The stream is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -124,6 +126,7 @@ public sealed class NwcDocument
 
         var container = NwcContainerReader.Read(stream);
         StreamClassifier.ClassifyAll(container.Streams);
+        var segments = ModelGraphReader.Locate(container);
 
         var fileInfo = new NwcFileInfo();
         var headerStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.PartitionHeader);
@@ -131,6 +134,8 @@ public sealed class NwcDocument
         {
             fileInfo = PartitionHeaderParser.Parse(headerStream);
         }
+
+        string rootName = Path.GetFileNameWithoutExtension(fileInfo.SourcePath ?? fallbackName ?? "Model");
 
         var records = new List<NwcPropertyRecord>();
         if (options.ReadPropertyRecords)
@@ -155,25 +160,34 @@ public sealed class NwcDocument
         }
 
         var transforms = new List<NwcTransform>();
-        if (options.ReadTransforms)
-        {
-            foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.Transforms))
-            {
-                transforms.AddRange(TransformParser.Parse(s));
-            }
-        }
-
         var meshes = new List<NwcMesh>();
-        if (options.ReadMeshes)
-        {
-            meshes.AddRange(MeshParser.Parse(container, transforms));
-        }
-
         NwcNode? rootNode = null;
-        if (options.BuildSceneTree)
+        if (segments is not null)
         {
-            string rootName = Path.GetFileNameWithoutExtension(fileInfo.SourcePath ?? fallbackName ?? "Model");
-            rootNode = SceneTreeBuilder.Build(rootName, records, transforms, guids);
+            var graph = ModelGraphReader.Read(segments, options, rootName);
+            transforms.AddRange(graph.Transforms);
+            meshes.AddRange(graph.Meshes);
+            rootNode = graph.Root;
+        }
+        else
+        {
+            if (options.ReadTransforms)
+            {
+                foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.Transforms))
+                {
+                    transforms.AddRange(TransformParser.Parse(s));
+                }
+            }
+
+            if (options.ReadMeshes)
+            {
+                meshes.AddRange(MeshParser.Parse(container, transforms));
+            }
+
+            if (options.BuildSceneTree)
+            {
+                rootNode = SceneTreeBuilder.Build(rootName, records, transforms, guids);
+            }
         }
 
         var materials = new List<NwcMaterial>();
@@ -189,9 +203,9 @@ public sealed class NwcDocument
             xRefs = XRefTableParser.Parse(xrefStream);
         }
 
-        NwcDbCacheDirectory? dbCache = null;
+        var dbCache = segments?.Directory;
         var dbCacheStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.DbCache);
-        if (dbCacheStream is not null)
+        if (dbCache is null && dbCacheStream is not null)
         {
             dbCache = DbCacheParser.Parse(dbCacheStream);
         }

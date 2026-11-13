@@ -204,6 +204,48 @@ public class MeshParserTests
     }
 
     [Fact]
+    public void Mesh_GetWorldVertices_WithMirroredTransform_AppliesScale()
+    {
+        var mesh = new NwcMesh { Id = 1, Vertices = [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 1, Translation = new(10, 0, 0), Scale = -1 } };
+        Assert.Equal([new Vector3d(9, 0, 0), new(10, -1, 0), new(10, 0, -1)], mesh.GetWorldVertices());
+        Assert.Equal(new BoundingBox3d(new(9, -1, -1), new(10, 0, 0)), mesh.GetWorldBoundingBox());
+    }
+
+    [Theory]
+    [InlineData(-1.0, new[] { 0, 2, 1, 2, 3, 1 })]
+    [InlineData(100.0, new[] { 0, 1, 2, 2, 1, 3 })]
+    [InlineData(1.0, new[] { 0, 1, 2, 2, 1, 3 })]
+    public void Mesh_GetWorldIndices_ReversesTrianglesOnlyForNegativeScale(double scale, int[] expected)
+    {
+        int[] indices = [0, 1, 2, 2, 1, 3];
+        var mesh = new NwcMesh { Id = 1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = indices,
+            Transform = new NwcTransform { Id = 1, Scale = scale } };
+        Assert.Equal(expected, mesh.GetWorldIndices());
+        Assert.Equal([0, 1, 2, 2, 1, 3], indices);
+        if (scale > 0) Assert.Same(indices, mesh.GetWorldIndices());
+    }
+
+    [Fact]
+    public void Mesh_GetWorldIndices_LeavesAnIncompleteTrailingTriple()
+    {
+        var mesh = new NwcMesh { Id = 1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = [0, 1, 2, 3],
+            Transform = new NwcTransform { Id = 1, Scale = -1 } };
+        Assert.Equal([0, 2, 1, 3], mesh.GetWorldIndices());
+    }
+
+    [Fact]
+    public void Mesh_NewMembers_DefaultToEmpty()
+    {
+        var mesh = new NwcMesh { Id = 1, Vertices = [], Indices = [] };
+        Assert.Null(mesh.Normals);
+        Assert.Empty(mesh.LineIndices);
+        Assert.Same(mesh.Indices, mesh.GetWorldIndices());
+        Assert.Equal(1.0, new NwcTransform { Id = 1 }.Scale);
+        Assert.Empty(new NwcNode { Id = 0, Name = "n", Class = "c" }.Meshes);
+    }
+
+    [Fact]
     public void MeshParser_SyntheticBuffer_ParsesTriangleStripCorrectly()
     {
         // Construct a synthetic raw stream with Tag 60 header and 4 vertices
@@ -313,5 +355,20 @@ public class MeshParserTests
 
         var meshes = MeshParser.Parse(container);
         Assert.Empty(meshes);
+    }
+
+    [Fact]
+    public void IsStrip_AgreesWithBuildStripIndices_AndRejectsSwappedPair()
+    {
+        for (int n = 3; n <= 8; n++)
+        {
+            int[] strip = MeshParser.BuildStripIndices(n);
+            Assert.True(MeshParser.IsStrip(strip, n));
+
+            int[] swapped = (int[])strip.Clone();
+            (swapped[0], swapped[1]) = (swapped[1], swapped[0]);
+            Assert.False(MeshParser.IsStrip(swapped, n));
+            Assert.False(MeshParser.IsStrip(strip.Take(strip.Length - 1).ToArray(), n));
+        }
     }
 }

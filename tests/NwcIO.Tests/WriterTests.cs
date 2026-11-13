@@ -173,6 +173,49 @@ public class WriterTests
         Assert.Equal(viewpoints.Select(v => v.Name), reopened.SavedViewpoints.Select(v => v.Name));
     }
 
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(100.0)]
+    [InlineData(double.NaN)]
+    public void Writer_RejectsScaledTransform_WithoutChangingDestination(double scale)
+    {
+        var transform = new NwcTransform { Id = 7, Scale = scale };
+        var mesh = new NwcMesh { Id = 3, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2], Transform = transform };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh], transforms: [transform]), "Transform 7");
+    }
+
+    [Fact]
+    public void Writer_RejectsLineMesh_WithoutChangingDestination()
+    {
+        var mesh = new NwcMesh { Id = 5, Vertices = [new(0, 0, 0), new(1, 0, 0), new(1, 1, 0)], Indices = [], LineIndices = [0, 1, 1, 2] };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 5");
+    }
+
+    // The writer stores positions only and the reader rebuilds one strip over them.
+    [Theory]
+    [InlineData(new[] { 0, 1, 2, 0, 2, 3 }, 4)]
+    [InlineData(new[] { 0, 1, 2, 2, 1, 3, 4, 5, 6 }, 7)]
+    [InlineData(new[] { 0, 2, 1 }, 3)]
+    public void Writer_RejectsTopologyTheStripCannotRepresent_WithoutChangingDestination(int[] indices, int vertexCount)
+    {
+        var mesh = new NwcMesh { Id = 9, Vertices = StripVertices(vertexCount), Indices = indices };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 9 has triangles the .nwc writer cannot store");
+    }
+
+    [Theory]
+    [InlineData(new[] { 0, 1, 2 }, 3)]
+    [InlineData(new[] { 0, 1, 2, 2, 1, 3 }, 4)]
+    [InlineData(new[] { 0, 1, 2, 2, 1, 3, 2, 3, 4 }, 5)]
+    [InlineData(new int[] { }, 3)]
+    public void Writer_AcceptsSingleStripAndEmptyIndices(int[] indices, int vertexCount)
+    {
+        var mesh = new NwcMesh { Id = 9, Vertices = StripVertices(vertexCount), Indices = indices };
+        var reopened = NwcDocument.Open(new MemoryStream(NwcDocument.Create(meshes: [mesh]).ToByteArray()));
+        Assert.Equal(mesh.Vertices, Assert.Single(reopened.Meshes).Vertices);
+    }
+
+    private static Vector3d[] StripVertices(int count) => Enumerable.Range(0, count).Select(i => new Vector3d(i / 2, i % 2, 0)).ToArray();
+
     private static void AssertRejectedWithoutChangingDestination(NwcDocument doc, string item, string? header = null)
     {
         Assert.Contains(item, Assert.Throws<ArgumentException>(() => doc.ToByteArray(header)).Message);
@@ -256,7 +299,7 @@ public class WriterTests
         {
             Id = id,
             Vertices = Enumerable.Range(0, vertexCount).Select(v => new Vector3d(v, v % 2, id)).ToArray(),
-            Indices = [0, 1, 2],
+            Indices = [], // the reader rebuilds the strip; one triangle over 124 vertices is not storable
         }).ToArray();
         var guids = withGuids
             ? new[] { Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"), Guid.Parse("ffeeddcc-bbaa-9988-7766-554433221100") }
