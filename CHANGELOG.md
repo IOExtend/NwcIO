@@ -4,14 +4,31 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Strict geometry reader for Navisworks model files. It runs when section 1 of the container holds exactly one stream that parses as a DbCache directory naming `LcOpNwdLogicalHierarchy`, `LcOpNwdFragments` or `LcOpNwdGeometry`; every other container, including files written by NwcIO, keeps the previous reader. A malformed model file throws `InvalidDataException` naming the segment instead of returning a partial document.
+- Triangle strips, polylines and stored normals are decoded from geometry records; node links, scaled poses and mirrored placements are read from the hierarchy and fragments.
+- New public members: `NwcTransform.Scale`, `NwcMesh.Normals`, `NwcMesh.LineIndices` and `NwcNode.Meshes`.
+- Node properties are read on the strict path: `Class` is the property tab name (category, for example `Element`), `Name` the property name and `FirstInt` the key object id.
+
+### Changed
+- Model files now produce one `NwcMesh` and one `NwcTransform` per fragment. `Id` of both is the fragment index; node ids are depth-first preorder indices; `NwcMesh.Node` is its leaf, `NwcNode.Meshes` holds every placed mesh and `NwcNode.Mesh` the first. Records shared between fragments share arrays. Persisted ids and IFC/BCF GUIDs derived from them change for these files.
+- `NwcNode.Transform` and `NwcNode.ElementGuid` are null on the strict path.
+- Opening a `.nwd` whose hierarchy holds partition nodes (class 32) throws `NotSupportedException` unless `BuildSceneTree` is false. The CLI appends a `--no-tree` hint and still exits with code 3, and passes `--no-tree` when loading `.nwf` files.
+- `NwcWriter` rejects, before writing, transforms with a scale other than 1 and meshes that hold line segments, with `ArgumentException`.
+- GLB, OBJ and IFC export reverse triangles of mirrored placements, only when baking world coordinates. The triangle clash detector never tests line-only meshes as triangles; diff and appearance rules use every mesh of a node; grids take the first line mesh of a node.
+- `NwcDbCacheEntry.Offset` is an absolute file offset, `Extra` is `a + b*2^32`, and `NwcDbCacheDirectory.DatabaseName` is the name of the `LcOpDBCache` entry or `""`.
+
 ### Fixed
 - Import and link TimeLiner schedules before single-document CLI exports, including primary CSV output and `--timeliner-csv`.
 - Count each mesh pair once when a federated clash test uses identical selections on both sides.
 - Correct the README and getting-started API/CLI examples and the discipline-pair tolerance assignments.
+- Read every DbCache directory entry; the parser stopped at the first entry that was not 8-byte aligned.
+- Read `.nwd` geometry with more than 5000 chunks.
 
 ### Documentation
 
 - **Documentation**: Added a "Scope and frozen features" section to the README listing the extras that now receive bug fixes only and their planned replacements.
+- **Documentation**: Rewrote the format notes for the logical hierarchy, fragments, table of contents, geometry records and DbCache directory, and updated the README and public API notes for the new reader and the `.nwd` scene-tree limitation.
 
 ## [0.10.0] - 2026-11-11
 

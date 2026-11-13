@@ -146,12 +146,15 @@ The documentation site with API references and guides is at <https://ioextend.gi
 
 ## Supported files
 
-Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisworks Federated (`.nwf`) files. Tested against models saved across Navisworks 2016 through 2026.
+Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisworks Federated (`.nwf`) files. Tested against models saved across Navisworks 2016 through 2026. Scene trees of `.nwd` files with partition nodes are not decoded yet: open them with `BuildSceneTree = false`.
 
 ## Limitations
 
 - Version 0.10.0 is a preview. The API can evolve before 1.0.
-- Geometry extraction supports triangle meshes, line sets, cylinders, and point clouds; proprietary custom parametric solids are tessellated.
+- Geometry extraction decodes triangle strips, polylines and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported.
+- `.nwd` scene trees with partition nodes are not decoded yet: open with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference `.nwd` files.
+- The `.nwc` writer stores vertex positions and rotation/translation; it rejects scaled transforms and line meshes.
+- The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property references, and at most one render vertex or corner per geometry-record byte. Files beyond these limits fail with `InvalidDataException`.
 - Writing native `.nwd` files is not supported (export targets native `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
 
 ## Scope and frozen features

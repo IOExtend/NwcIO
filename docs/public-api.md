@@ -10,15 +10,15 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here.
 
 | Type | Description |
 |---|---|
-| `NwcDocument` | Primary document container holding the root scene graph node, meshes, materials, viewpoints, selection sets, and TimeLiner schedules. Opens `.nwc`, `.nwd`, and `.nwf` files via `NwcDocument.Open`. |
+| `NwcDocument` | Primary document container holding the root scene graph node, meshes, materials, viewpoints, selection sets, and TimeLiner schedules. Opens `.nwc`, `.nwd`, and `.nwf` files via `NwcDocument.Open`; `.nwd` scene trees with partition nodes throw `NotSupportedException` unless `BuildSceneTree` is false. |
 | `NwcDocumentBuilder` | Fluent builder API for creating Navisworks documents and geometry programmatically from code. |
 | `NwcWriter` | Direct `#LcUStream-V1.1` binary container serializer and continuous zlib chunk writer. |
 | `NwcReaderOptions` | Per-open options: which streams to read (meshes, materials, viewpoints, selection sets, TimeLiner), catalog retention. |
 | `NwcAssembly` | Federated multi-model assembly: `Create`, `LoadFromDirectory`, `OpenNwf` (with `UnresolvedXRefs`/`SkippedXRefs` reporting), combined meshes/materials/bounds, per-assembly exports and clash runs. |
-| `NwcNode` | Scene graph tree node representing layers, categories, composite elements, and geometry instances with hierarchical transformations and properties. |
+| `NwcNode` | Scene graph tree node representing layers, categories, composite elements, and geometry instances with hierarchical transformations and properties. `Meshes` lists every mesh placed on a leaf and `Mesh` the first. Ids of navisworks model files are depth-first preorder indices; `Transform` and `ElementGuid` are null there. |
 | `NwcPropertyRecord` | Property key-value record (class, name, string value, tags) as parsed from Navisworks property streams. |
-| `NwcMesh` & `NwcMaterial` | Triangle mesh with vertices, indices, world-space transform, bounding box, and PBR material. |
-| `NwcTransform` | Parsed pose/transform records with quaternion rotation and affine 4×4 matrix conversion. |
+| `NwcMesh` & `NwcMaterial` | Triangle mesh with vertices, indices, `Normals` aligned with vertices, `LineIndices` for polylines, world-space transform, bounding box, and PBR material. Model files hold one mesh per placed fragment; `Id` is the fragment index. |
+| `NwcTransform` | Parsed pose/transform records with quaternion rotation, uniform `Scale` (negative for a mirrored placement) and affine 4×4 matrix conversion. Model files hold one transform per fragment, with the same `Id` as its mesh. |
 | `NwcFileInfo` | Source path, loader plugin, and export timestamp from the partition header. |
 | `NwcXRef` & `NwcXRefTable` | External references with suffix-based resolution (`TryResolve`, `Exists`) and the parsed XRef table. |
 | `NwcCamera`, `NwcSavedViewpoint`, `NwcCameraProjection` | Camera model (position, unit rotation quaternion, computed direction/up/target) and saved viewpoints. |
