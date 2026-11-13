@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using NwcIO.Model;
 using Xunit;
 using Xunit.Abstractions;
@@ -40,7 +41,17 @@ public class RealFileInvariantTests
     [RealFixtureFact]
     public void OpenEveryFixture_HoldsReaderInvariants()
     {
-        var files = TestFiles.EnumerateAll();
+        IReadOnlyList<string> files;
+        try
+        {
+            files = TestFiles.EnumerateAll();
+        }
+        catch (Exception ex)
+        {
+            // An IO error message can carry a fixture path.
+            throw new XunitException($"fixture enumeration: {ex.GetType().Name}");
+        }
+
         var totals = new Totals();
 
         for (var i = 0; i < files.Count; i++)
@@ -82,18 +93,26 @@ public class RealFileInvariantTests
 
     private void CheckNwd(int i, string path, Totals totals)
     {
+        // The first document is not referenced after this call, so it can be collected before the second open.
+        CheckMeshes(i, OpenWithoutTree(i, path), totals, withNodes: false);
+
+        // This open inflates the whole container again and throws at the hierarchy, before any geometry record is decoded.
+        Check(ThrowsNotSupported(path), i, "nwd-default-open-must-throw");
+    }
+
+    private NwcDocument OpenWithoutTree(int i, string path)
+    {
         var sw = Stopwatch.StartNew();
         var doc = NwcDocument.Open(path, new NwcReaderOptions { BuildSceneTree = false });
         sw.Stop();
         using (var process = Process.GetCurrentProcess())
         {
-            _output.WriteLine($"#{i} open {sw.Elapsed.TotalSeconds:F1} s, peak working set {process.PeakWorkingSet64 / (1024 * 1024)} MB");
+            _output.WriteLine(string.Create(
+                CultureInfo.InvariantCulture,
+                $"#{i} open {sw.Elapsed.TotalSeconds:F1} s, peak working set {process.PeakWorkingSet64 / (1024 * 1024)} MB"));
         }
 
-        CheckMeshes(i, doc, totals, withNodes: false);
-
-        // The hierarchy is read before any geometry, so this second open does no geometry work.
-        Check(ThrowsNotSupported(path), i, "nwd-default-open-must-throw");
+        return doc;
     }
 
     private static bool ThrowsNotSupported(string path)
