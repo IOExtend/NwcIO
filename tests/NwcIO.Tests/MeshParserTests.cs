@@ -9,6 +9,78 @@ namespace NwcIO.Tests;
 public class MeshParserTests
 {
     [Theory]
+    [InlineData(3, 0, 72)]
+    [InlineData(0, 9, 72)]
+    [InlineData(3, 0, int.MaxValue)]
+    [InlineData(0, 9, int.MaxValue)]
+    public void Parse_LastTocRecordWithOverlongLength_ParsesVerticesThatFit(int p1, int p2, int declaredLength)
+    {
+        var record = Int32Bytes(0, 94, 0, 60, p1, p2,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = record.Concat(record).ToArray();
+        var toc = Int32Bytes(2, 1, chunk.Length, record.Length, declaredLength);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        // The first mesh prevents heuristic fallback from masking a skipped final record.
+        var meshes = MeshParser.Parse(container);
+
+        Assert.Equal(2, meshes.Count);
+        Assert.Equal(3, meshes[1].Vertices.Count);
+        Assert.Equal(new Vector3d(0, 0, 0), meshes[1].Vertices[0]);
+        Assert.Equal(new Vector3d(1, 0, 0), meshes[1].Vertices[1]);
+        Assert.Equal(new Vector3d(0, 1, 0), meshes[1].Vertices[2]);
+        Assert.Equal(1, meshes[1].TriangleCount);
+    }
+
+    [Theory]
+    [InlineData(100, 0, 1224)]
+    [InlineData(0, 0, -100)]
+    [InlineData(0, 0, int.MaxValue)]
+    [InlineData(1073741827, 0, 60)]
+    [InlineData(0, 1073741829, 60)]
+    public void Open_MalformedTocRecord_SkipsMesh(int p1, int p2, int recordLength)
+    {
+        var chunk = Int32Bytes(0, 94, 0, 60, p1, p2, 0, 0);
+        var toc = recordLength < 0
+            ? Int32Bytes(2, 1, chunk.Length, recordLength, 24)
+            : Int32Bytes(1, 1, chunk.Length, recordLength);
+        var bytes = NwcContainerWriter.Write([chunk, toc]);
+        using var file = new MemoryStream(bytes);
+
+        Assert.Empty(NwcDocument.Open(file).Meshes);
+
+        // Classification rejects negative lengths already; exercise the parser guard too.
+        var container = NwcContainerReader.Read(bytes);
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+        Assert.Empty(MeshParser.Parse(container));
+    }
+
+    [Theory]
+    [InlineData(536870912)]
+    [InlineData(int.MaxValue)]
+    public void Parse_OverflowingTocRecordCount_SkipsMesh(int recordCount)
+    {
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([Int32Bytes(recordCount, 1, 32, 24)]));
+        container.Streams[0].Kind = NwcStreamKind.Toc;
+
+        Assert.Empty(MeshParser.Parse(container));
+    }
+
+    private static byte[] Int32Bytes(params int[] values)
+    {
+        var data = new byte[values.Length * 4];
+        for (var i = 0; i < values.Length; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(i * 4), values[i]);
+        }
+
+        return data;
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void Mesh_GetWorldBoundingBox_AfterTransformAssignment_UsesCurrentTransform(bool initiallyTransformed)

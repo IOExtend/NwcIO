@@ -31,7 +31,7 @@ public static class PartitionHeaderParser
             {
                 long seconds = BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(pos));
                 pos += 8;
-                if (seconds > 0)
+                if (seconds is > 0 and <= 253402300799)
                 {
                     info.SourceTimestampUtc = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
                 }
