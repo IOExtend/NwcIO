@@ -269,53 +269,144 @@ public static class NwcMeasureEngine
             return new NwcMeshToMeshMeasurement(meshA, meshB, 0.0, Vector3d.Zero, Vector3d.Zero);
         }
 
-        // Bounding box pre-check
-        var boxA = meshA.GetWorldBoundingBox();
-        var boxB = meshB.GetWorldBoundingBox();
-        if (boxA.Intersects(boxB))
-        {
-            // Boxes intersect - check if vertices of A are close to B
-        }
-
-        double minDistance = double.PositiveInfinity;
+        var minDistance = double.PositiveInfinity;
         var bestPtA = Vector3d.Zero;
         var bestPtB = Vector3d.Zero;
+        Span<Vector3d> a = stackalloc Vector3d[3];
+        Span<Vector3d> b = stackalloc Vector3d[3];
 
-        int triCountA = indicesA.Count / 3;
-        int triCountB = indicesB.Count / 3;
-
-        // Sample vertices of A against mesh B
-        for (int i = 0; i < vertsA.Count; i++)
+        for (var i = 0; i + 2 < indicesA.Count; i += 3)
         {
-            var pA = vertsA[i];
-            var m = MeasurePointToMesh(pA, meshB, useWorldCoordinates);
-            if (m.Distance < minDistance)
+            if (!ReadTriangle(vertsA, indicesA, i, a))
             {
-                minDistance = m.Distance;
-                bestPtA = pA;
-                bestPtB = m.ClosestPoint;
-                if (minDistance < 1e-6) break;
+                continue;
             }
-        }
 
-        // Sample vertices of B against mesh A
-        if (minDistance > 1e-6)
-        {
-            for (int i = 0; i < vertsB.Count; i++)
+            for (var j = 0; j + 2 < indicesB.Count; j += 3)
             {
-                var pB = vertsB[i];
-                var m = MeasurePointToMesh(pB, meshA, useWorldCoordinates);
-                if (m.Distance < minDistance)
+                if (!ReadTriangle(vertsB, indicesB, j, b))
                 {
-                    minDistance = m.Distance;
-                    bestPtA = m.ClosestPoint;
-                    bestPtB = pB;
-                    if (minDistance < 1e-6) break;
+                    continue;
+                }
+
+                if (TriangleBoundsDistance(a, b) >= minDistance)
+                {
+                    continue;
+                }
+
+                for (var edge = 0; edge < 3; edge++)
+                {
+                    if (SegmentIntersectsTriangle(a[edge], a[(edge + 1) % 3], b, out var intersection) ||
+                        SegmentIntersectsTriangle(b[edge], b[(edge + 1) % 3], a, out intersection))
+                    {
+                        return new NwcMeshToMeshMeasurement(meshA, meshB, 0.0, intersection, intersection);
+                    }
+
+                    Consider(a[edge], ClosestPointOnTriangle(a[edge], b[0], b[1], b[2]));
+                    Consider(ClosestPointOnTriangle(b[edge], a[0], a[1], a[2]), b[edge]);
+                    for (var otherEdge = 0; otherEdge < 3; otherEdge++)
+                    {
+                        ClosestPointsOnSegments(a[edge], a[(edge + 1) % 3],
+                            b[otherEdge], b[(otherEdge + 1) % 3], out var pointA, out var pointB);
+                        Consider(pointA, pointB);
+                    }
                 }
             }
         }
 
         return new NwcMeshToMeshMeasurement(meshA, meshB, minDistance, bestPtA, bestPtB);
+
+        void Consider(Vector3d pointA, Vector3d pointB)
+        {
+            var distance = Vector3d.Distance(pointA, pointB);
+            if (distance < minDistance)
+            {
+                minDistance = distance;
+                bestPtA = pointA;
+                bestPtB = pointB;
+            }
+        }
+    }
+
+    private static double TriangleBoundsDistance(ReadOnlySpan<Vector3d> a, ReadOnlySpan<Vector3d> b)
+    {
+        var dx = Gap(a[0].X, a[1].X, a[2].X, b[0].X, b[1].X, b[2].X);
+        var dy = Gap(a[0].Y, a[1].Y, a[2].Y, b[0].Y, b[1].Y, b[2].Y);
+        var dz = Gap(a[0].Z, a[1].Z, a[2].Z, b[0].Z, b[1].Z, b[2].Z);
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+
+        static double Gap(double a0, double a1, double a2, double b0, double b1, double b2)
+        {
+            var minA = Math.Min(a0, Math.Min(a1, a2));
+            var maxA = Math.Max(a0, Math.Max(a1, a2));
+            var minB = Math.Min(b0, Math.Min(b1, b2));
+            var maxB = Math.Max(b0, Math.Max(b1, b2));
+            return Math.Max(0.0, Math.Max(minA - maxB, minB - maxA));
+        }
+    }
+
+    private static bool ReadTriangle(IReadOnlyList<Vector3d> vertices, IReadOnlyList<int> indices,
+        int offset, Span<Vector3d> triangle)
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            var index = indices[offset + i];
+            if (index < 0 || index >= vertices.Count)
+            {
+                return false;
+            }
+            triangle[i] = vertices[index];
+        }
+        return true;
+    }
+
+    private static bool SegmentIntersectsTriangle(Vector3d start, Vector3d end,
+        ReadOnlySpan<Vector3d> triangle, out Vector3d point)
+    {
+        // Moller-Trumbore with a segment parameter in [0, 1]. Coplanar contact
+        // is covered by the vertex-to-face and edge-to-edge distance checks.
+        point = Vector3d.Zero;
+        var direction = end - start;
+        var ab = triangle[1] - triangle[0];
+        var ac = triangle[2] - triangle[0];
+        var cross = Vector3d.Cross(direction, ac);
+        var determinant = Vector3d.Dot(ab, cross);
+        if (determinant == 0.0)
+        {
+            return false;
+        }
+
+        var offset = start - triangle[0];
+        var u = Vector3d.Dot(offset, cross) / determinant;
+        var q = Vector3d.Cross(offset, ab);
+        var v = Vector3d.Dot(direction, q) / determinant;
+        var t = Vector3d.Dot(ac, q) / determinant;
+        if (u < 0.0 || v < 0.0 || u + v > 1.0 || t < 0.0 || t > 1.0)
+        {
+            return false;
+        }
+
+        point = start + direction * t;
+        return true;
+    }
+
+    private static void ClosestPointsOnSegments(Vector3d a0, Vector3d a1, Vector3d b0, Vector3d b1,
+        out Vector3d pointA, out Vector3d pointB)
+    {
+        var a = a1 - a0;
+        var b = b1 - b0;
+        var offset = a0 - b0;
+        var aa = Vector3d.Dot(a, a);
+        var bb = Vector3d.Dot(b, b);
+        var ab = Vector3d.Dot(a, b);
+        var ar = Vector3d.Dot(a, offset);
+        var br = Vector3d.Dot(b, offset);
+        var denominator = aa * bb - ab * ab;
+        var s = aa == 0.0 || denominator <= 0.0 ? 0.0 : Math.Clamp((ab * br - ar * bb) / denominator, 0.0, 1.0);
+        var t = bb == 0.0 ? 0.0 : Math.Clamp((ab * s + br) / bb, 0.0, 1.0);
+        s = aa == 0.0 ? 0.0 : Math.Clamp((ab * t - ar) / aa, 0.0, 1.0);
+        pointA = a0 + a * s;
+        pointB = b0 + b * t;
     }
 
     /// <summary>
