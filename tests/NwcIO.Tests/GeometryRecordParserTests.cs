@@ -219,6 +219,16 @@ public class GeometryRecordParserTests
     }
 
     [Theory]
+    [InlineData(24, float.NaN)]                 // first position x
+    [InlineData(68, float.NegativeInfinity)]    // last position z
+    public void Parse_NonFinitePosition_Throws(int offset, float value)
+    {
+        var record = FormatVectors.Patched(FormatVectors.R1, offset, BitConverter.GetBytes(value));
+        var ex = Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
+        Assert.StartsWith("position is not finite at +", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("0480", 6, 5, false, new[] { 0, 1, 2, 3, 4, 4 })]
     [InlineData("0242", 4, 3, false, new[] { 0, 1, 2, 1 })]
     [InlineData("D0D1D5", 3, 0, true, new[] { -1, -2, -6 })]

@@ -145,8 +145,8 @@ internal static class FragmentParser
         // Class 93: [6 f32 bbox: min xyz, max xyz][3 f64 c][f32 f][key][rec]; c, f and key are dropped.
         private GeometryReference ReadGeometry()
         {
-            var min = new Vector3d(_reader.ReadSingle(), _reader.ReadSingle(), _reader.ReadSingle());
-            var max = new Vector3d(_reader.ReadSingle(), _reader.ReadSingle(), _reader.ReadSingle());
+            var min = new Vector3d(ReadBoxValue(), ReadBoxValue(), ReadBoxValue());
+            var max = new Vector3d(ReadBoxValue(), ReadBoxValue(), ReadBoxValue());
             for (int i = 0; i < 3; i++)
             {
                 _reader.ReadDouble();
@@ -155,6 +155,12 @@ internal static class FragmentParser
             _reader.ReadSingle();
             _reader.ReadInt32();
             return new GeometryReference(new BoundingBox3d(min, max), _reader.ReadInt32());
+        }
+
+        private float ReadBoxValue()
+        {
+            float value = _reader.ReadSingle();
+            return float.IsFinite(value) ? value : throw _reader.Fail("geometry box value is not finite");
         }
     }
 }

@@ -92,6 +92,11 @@ internal static class GeometryRecordParser
                 BinaryPrimitives.ReadSingleLittleEndian(span),
                 BinaryPrimitives.ReadSingleLittleEndian(span[4..]),
                 BinaryPrimitives.ReadSingleLittleEndian(span[8..]));
+            if (!double.IsFinite(positions[i].X) || !double.IsFinite(positions[i].Y) || !double.IsFinite(positions[i].Z))
+            {
+                throw Fail("position is not finite", pos + 12 * i);
+            }
+
             bounds = bounds.Union(positions[i]);
         }
 

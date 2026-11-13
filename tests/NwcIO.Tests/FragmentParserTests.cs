@@ -42,6 +42,17 @@ public class FragmentParserTests
         Assert.EndsWith(rule, ex.Message);
     }
 
+    [Theory]
+    [InlineData(188, float.PositiveInfinity)]   // class-93 box min x
+    [InlineData(208, float.NaN)]                // class-93 box max z
+    public void Read_NonFiniteGeometryBox_Throws(int offset, float value)
+    {
+        var bytes = FormatVectors.Patched(FormatVectors.F1, offset, BitConverter.GetBytes(value));
+        var ex = Assert.Throws<InvalidDataException>(() => FragmentParser.Read(bytes));
+        Assert.StartsWith("LcOpNwdFragments at byte ", ex.Message);
+        Assert.EndsWith("geometry box value is not finite", ex.Message);
+    }
+
     [Fact]
     public void Read_ZeroBytesAfterTheEnd_Throws()
     {
