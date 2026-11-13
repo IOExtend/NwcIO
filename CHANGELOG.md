@@ -13,9 +13,14 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 ### Changed
 - Model files now produce one `NwcMesh` and one `NwcTransform` per fragment. `Id` of both is the fragment index; node ids are depth-first preorder indices; `NwcMesh.Node` is its leaf, `NwcNode.Meshes` holds every placed mesh and `NwcNode.Mesh` the first. Records shared between fragments share arrays. Persisted ids and IFC/BCF GUIDs derived from them change for these files.
 - `NwcNode.Transform` and `NwcNode.ElementGuid` are null on the strict path.
-- Opening a `.nwd` whose hierarchy holds partition nodes (class 32) throws `NotSupportedException` unless `BuildSceneTree` is false. The CLI appends a `--no-tree` hint and still exits with code 3, and passes `--no-tree` when loading `.nwf` files.
+- Opening a `.nwd` whose hierarchy holds partition nodes (class 32) throws `NotSupportedException` unless `BuildSceneTree` is false. The CLI appends a `--no-tree` hint and still exits with code 3, and passes `--no-tree` when loading `.nwf` files. `--no-tree` skips reading the scene tree and is required to open a `.nwd` with partition nodes; it now also applies to the `--diff` baseline and to folder input.
 - `NwcWriter` rejects, before writing, transforms with a scale other than 1 and meshes that hold line segments, with `ArgumentException`.
 - GLB, OBJ and IFC export reverse triangles of mirrored placements, only when baking world coordinates. The triangle clash detector never tests line-only meshes as triangles; diff and appearance rules use every mesh of a node; grids take the first line mesh of a node.
+- Clash detection skips pairs of fragments that belong to the same element; federated clash items take the parent layer name as `Layer`, as single-document runs do; `ExplicitNodeIds` match node ids (mesh ids for meshes without a node).
+- The JSON `transforms` block writes `"scale"` when the pose scale is not 1; unscaled output is unchanged. HTML viewer selection-set clicks match meshes by node id, and diff geometry counts cover every fragment of a node.
+- `NwcReaderOptions.ReadPropertyRecords = false` leaves node properties empty on the strict path as well.
+- Non-finite position floats and non-finite geometry box floats make a model file fail with `InvalidDataException`.
+- The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property references, and at most one render vertex or corner per geometry-record byte. Input beyond these limits fails with `InvalidDataException`.
 - `NwcDbCacheEntry.Offset` is an absolute file offset, `Extra` is `a + b*2^32`, and `NwcDbCacheDirectory.DatabaseName` is the name of the `LcOpDBCache` entry or `""`.
 
 ### Fixed

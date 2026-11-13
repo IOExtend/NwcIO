@@ -60,7 +60,6 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Attributes** (slots may be null): `86` property tab `[str name][ptr 52][i32 flags][i32 n] n x ([ptr 52 key][i32 type][value])` with value by type `0` none, `1,5,6,7,10,11` `f64`, `2,3` `i32`, `4` string, `8` class-52 pointer; `31` material; `40` translation; `41` translation and quaternion (`x -> R(q)x + t`); `39` 3x3 column-major matrix and translation; `79` hyperlinks; `200` and `185` material JSON.
 - **Shared subtrees**: a child pointer may back-reference an earlier node, so the hierarchy is a directed acyclic graph. A node reached through several parents appears once per path when the tree is expanded.
 - **Preorder index (`seq`)**: walk from the implicit root in stored order, counting groups, with a shared subtree walked again at every place it occurs. The root has index 0. Every fragment's `seq` indexes this expanded sequence and lands on a leaf; `seq` never decreases along the fragments stream, and a leaf owns one contiguous run of fragments.
-- **Writer**: NwcIO's own writer still emits its single-section layout, which the reader keeps; the object graph above is read, not written.
 
 ### 2.3 GUID Table (`Guids`)
 - **Signature**: `[int32 ?][int32 count]` where `(streamLength - 8) == count * 16`.
@@ -71,7 +70,7 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Classes**:
   - `13` fragment: `[f64 D][i32 a][i32 b][i32 c][i32 seq][ptr pose][ptr appearance][ptr geometry]`.
     - `seq`: preorder index of the owning leaf (§2.2).
-    - `a`: triangle count (sum of strip lengths minus 2) for a triangle record, segment count (sum of polyline lengths minus 1) for a line record.
+    - `a`: triangle count Σ(L − 2) over the strip lengths `L` for a triangle record, segment count Σ(L − 1) over the polyline lengths `L` for a line record.
     - `D`, `b`, `c`: not decoded.
   - `15` pose: `[3 x f64 t][4 x f64 q]`, `q = (x, y, z, w)` a unit quaternion.
   - `16` pose with scale: class 15 plus `[f64 s]`. The scale is a uniform factor and can be negative.
@@ -101,6 +100,8 @@ NSLOT  := 0 | [id][100][-p1][pal] PACKED(3*pal, B) NTOK?   (NTOK iff pal != p1)
 CSLOT  := 0 | [id][58][5634][-p1][pal][pal x 4 bytes] CTOK?  (CTOK iff pal != p1)
 P      := [n][bits][n][ceil(n*bits/32) words]         (strip or polyline lengths L)
 SFIELD := [S] TOKENS(S, p1)?                          (class 94 only; tokens iff S > 0)
+UVBODY := [p1][fc][fc x f32] TOKENS(p1, fc/2)?        (raw; tokens iff fc/2 != p1)
+        | [-p1][4 x f32][w][m][ceil(m*(bu+bv)/32) words] TOKENS(p1, m)?   (quantised; tokens iff m != p1)
 ```
 
 - **Class**: `94` triangles, `95` lines. Class 94 always has a normal slot and never a colour slot; class 95 has only the colour slot. Object ids run 100, 101, then 102, 103 over the slots present.
@@ -121,6 +122,7 @@ SFIELD := [S] TOKENS(S, p1)?                          (class 94 only; tokens iff
 - **Normals** (class 94): a palette entry is three two's-complement values of width `B`, divided by `2^(B-1)-1` and normalised; a zero vector means no normal. `B` is not stored in the record: it is the width under which every record of the file parses (16 for `.nwc`, 8 for `.nwd`). Render vertex `r` takes `palette[NIdx[r]]`, or an axis vector for an axis code (`D0` +X, `D1` -X, `D2` +Y, `D3` -Y, `D4` +Z, `D5` -Z).
 - **Triangles** (class 94): corners are `0..p1-1` when `S = 0`, otherwise `TOKENS(S, p1)`. They are split by `L` into consecutive strips; in each strip, triangle `i` is `(c[i], c[i+1], c[i+2])` for even `i` and `(c[i+1], c[i], c[i+2])` for odd `i`. Parity restarts in every strip. The triangle count is the sum of `L-2`. Front faces are counter-clockwise.
 - **Polylines** (class 95): render vertices `0..p1-1` are split by `L` into open polylines; the segment count is the sum of `L-1`. There is no implicit closing segment.
+- **UVBODY**: the raw form has a non-negative first int `p1` and `fc` floats (two per UV pair, `fc/2` pairs). The quantised form has `-p1`, four floats, then `w`, `m` and the packed words; `bu = w & 0xFF` and `bv = (w >> 8) & 0xFF` are the bit widths of the two coordinates, so the packed block is `ceil(m*(bu+bv)/32)` words. The token stream maps each of the `p1` render vertices to one of the `fc/2` or `m` stored pairs.
 - **Not decoded**: UV values and colour channels. Only their lengths and maps are read, to find the next field.
 
 ### 2.7 DB Cache Directory (`DbCache` / `LcOpDBCache`)

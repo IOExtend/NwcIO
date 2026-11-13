@@ -24,7 +24,8 @@ public sealed class NwcTransform
     public double Scale { get; init; } = 1.0;
 
     /// <summary>
-    /// Computes the 4x4 affine transformation matrix in row-major order:
+    /// Computes the 4x4 affine transformation matrix in row-major order. The upper 3x3 block is
+    /// <see cref="Scale"/>·R, where R is the rotation matrix of <see cref="Rotation"/> (entries shown as R):
     /// <code>
     /// [ R00, R01, R02, 0 ]
     /// [ R10, R11, R12, 0 ]

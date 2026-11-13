@@ -65,7 +65,7 @@ internal static class Program
           --no-materials     Disable material and surface color extraction
           --catalog          Include raw container stream catalog (offsets, sizes, kinds)
           --no-transforms    Exclude 3D transform matrices from JSON export
-          --no-tree          Exclude hierarchical scene graph tree from JSON export
+          --no-tree          Skip reading the scene tree and exclude it from JSON export (required to open a .nwd)
           --no-indent        Write compact JSON instead of pretty-printed indented JSON
           --bvh-stats        Include Bounding Volume Hierarchy (BVH) spatial index statistics
           --raycast <coords> Perform 3D raycast test: "originX,originY,originZ,dirX,dirY,dirZ"
