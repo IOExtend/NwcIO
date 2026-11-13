@@ -5,9 +5,9 @@ namespace NwcIO.Model;
 /// </summary>
 /// <param name="Name">Segment name (e.g., "cache\LcOpNwdGeometry", "cache\LcOpGuidStore").</param>
 /// <param name="Flags">Flags or schema version associated with the segment.</param>
-/// <param name="Offset">Relative byte offset inside the partition or cache stream.</param>
+/// <param name="Offset">Absolute file offset of the segment data.</param>
 /// <param name="Length">Byte length of the segment data.</param>
-/// <param name="Extra">Additional format or alignment flags.</param>
+/// <param name="Extra">The two trailing 32-bit fields as <c>a + b * 2^32</c>: <c>(0, 0)</c> means one zlib stream, <c>(4, b)</c> a 4-byte prefix plus streams whose last compressed length is <c>b</c>.</param>
 public sealed record NwcDbCacheEntry(
     string Name,
     int Flags,
@@ -18,6 +18,8 @@ public sealed record NwcDbCacheEntry(
 /// <summary>
 /// Master directory of cached data tables registered in the <c>LcOpDBCache</c> stream.
 /// </summary>
+/// <param name="DatabaseName">Name of the <c>LcOpDBCache</c> entry, or an empty string when the directory has none.</param>
+/// <param name="Entries">Every directory entry in file order.</param>
 public sealed record NwcDbCacheDirectory(
     string DatabaseName,
     IReadOnlyList<NwcDbCacheEntry> Entries)
