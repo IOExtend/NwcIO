@@ -18,6 +18,12 @@ public sealed class NwcTransform
     public BoundingBox3d? BoundingBox { get; init; }
 
     /// <summary>
+    /// Uniform scale applied before the rotation: world = Scale·R(Rotation)·v + Translation.
+    /// A negative value mirrors; world-space consumers must reverse triangle winding.
+    /// </summary>
+    public double Scale { get; init; } = 1.0;
+
+    /// <summary>
     /// Computes the 4x4 affine transformation matrix in row-major order:
     /// <code>
     /// [ R00, R01, R02, 0 ]
@@ -45,12 +51,13 @@ public sealed class NwcTransform
         double wx = w * x;
         double wy = w * y;
         double wz = w * z;
+        double s = Scale;
 
         return
         [
-            1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz),       2.0 * (xz - wy),       0.0,
-            2.0 * (xy - wz),       1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx),       0.0,
-            2.0 * (xz + wy),       2.0 * (yz - wx),       1.0 - 2.0 * (xx + yy), 0.0,
+            s * (1.0 - 2.0 * (yy + zz)), s * (2.0 * (xy + wz)),       s * (2.0 * (xz - wy)),       0.0,
+            s * (2.0 * (xy - wz)),       s * (1.0 - 2.0 * (xx + zz)), s * (2.0 * (yz + wx)),       0.0,
+            s * (2.0 * (xz + wy)),       s * (2.0 * (yz - wx)),       s * (1.0 - 2.0 * (xx + yy)), 0.0,
             Translation.X,         Translation.Y,         Translation.Z,         1.0,
         ];
     }

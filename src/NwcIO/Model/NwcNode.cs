@@ -34,8 +34,11 @@ public sealed class NwcNode
     /// <summary>Material assigned to this node.</summary>
     public NwcMaterial? Material { get; set; }
 
-    /// <summary>Associated 3D mesh geometry if this node represents a geometric element.</summary>
+    /// <summary>The first of <see cref="Meshes"/> for documents read from files; null when the node has no geometry.</summary>
     public NwcMesh? Mesh { get; set; }
+
+    /// <summary>Every mesh instance placed at this node; <see cref="Mesh"/> is the first of them for documents read from files.</summary>
+    public List<NwcMesh> Meshes { get; } = [];
 
     public override string ToString() => $"{Name} ({Class}) [Children: {Children.Count}, Props: {Properties.Count}]";
 }

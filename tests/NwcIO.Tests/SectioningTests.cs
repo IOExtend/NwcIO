@@ -277,4 +277,20 @@ public class SectioningTests
             Indices = indices,
         };
     }
+
+    // The clipper needs no change; this locks it in.
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(100.0)]
+    public void NwcMeshClipper_Clip_ScaledOrMirroredMesh_CutsInWorldSpace(double scale)
+    {
+        var mesh = new NwcMesh { Id = 1, Vertices = [new(0, 0, 1), new(1, 0, 1), new(0, 1, 1)], Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 1, Scale = scale } }; // world z == scale
+        var keepPlane = scale > 0 ? NwcSectionPlane.CreateBottom(scale / 2) : NwcSectionPlane.CreateTop(scale / 2);
+        var cutPlane = scale > 0 ? NwcSectionPlane.CreateTop(scale / 2) : NwcSectionPlane.CreateBottom(scale / 2);
+        var kept = NwcMeshClipper.Clip(mesh, [keepPlane]);
+        Assert.Equal(1, kept.TriangleCount);
+        Assert.All(kept.GetWorldVertices(), v => Assert.Equal(scale, v.Z, 9));
+        Assert.Equal(0, NwcMeshClipper.Clip(mesh, [cutPlane]).TriangleCount);
+    }
 }
