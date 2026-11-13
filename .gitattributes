@@ -12,3 +12,6 @@
 *.ico binary
 *.nupkg binary
 *.snupkg binary
+
+# Third-party schemas kept byte-identical to upstream (CC BY-ND 4.0, see THIRD-PARTY-NOTICES.md)
+tests/NwcIO.Tests/Schemas/Bcf21/*.xsd -text

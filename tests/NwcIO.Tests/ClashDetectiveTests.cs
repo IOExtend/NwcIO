@@ -11,6 +11,61 @@ public sealed class ClashDetectiveTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ClashBcfExport_ValidatesAgainstBcf21Schemas(bool includeIfcGuids)
+    {
+        var clash = new NwcClashResult
+        {
+            Item1 = new NwcClashObject("Pipe", includeIfcGuids ? 1 : null),
+            Item2 = new NwcClashObject("Wall", includeIfcGuids ? 2 : null),
+            AssignedTo = "coordinator@example.org",
+            Description = "Pipe intersects wall",
+            Distance = -0.02,
+            GridLocation = "A-1",
+        };
+        clash.AddComment("Add a sleeve", "Reviewer");
+
+        using var stream = new MemoryStream();
+        NwcClashBcfExporter.Write(stream, [clash]);
+        stream.Position = 0;
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        BcfSchemaAssert.ValidArchive(archive, 1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GroupBcfExport_ValidatesAgainstBcf21Schemas(bool includeIfcGuids)
+    {
+        var clash = new NwcClashResult
+        {
+            Item1 = new NwcClashObject("Pipe", includeIfcGuids ? 1 : null),
+            Item2 = new NwcClashObject("Wall", includeIfcGuids ? 2 : null),
+        };
+        clash.AddComment("Child comment", "Reviewer");
+        var group = new NwcClashGroup("Pipe clashes");
+        group.Clashes.Add(clash);
+        group.Comments.Add(new NwcClashComment("Group comment", "Coordinator"));
+        var test = new NwcClashTest("Coordination");
+        test.Groups.Add(group);
+        test.Results.Add(new NwcClashResult());
+
+        using var stream = new MemoryStream();
+        NwcClashBcfExporter.Write(stream, test);
+        stream.Position = 0;
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        BcfSchemaAssert.ValidArchive(archive, 2);
+
+        using var markup = archive.GetEntry($"{group.GroupGuid:D}/markup.bcf")!.Open();
+        var root = XDocument.Load(markup).Root!;
+        Assert.Collection(root.Elements("Comment"),
+            c => Assert.Equal("Group comment", c.Element("Comment")!.Value),
+            c => Assert.Equal("Child comment", c.Element("Comment")!.Value));
+        Assert.Equal("viewpoint.bcfv", root.Element("Viewpoints")?.Element("Viewpoint")?.Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void MeshClashDetectionPreservesSharedVertexForNearlyParallelTriangles(bool swapMeshes)
     {
         var v = new NwcMesh

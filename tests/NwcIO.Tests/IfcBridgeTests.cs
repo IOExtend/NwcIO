@@ -145,8 +145,10 @@ public class IfcBridgeTests
         }
     }
 
-    [Fact]
-    public void BcfExporter_Write_GeneratesValidBcfZipWithClippingAndRedlines()
+    [Theory]
+    [InlineData(NwcCameraProjection.Perspective)]
+    [InlineData(NwcCameraProjection.Orthographic)]
+    public void BcfExporter_Write_GeneratesValidBcfZipWithClippingAndRedlines(NwcCameraProjection projection)
     {
         var vp = new NwcSavedViewpoint
         {
@@ -159,8 +161,9 @@ public class IfcBridgeTests
                 FocalDistance = 15.0,
                 FieldOfView = 60.0,
                 AspectRatio = 1.6,
-                Projection = NwcCameraProjection.Perspective,
+                Projection = projection,
             },
+            Comments = ["Check clearance"],
             SectionPlanes =
             [
                 new NwcSectionPlane
@@ -193,6 +196,7 @@ public class IfcBridgeTests
 
         ms.Position = 0;
         using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+        BcfSchemaAssert.ValidArchive(archive, 1);
 
         // 1. Root bcf.version
         var versionEntry = archive.GetEntry("bcf.version");
@@ -210,12 +214,13 @@ public class IfcBridgeTests
         using (var reader = new StreamReader(markupEntry.Open()))
         {
             var doc = XDocument.Load(reader);
+            Assert.Null(doc.Root!.Element("Header")!.Element("File")!.Attribute("IfcProject"));
             var title = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "Title")?.Value;
             Assert.Equal("Clash Viewpoint", title);
 
-            var comment = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "Comment")?.Value;
-            Assert.NotNull(comment);
-            Assert.Contains("Review clash here", comment);
+            Assert.Collection(doc.Root.Elements("Comment"),
+                c => Assert.Equal("Check clearance", c.Element("Comment")?.Value),
+                c => Assert.Contains("Review clash here", c.Element("Comment")?.Value));
         }
 
         var vpEntry = archive.GetEntry($"{topicFolder}/viewpoint.bcfv");

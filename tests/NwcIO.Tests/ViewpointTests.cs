@@ -13,6 +13,26 @@ namespace NwcIO.Tests;
 public class ViewpointTests
 {
     [Fact]
+    public void BcfExporter_WriteClashes_ValidatesAgainstBcf21Schemas()
+    {
+        var model = new NwcDocumentBuilder().SetFileInfo("Model.nwc").Build();
+        var clash = new NwcClash(model, new NwcMesh { Id = 1, Vertices = [], Indices = [] },
+            model, new NwcMesh { Id = 2, Vertices = [], Indices = [] },
+            new BoundingBox3d(Vector3d.Zero, new Vector3d(1, 1, 1)));
+
+        using var stream = new MemoryStream();
+        BcfExporter.Write([clash], stream);
+        stream.Position = 0;
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        BcfSchemaAssert.ValidArchive(archive, 1);
+
+        using var markup = archive.GetEntry($"{clash.Id:D}/markup.bcf")!.Open();
+        var file = XDocument.Load(markup).Root!.Element("Header")!.Element("File")!;
+        Assert.Null(file.Attribute("IfcProject"));
+        Assert.Equal("true", file.Attribute("isExternal")?.Value);
+    }
+
+    [Fact]
     public void Camera_DirectionAndUp_AreOrthogonal()
     {
         var camera = new NwcCamera
@@ -199,8 +219,10 @@ public class ViewpointTests
         Assert.True(foundCameraNode, "GLB nodes must contain a node referencing the camera");
     }
 
-    [Fact]
-    public void BcfExporter_WriteViewpoints_CreatesValidBcfZip()
+    [Theory]
+    [InlineData(NwcCameraProjection.Perspective)]
+    [InlineData(NwcCameraProjection.Orthographic)]
+    public void BcfExporter_WriteViewpoints_CreatesValidBcfZip(NwcCameraProjection projection)
     {
         var vp = new NwcSavedViewpoint
         {
@@ -212,7 +234,7 @@ public class ViewpointTests
                 FocalDistance = 25.0,
                 FieldOfView = 60.0,
                 AspectRatio = 1.77,
-                Projection = NwcCameraProjection.Perspective,
+                Projection = projection,
             },
             Comments = ["Check clearance under floor beams"],
         };
@@ -222,6 +244,7 @@ public class ViewpointTests
 
         ms.Position = 0;
         using var zip = new ZipArchive(ms, ZipArchiveMode.Read);
+        BcfSchemaAssert.ValidArchive(zip, 1);
 
         // 1. bcf.version
         var versionEntry = zip.GetEntry("bcf.version");
@@ -239,6 +262,7 @@ public class ViewpointTests
         using (var stream = markupEntry.Open())
         {
             var doc = XDocument.Load(stream);
+            Assert.Null(doc.Root!.Element("Header")!.Element("File")!.Attribute("IfcProject"));
             var topic = doc.Descendants("Topic").FirstOrDefault();
             Assert.NotNull(topic);
             Assert.Equal("Section Perspective", topic.Element("Title")?.Value);
@@ -253,7 +277,7 @@ public class ViewpointTests
         using (var stream = viewpointEntry.Open())
         {
             var doc = XDocument.Load(stream);
-            var perspective = doc.Descendants("PerspectiveCamera").FirstOrDefault();
+            var perspective = doc.Descendants(projection == NwcCameraProjection.Perspective ? "PerspectiveCamera" : "OrthogonalCamera").FirstOrDefault();
             Assert.NotNull(perspective);
             var pos = perspective.Element("CameraViewPoint");
             Assert.NotNull(pos);
