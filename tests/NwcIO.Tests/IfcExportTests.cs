@@ -189,11 +189,61 @@ public class IfcExportTests
     {
         var doc = CreateSyntheticDocument(meshName);
 
-        using var sw = new StringWriter();
-        doc.SaveIfc(sw);
-        string ifc = sw.ToString();
+        foreach (var schema in new[] { NwcIfcSchemaVersion.Ifc2x3, NwcIfcSchemaVersion.Ifc4 })
+        {
+            using var sw = new StringWriter();
+            doc.SaveIfc(sw, new NwcIfcExportOptions { SchemaVersion = schema });
+            var ifc = sw.ToString();
+            var expected = schema == NwcIfcSchemaVersion.Ifc2x3
+                && expectedIfcEntity is "IFCPIPESEGMENT" or "IFCDUCTSEGMENT"
+                ? "IFCFLOWSEGMENT"
+                : expectedIfcEntity;
 
-        Assert.Contains(expectedIfcEntity + "(", ifc);
+            Assert.Contains(expected + "(", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, NwcIfcSchemaVersion.Ifc2x3, "Pipe A", "IFCFLOWSEGMENT", "IFCPIPESEGMENTTYPE")]
+    [InlineData(true, NwcIfcSchemaVersion.Ifc2x3, "Pipe A", "IFCFLOWSEGMENT", "IFCPIPESEGMENTTYPE")]
+    [InlineData(false, NwcIfcSchemaVersion.Ifc2x3, "Duct B", "IFCFLOWSEGMENT", "IFCDUCTSEGMENTTYPE")]
+    [InlineData(true, NwcIfcSchemaVersion.Ifc2x3, "Duct B", "IFCFLOWSEGMENT", "IFCDUCTSEGMENTTYPE")]
+    [InlineData(false, NwcIfcSchemaVersion.Ifc2x3, "Roof C", "IFCROOF", "IFCBUILDINGELEMENTPROXYTYPE")]
+    [InlineData(true, NwcIfcSchemaVersion.Ifc2x3, "Roof C", "IFCROOF", "IFCBUILDINGELEMENTPROXYTYPE")]
+    [InlineData(false, NwcIfcSchemaVersion.Ifc4, "Pipe A", "IFCPIPESEGMENT", "IFCPIPESEGMENTTYPE")]
+    [InlineData(true, NwcIfcSchemaVersion.Ifc4, "Pipe A", "IFCPIPESEGMENT", "IFCPIPESEGMENTTYPE")]
+    [InlineData(false, NwcIfcSchemaVersion.Ifc4, "Duct B", "IFCDUCTSEGMENT", "IFCDUCTSEGMENTTYPE")]
+    [InlineData(true, NwcIfcSchemaVersion.Ifc4, "Duct B", "IFCDUCTSEGMENT", "IFCDUCTSEGMENTTYPE")]
+    [InlineData(false, NwcIfcSchemaVersion.Ifc4, "Roof C", "IFCROOF", "IFCROOFTYPE")]
+    [InlineData(true, NwcIfcSchemaVersion.Ifc4, "Roof C", "IFCROOF", "IFCROOFTYPE")]
+    public void SaveIfc_ClassifiedProducts_UseSchemaCompatibleEntities(
+        bool assembly, NwcIfcSchemaVersion schema, string meshName, string entity, string typeEntity)
+    {
+        var doc = CreateSyntheticDocument(meshName);
+        using var sw = new StringWriter();
+        var options = new NwcIfcExportOptions { SchemaVersion = schema };
+        if (assembly)
+        {
+            NwcAssembly.Create("Schema compatibility", doc).SaveIfc(sw, options);
+        }
+        else
+        {
+            doc.SaveIfc(sw, options);
+        }
+
+        var ifc = sw.ToString();
+        Assert.Contains($"FILE_SCHEMA(('{options.Schema}'));", ifc);
+        Assert.Contains(entity + "(", ifc);
+        Assert.Contains(typeEntity + "(", ifc);
+        Assert.Contains("IFCRELDEFINESBYTYPE(", ifc);
+        Assert.Contains("IFCRELCONTAINEDINSPATIALSTRUCTURE(", ifc);
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.DoesNotContain("IFCPIPESEGMENT(", ifc);
+            Assert.DoesNotContain("IFCDUCTSEGMENT(", ifc);
+            Assert.DoesNotContain("IFCROOFTYPE(", ifc);
+        }
     }
 
     [Fact]
