@@ -8,6 +8,70 @@ namespace NwcIO.Tests;
 
 public sealed class HtmlViewerTests
 {
+    [Fact]
+    public void Write_SplitSourceMesh_KeepsOneHierarchyEntryAndBoundsOverAllChunks()
+    {
+        var vertices = Enumerable.Range(0, 21846)
+            .SelectMany(i => new[] { new Vector3d(i, 0, 0), new Vector3d(i, 1, 0), new Vector3d(i, 0, 1) }).ToArray();
+        var node = new NwcNode { Id = 5, Name = "Node", Class = "Layer" };
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 1, Class = "General", Name = "Source", Value = "68" });
+        var mesh = new NwcMesh
+        {
+            Id = 68,
+            Name = "Split source",
+            Node = node,
+            Material = new NwcMaterial { Id = 1, Name = "Color", Color = new RgbaColor(0.25f, 0.5f, 0.75f) },
+            Vertices = vertices,
+            Indices = Enumerable.Range(0, vertices.Length).ToArray(),
+        };
+
+        // Exercise the public exporter, including a source with no precomputed bounds.
+        var html = ExportMesh(mesh);
+        using var payload = ReadPayload(html);
+        var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        Assert.Equal(68, source.GetProperty("id").GetInt32());
+        Assert.Equal(5, source.GetProperty("nodeId").GetInt32());
+        Assert.Equal("Split source", source.GetProperty("name").GetString());
+        Assert.Equal("Layer", source.GetProperty("layer").GetString());
+        Assert.Equal<double>([0.25 / 255.0, 0.5 / 255.0, 0.75 / 255.0, 1 / 255.0],
+            source.GetProperty("color").EnumerateArray().Select(v => v.GetDouble()));
+        Assert.Equal("68", source.GetProperty("properties").GetProperty("General").GetProperty("Source").GetString());
+        var chunks = source.GetProperty("chunks").EnumerateArray().ToArray();
+        Assert.Equal<int>([65535, 3], chunks.Select(c => c.GetProperty("vertices").GetArrayLength() / 3));
+        var reconstructed = new List<Vector3d>();
+        foreach (var chunk in chunks)
+        {
+            var positions = chunk.GetProperty("vertices").EnumerateArray().Select(v => v.GetDouble()).ToArray();
+            foreach (var index in chunk.GetProperty("indices").EnumerateArray().Select(v => v.GetInt32()))
+            {
+                Assert.InRange(index, 0, positions.Length / 3 - 1);
+                reconstructed.Add(new Vector3d(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]));
+            }
+        }
+        Assert.Equal(vertices, reconstructed);
+        var bounds = source.GetProperty("bounds");
+        Assert.Equal<double>([0, 0, 0], bounds.GetProperty("min").EnumerateArray().Select(v => v.GetDouble()));
+        Assert.Equal<double>([21845, 1, 1], bounds.GetProperty("max").EnumerateArray().Select(v => v.GetDouble()));
+        Assert.Contains("modelData.meshes.forEach((m, idx) =>", html);
+    }
+
+    [Fact]
+    public void Write_SplitSourceMesh_ScriptDrawsChunksAndFitsSourceBounds()
+    {
+        var html = ExportMesh(new NwcMesh { Id = 68, Vertices = [], Indices = [] }).Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert.Contains("const gpuMeshes = modelData.meshes.map((m, idx) =>", html);
+        Assert.Contains("const chunks = m.chunks.map(chunk =>", html);
+        Assert.Contains("raw: m, index: idx, bounds: m.bounds", html);
+        Assert.Contains("for (const chunk of gm.chunks)", html);
+        Assert.Contains("new Float32Array(chunk.vertices)", html);
+        Assert.Contains("new Uint16Array(chunk.indices)", html);
+        Assert.Contains("selectedMeshIndex = idx;", html);
+        Assert.Contains("gm.index === selectedMeshIndex", html);
+        Assert.Contains("const gm = gpuMeshes[selectedMeshIndex];\n        const b = gm.bounds;", html);
+        Assert.Contains("clipBox.min = [...b.min]", html);
+        Assert.Contains("clipBox.max = [...b.max]", html);
+    }
+
     [Theory]
     [InlineData(65535)]
     [InlineData(65536)]
@@ -28,7 +92,8 @@ public sealed class HtmlViewerTests
 
         var html = ExportMesh(mesh);
         using var payload = ReadPayload(html);
-        var chunks = payload.RootElement.GetProperty("meshes").EnumerateArray().ToArray();
+        var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        var chunks = source.GetProperty("chunks").EnumerateArray().ToArray();
         if (count > 65535)
         {
             Assert.True(chunks.Length > 1, "Large meshes must be split into 16-bit-safe chunks.");
@@ -37,13 +102,13 @@ public sealed class HtmlViewerTests
         {
             Assert.Single(chunks);
         }
+        Assert.Equal(68, source.GetProperty("id").GetInt32());
+        Assert.Equal(5, source.GetProperty("nodeId").GetInt32());
+        Assert.Equal("Large mesh", source.GetProperty("name").GetString());
+        Assert.Equal("Layer", source.GetProperty("layer").GetString());
         var reconstructed = new List<Vector3d>();
         foreach (var chunk in chunks)
         {
-            Assert.Equal(68, chunk.GetProperty("id").GetInt32());
-            Assert.Equal(5, chunk.GetProperty("nodeId").GetInt32());
-            Assert.Equal("Large mesh", chunk.GetProperty("name").GetString());
-            Assert.Equal("Layer", chunk.GetProperty("layer").GetString());
             var positions = chunk.GetProperty("vertices").EnumerateArray().Select(v => v.GetDouble()).ToArray();
             var vertexCount = positions.Length / 3;
             Assert.InRange(vertexCount, 1, 65535);
@@ -74,17 +139,18 @@ public sealed class HtmlViewerTests
 
         var html = ExportMesh(mesh);
         using var payload = ReadPayload(html);
-        var exported = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        var exported = Assert.Single(source.GetProperty("chunks").EnumerateArray());
         Assert.Equal(mesh.Indices, exported.GetProperty("indices").EnumerateArray().Select(v => v.GetInt32()));
         Assert.False(exported.TryGetProperty("lineIndices", out _));
-        Assert.Contains("const lineIndices = new Uint16Array(Math.floor(m.indices.length / 3) * 6)", html);
-        Assert.Contains("i + 2 < m.indices.length; i += 3", html);
-        Assert.Contains("const a = m.indices[i], b = m.indices[i + 1], c = m.indices[i + 2]", html);
+        Assert.Contains("const lineIndices = new Uint16Array(Math.floor(chunk.indices.length / 3) * 6)", html);
+        Assert.Contains("i + 2 < chunk.indices.length; i += 3", html);
+        Assert.Contains("const a = chunk.indices[i], b = chunk.indices[i + 1], c = chunk.indices[i + 2]", html);
         Assert.Contains("lineIndices.set([a, b, b, c, c, a], i * 2)", html);
         Assert.Contains("gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lineIndices, gl.STATIC_DRAW)", html);
         Assert.Contains("lineCount: lineIndices.length", html);
-        Assert.Contains("gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, wireframeMode ? gm.lineIbo : gm.ibo)", html);
-        Assert.Contains("wireframeMode ? gm.lineCount : gm.count, gl.UNSIGNED_SHORT", html);
+        Assert.Contains("gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, wireframeMode ? chunk.lineIbo : chunk.ibo)", html);
+        Assert.Contains("wireframeMode ? chunk.lineCount : chunk.count, gl.UNSIGNED_SHORT", html);
     }
 
     [Theory]
@@ -106,7 +172,8 @@ public sealed class HtmlViewerTests
         var mesh = new NwcMesh { Id = 68, Vertices = vertices, Indices = indices };
 
         using var payload = ReadPayload(ExportMesh(mesh));
-        var chunk = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        var chunk = Assert.Single(source.GetProperty("chunks").EnumerateArray());
         var positions = chunk.GetProperty("vertices").EnumerateArray().Select(v => v.GetDouble()).ToArray();
         var triangles = chunk.GetProperty("indices").EnumerateArray().Select(v => v.GetInt32()).ToArray();
         Assert.Equal(validIndices.Length * 3, positions.Length);
@@ -137,7 +204,8 @@ public sealed class HtmlViewerTests
         };
 
         using var payload = ReadPayload(ExportMesh(mesh));
-        var chunk = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
+        var chunk = Assert.Single(source.GetProperty("chunks").EnumerateArray());
         Assert.Equal(9, chunk.GetProperty("vertices").GetArrayLength());
         Assert.Equal(3, chunk.GetProperty("indices").GetArrayLength());
     }
