@@ -388,4 +388,43 @@ public sealed class DiffEngineTests
         Assert.Single(report.Modified);
         Assert.True(report.Modified[0].GeometryChanged);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Compare_VertexCountChangeInsideSameBounds_ReportsGeometryChanged(bool fragments)
+    {
+        var guid = Guid.NewGuid();
+
+        NwcDocument Build(bool extraVertex)
+        {
+            var first = CreateBoxMesh(1, "A", new Vector3d(0, 0, 0));
+            var box = CreateBoxMesh(2, "B", new Vector3d(10, 0, 0));
+            // An extra vertex inside the box changes the vertex count but not the bounds.
+            var second = !extraVertex ? box : new NwcMesh
+            {
+                Id = box.Id,
+                Name = box.Name,
+                Vertices = [.. box.Vertices, new Vector3d(10.5, 0.5, 0.5)],
+                Indices = box.Indices,
+                BoundingBox = box.BoundingBox,
+            };
+            var node = new NwcNode { Id = 5, Name = "Multi", Class = "LcRevitData_Element", ElementGuid = guid };
+            if (fragments)
+            {
+                node.Mesh = first;
+                node.Meshes.Add(first);
+                node.Meshes.Add(second);
+                return NwcDocument.Create(rootNode: node, meshes: [first, second]);
+            }
+
+            node.Mesh = second;
+            return NwcDocument.Create(rootNode: node, meshes: [second]);
+        }
+
+        Assert.Single(Build(false).Compare(Build(false)).Unchanged);
+        var report = Build(false).Compare(Build(true));
+
+        Assert.True(Assert.Single(report.Modified).GeometryChanged);
+    }
 }

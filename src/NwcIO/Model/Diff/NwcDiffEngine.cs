@@ -157,15 +157,7 @@ public static class NwcDiffEngine
                     }
                 }
 
-                if (baseItem.Mesh is not null && rev.Mesh is not null)
-                {
-                    if (baseItem.Mesh.Vertices.Count != rev.Mesh.Vertices.Count ||
-                        baseItem.Mesh.Indices.Count != rev.Mesh.Indices.Count)
-                    {
-                        geomChanged = true;
-                    }
-                }
-                else if ((baseItem.Mesh is null) != (rev.Mesh is null))
+                if (GeometryCounts(baseItem) != GeometryCounts(rev))
                 {
                     geomChanged = true;
                 }
@@ -308,6 +300,23 @@ public static class NwcDiffEngine
                 changes.Add(new NwcPropertyChange(op.Class, op.Name, op.Value, null, "Removed"));
             }
         }
+    }
+
+    // Totals over every fragment of the node, like the bounds; null when the item has no geometry.
+    private static (long Vertices, long Indices)? GeometryCounts(DiffItem item)
+    {
+        if (item.Node is { Meshes.Count: > 0 } node)
+        {
+            long vertices = 0, indices = 0;
+            foreach (var mesh in node.Meshes)
+            {
+                vertices += mesh.Vertices.Count;
+                indices += (long)mesh.Indices.Count + mesh.LineIndices.Count;
+            }
+            return (vertices, indices);
+        }
+
+        return item.Mesh is null ? null : (item.Mesh.Vertices.Count, item.Mesh.Indices.Count);
     }
 
     private static List<DiffItem> CollectItems(NwcDocument doc)
