@@ -62,7 +62,7 @@ public sealed class NwcNwfManifest
         xml.WriteStartDocument();
         xml.WriteStartElement("NavisworksFederation");
         xml.WriteAttributeString("project", ProjectName);
-        xml.WriteAttributeString("date", CreatedDate.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
+        xml.WriteAttributeString("date", CreatedDate.UtcDateTime.ToString("o", CultureInfo.InvariantCulture));
 
         // Referenced Models
         xml.WriteStartElement("Models");
@@ -74,40 +74,20 @@ public sealed class NwcNwfManifest
         }
         xml.WriteEndElement(); // Models
 
-        // Saved Viewpoints
+        // Reuse the exchange serializers so nested sets and rule settings are preserved.
         if (SavedViewpoints.Count > 0)
         {
             xml.WriteStartElement("Viewpoints");
-            foreach (var vp in SavedViewpoints)
-            {
-                xml.WriteStartElement("Viewpoint");
-                xml.WriteAttributeString("name", vp.Name);
-                if (vp.CameraPosition.HasValue)
-                {
-                    xml.WriteAttributeString("cameraX", vp.CameraPosition.Value.X.ToString("0.###", CultureInfo.InvariantCulture));
-                    xml.WriteAttributeString("cameraY", vp.CameraPosition.Value.Y.ToString("0.###", CultureInfo.InvariantCulture));
-                    xml.WriteAttributeString("cameraZ", vp.CameraPosition.Value.Z.ToString("0.###", CultureInfo.InvariantCulture));
-                }
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement(); // Viewpoints
+            XDocument.Parse(Sectioning.NwcXmlViewpointSerializer.Serialize(SavedViewpoints)).Root!.WriteTo(xml);
+            xml.WriteEndElement();
         }
-
-        // Appearance Profiler Rules
+        if (Sets.Count > 0)
+        {
+            WriteExchange(xml, "Sets", stream => NwcXmlSetSerializer.Write(Sets, stream));
+        }
         if (AppearanceProfiler.Rules.Count > 0)
         {
-            xml.WriteStartElement("AppearanceRules");
-            foreach (var rule in AppearanceProfiler.Rules)
-            {
-                xml.WriteStartElement("Rule");
-                xml.WriteAttributeString("name", rule.Name);
-                xml.WriteAttributeString("category", rule.Condition.Category);
-                xml.WriteAttributeString("property", rule.Condition.Property);
-                xml.WriteAttributeString("value", rule.Condition.Value);
-                xml.WriteAttributeString("color", rule.Color.ToString());
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement(); // AppearanceRules
+            WriteExchange(xml, "AppearanceRules", stream => NwcXmlAppearanceProfilerSerializer.Write(AppearanceProfiler, stream));
         }
 
         // Clash Tests
@@ -140,6 +120,16 @@ public sealed class NwcNwfManifest
         return Read(fs);
     }
 
+    private static void WriteExchange(XmlWriter xml, string element, Action<Stream> write)
+    {
+        using var stream = new MemoryStream();
+        write(stream);
+        stream.Position = 0;
+        xml.WriteStartElement(element);
+        XDocument.Load(stream).Root!.WriteTo(xml);
+        xml.WriteEndElement();
+    }
+
     /// <summary>
     /// Reads a federation project manifest from a stream.
     /// </summary>
@@ -150,6 +140,60 @@ public sealed class NwcNwfManifest
         var root = doc.Root ?? throw new InvalidDataException("Invalid XML manifest: root element missing.");
 
         var manifest = new NwcNwfManifest((string?)root.Attribute("project") ?? "Navisworks Coordination Project");
+
+        if (DateTimeOffset.TryParse((string?)root.Attribute("date"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var date))
+        {
+            manifest.CreatedDate = date;
+        }
+
+        var viewpoints = root.Element("Viewpoints");
+        if (viewpoints is not null)
+        {
+            foreach (var element in viewpoints.Descendants().Where(e => e.Name.LocalName.Equals("viewpoint", StringComparison.OrdinalIgnoreCase)))
+            {
+                var viewpoint = Sectioning.NwcXmlViewpointSerializer.DeserializeViewpoint(element);
+                if (viewpoint is null)
+                {
+                    continue;
+                }
+                // Pair legacy camera attributes with the element that produced this viewpoint.
+                if (element.Attribute("cameraX") is not null)
+                {
+                    viewpoint = viewpoint with
+                    {
+                        Camera = new NwcCamera
+                        {
+                            Position = new Vector3d((double)element.Attribute("cameraX")!, (double)element.Attribute("cameraY")!, (double)element.Attribute("cameraZ")!),
+                            Rotation = Quaterniond.Identity,
+                        },
+                    };
+                }
+                manifest.SavedViewpoints.Add(viewpoint);
+            }
+        }
+        if (root.Element("Sets")?.Element("exchange") is { } sets)
+        {
+            using var input = new MemoryStream(Encoding.UTF8.GetBytes(sets.ToString()));
+            manifest.Sets.AddRange(NwcXmlSetSerializer.Read(input));
+        }
+        if (root.Element("AppearanceRules") is { } appearance)
+        {
+            using var input = new MemoryStream(Encoding.UTF8.GetBytes(appearance.ToString()));
+            manifest.AppearanceProfiler = NwcXmlAppearanceProfilerSerializer.Read(input);
+            foreach (var rule in appearance.Elements("Rule"))
+            {
+                var colorText = (string?)rule.Attribute("color");
+                if (colorText is not null && colorText.StartsWith("rgba(", StringComparison.Ordinal) && colorText.EndsWith(')'))
+                {
+                    colorText = colorText[5..^1];
+                }
+                var color = RgbaColor.TryParse(colorText, out var parsedColor) ? parsedColor : RgbaColor.White;
+                manifest.AppearanceProfiler.Rules.Add(new NwcAppearanceRule(
+                    (string?)rule.Attribute("name") ?? "Rule",
+                    new NwcSearchCondition((string?)rule.Attribute("category") ?? "Item", (string?)rule.Attribute("property") ?? "Name",
+                        NwcSearchOperator.Equals, (string?)rule.Attribute("value") ?? string.Empty), color));
+            }
+        }
 
         var modelsElem = root.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("Models", StringComparison.OrdinalIgnoreCase));
         if (modelsElem is not null)
@@ -168,7 +212,8 @@ public sealed class NwcNwfManifest
             {
                 string name = (string?)t.Attribute("name") ?? "Clash Test";
                 double tol = double.TryParse((string?)t.Attribute("tolerance"), NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedTol) ? parsedTol : 0.001;
-                manifest.ClashTests.Add(new NwcClashTest(name, NwcClashTestType.Hard, tol));
+                var type = Enum.TryParse<NwcClashTestType>((string?)t.Attribute("type"), true, out var parsedType) ? parsedType : NwcClashTestType.Hard;
+                manifest.ClashTests.Add(new NwcClashTest(name, type, tol));
             }
         }
 

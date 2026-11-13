@@ -97,6 +97,8 @@ public sealed class NwcDocument
 
     internal NwcContainer Container { get; }
 
+    internal string? LoadedPath { get; private set; }
+
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
     /// <exception cref="InvalidDataException">The file is not an LcUStream container.</exception>
@@ -108,7 +110,9 @@ public sealed class NwcDocument
         }
 
         using var stream = File.OpenRead(path);
-        return Open(stream, options, Path.GetFileNameWithoutExtension(path));
+        var document = Open(stream, options, Path.GetFileNameWithoutExtension(path));
+        document.LoadedPath = Path.GetFullPath(path);
+        return document;
     }
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>

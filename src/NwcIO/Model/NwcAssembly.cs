@@ -353,13 +353,25 @@ public sealed class NwcAssembly
         var manifest = new Clash.NwcNwfManifest(Name);
         for (int i = 0; i < Models.Count; i++)
         {
-            var p = Models[i].FileInfo.SourcePath;
+            var p = Models[i].LoadedPath;
+            if (string.IsNullOrEmpty(p))
+            {
+                p = Models[i].FileInfo.SourcePath;
+            }
             if (!string.IsNullOrEmpty(p))
             {
                 manifest.ModelPaths.Add(p);
             }
         }
         manifest.SavedViewpoints.AddRange(SavedViewpoints);
+        manifest.Sets.AddRange(SelectionSets);
+        foreach (var model in Models)
+        {
+            if (model.AppearanceProfiler is not null)
+            {
+                manifest.AppearanceProfiler.Rules.AddRange(model.AppearanceProfiler.Rules);
+            }
+        }
         manifest.ClashTests.AddRange(ClashTests);
         return manifest;
     }
@@ -367,7 +379,13 @@ public sealed class NwcAssembly
     /// <summary>Saves the assembly coordination manifest as a Navisworks NWF coordination file (.nwf.xml).</summary>
     public void SaveNwf(string path)
     {
-        ToNwfManifest().Save(path);
+        var manifest = ToNwfManifest();
+        var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
+        for (var i = 0; i < manifest.ModelPaths.Count; i++)
+        {
+            manifest.ModelPaths[i] = Path.GetRelativePath(directory, manifest.ModelPaths[i]);
+        }
+        manifest.Save(path);
     }
 
     /// <summary>Exports the 4D TimeLiner schedule to Navisworks XML exchange format (.xml).</summary>
