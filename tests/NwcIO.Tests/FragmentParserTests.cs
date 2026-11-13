@@ -18,16 +18,13 @@ public class FragmentParserTests
 
     // F1 byte edits (offsets from the F1 layout in FormatVectors), applied with FormatVectors.Patched
     [Theory]
-    [InlineData(252, new[] { 0 })]                 // null fragment pointer
-    [InlineData(252, new[] { 1, 100 })]            // fragment pointer as back-reference
-    [InlineData(288, new[] { 1, 104 })]            // pose pointer -> class-93 object
-    [InlineData(12, new[] { 1 })]                  // non-zero f64 pad
-    public void Read_InvalidFragments_Throws(int offset, int[] ints)
-    {
-        var bytes = FormatVectors.Patched(FormatVectors.F1, offset, ints.SelectMany(BitConverter.GetBytes).ToArray());
-        var ex = Assert.Throws<InvalidDataException>(() => FragmentParser.Read(bytes));
-        Assert.StartsWith("LcOpNwdFragments at byte ", ex.Message);
-    }
+    [InlineData(252, new[] { 0 }, "null pointer in a slot that needs an object")]              // null fragment pointer
+    [InlineData(252, new[] { 1, 100 }, "back-reference in a slot that needs a new object")]    // fragment pointer as back-reference
+    [InlineData(288, new[] { 1, 104 }, "back-reference in a slot that needs a new object")]    // pose pointer as back-reference (to the class-93 object)
+    [InlineData(292, new[] { 93 }, "class 93, which this slot does not allow")]                // pose pointer to a new class-93 object
+    [InlineData(12, new[] { 1 }, "f64 alignment pad is not zero")]                             // non-zero f64 pad
+    public void Read_InvalidFragments_Throws(int offset, int[] ints, string rule)
+        => AssertRule(rule, FormatVectors.Patched(FormatVectors.F1, offset, ints.SelectMany(BitConverter.GetBytes).ToArray()));
 
     [Theory]
     [InlineData(352, 0.0, "pose scale is 0")]
@@ -55,34 +52,34 @@ public class FragmentParserTests
 
     [Fact]
     public void Read_ZeroBytesAfterTheEnd_Throws()
-    {
-        var ex = Assert.Throws<InvalidDataException>(() => FragmentParser.Read(FormatVectors.Patched(FormatVectors.F1, -1, new byte[8])));
-        Assert.StartsWith("LcOpNwdFragments at byte ", ex.Message);
-    }
+        => AssertRule("data does not end at the zero pad to a multiple of 8", FormatVectors.Patched(FormatVectors.F1, -1, new byte[8]));
 
     [Fact]
     public void LcGraphWriter_RebuildsF1ByteForByte() => Assert.Equal(FormatVectors.F1, BuildF1());
 
     // each variant would parse under a reader that allows it, so only the observed-slot rule rejects it
     [Theory]
-    [InlineData("sharedPose")]      // fragment 1's pose = Ref(101), fragment 0's finished class-15 pose
-    [InlineData("appearanceNull")]  // fragment 1's appearance = Null()
-    [InlineData("materialNull")]    // class 55 with a null material and no class-54 object
-    public void Read_ObservedSlotRuleBroken_Throws(string defect)
-    {
-        var ex = Assert.Throws<InvalidDataException>(() => FragmentParser.Read(BuildF1(defect)));
-        Assert.StartsWith("LcOpNwdFragments at byte ", ex.Message);
-    }
+    [InlineData("sharedPose", "back-reference in a slot that needs a new object")]  // fragment 1's pose = Ref(101), fragment 0's finished class-15 pose
+    [InlineData("appearanceNull", "null pointer in a slot that needs an object")]   // fragment 1's appearance = Null()
+    [InlineData("materialNull", "null pointer in a slot that needs an object")]     // class 55 with a null material and no class-54 object
+    public void Read_ObservedSlotRuleBroken_Throws(string defect, string rule) => AssertRule(rule, BuildF1(defect));
 
     // flags & 32 adds a class-185 slot after the material; null and a new class 185 both read as F1 does
     [Theory]
     [InlineData("extra185")]
     [InlineData("extraNull")]
-    public void Read_AppearanceWithExtraSlot_ReadsLikeF1(string defect) =>
-        Assert.Equal(FragmentParser.Read(FormatVectors.F1), FragmentParser.Read(BuildF1(defect)));
+    public void Read_AppearanceWithExtraSlot_ReadsLikeF1(string variant) =>
+        Assert.Equal(FragmentParser.Read(FormatVectors.F1), FragmentParser.Read(BuildF1(variant)));
 
-    // The F1 layout documented in FormatVectors; a defect changes the shared class 55 or fragment 1 as its row says.
-    private static byte[] BuildF1(string? defect = null)
+    private static void AssertRule(string rule, byte[] bytes)
+    {
+        var ex = Assert.Throws<InvalidDataException>(() => FragmentParser.Read(bytes));
+        Assert.StartsWith("LcOpNwdFragments at byte ", ex.Message);
+        Assert.EndsWith(": " + rule, ex.Message);
+    }
+
+    // The F1 layout documented in FormatVectors; a variant changes the shared class 55 or fragment 1 as its row says.
+    private static byte[] BuildF1(string? variant = null)
     {
         var w = new LcGraphWriter();
         w.Int(2);
@@ -92,7 +89,7 @@ public class FragmentParserTests
         w.Double(10).Double(0).Double(0);
         w.Double(0).Double(0).Double(0).Double(1);
         int appearance = w.New(55);
-        Appearance(w, defect);
+        Appearance(w, variant);
         int geometry = w.New(93);
         w.Float(0).Float(0).Float(0).Float(1).Float(1).Float(0);
         w.Double(0.5).Double(0.5).Double(0);
@@ -100,7 +97,7 @@ public class FragmentParserTests
 
         w.New(13);
         w.Double(1.0).Int(2).Int(4).Int(0).Int(7);
-        if (defect == "sharedPose")
+        if (variant == "sharedPose")
         {
             w.Ref(pose);
         }
@@ -112,7 +109,7 @@ public class FragmentParserTests
             w.Double(-1);
         }
 
-        if (defect == "appearanceNull")
+        if (variant == "appearanceNull")
         {
             w.Null();
         }
@@ -126,10 +123,10 @@ public class FragmentParserTests
     }
 
     // Class-55 body: [flags][ptr 54], then [ptr 185 or null] when flags & 32.
-    private static void Appearance(LcGraphWriter w, string? defect)
+    private static void Appearance(LcGraphWriter w, string? variant)
     {
-        w.Int(defect is "extra185" or "extraNull" ? 33 : 1);
-        if (defect == "materialNull")
+        w.Int(variant is "extra185" or "extraNull" ? 33 : 1);
+        if (variant == "materialNull")
         {
             w.Null();
             return;
@@ -141,12 +138,12 @@ public class FragmentParserTests
             w.Int(0);
         }
 
-        if (defect == "extra185")
+        if (variant == "extra185")
         {
             w.New(185);
             w.Str("j").Str("i").Int(0);
         }
-        else if (defect == "extraNull")
+        else if (variant == "extraNull")
         {
             w.Null();
         }

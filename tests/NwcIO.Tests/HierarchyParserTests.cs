@@ -71,11 +71,14 @@ public class HierarchyParserTests
     [Fact]
     public void Read_EveryAttributeClass_ParsesAndKeepsOnlyProperties()
     {
-        var bytes = GroupWithLeaf(6, w =>
+        var bytes = GroupWithLeaf(7, w =>
         {
             w.New(31);
             w.Str("m");
             Doubles(w, 15);
+            w.New(40);
+            w.Str(null).Int(0).Int(131072);
+            Doubles(w, 3);
             w.New(41);
             w.Str(null).Int(0).Int(131072);
             Doubles(w, 3 + 4);
@@ -94,25 +97,19 @@ public class HierarchyParserTests
     }
 
     [Theory]
-    [InlineData("trailingIntIn79")]   // the parser meets 7 where the tail must be 1
-    [InlineData("payloadPad185")]     // the 185 item with its pad byte 0x01
-    [InlineData("itemFlag185")]       // the 185 item with e = 2
-    [InlineData("valueType9")]        // unknown class-86 value type
-    public void Read_AttributeDefect_Throws(string defect)
-    {
-        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(Defective(defect), "Model"));
-        Assert.StartsWith("LcOpNwdLogicalHierarchy at byte ", ex.Message);
-    }
+    [InlineData("trailingIntIn79", "hierarchy tail is not 1")]                    // the parser meets 7 where the tail must be 1
+    [InlineData("payloadPad185", "pad after the bytes is not zero")]              // the 185 item with its pad byte 0x01
+    [InlineData("itemFlag185", "class-185 item flag 2 is neither 0 nor 1")]      // the 185 item with e = 2
+    [InlineData("lengthNegative185", "byte length -1 is negative")]               // the 185 item with length -1
+    [InlineData("payloadPastEnd185", "1000 bytes pass the end of the data")]      // the 185 item with length 1000
+    [InlineData("valueType9", "property value type 9 is unknown")]                // unknown class-86 value type
+    public void Read_AttributeDefect_Throws(string defect, string rule) => AssertRule(rule, Defective(defect));
 
     [Theory]
-    [InlineData("topLevelLeaf")]      // root's top-level slot holds a new 22 (observed: 53 or 32 only)
-    [InlineData("kZero")]             // header k = 0
-    [InlineData("extra200Null")]      // class 200 with a null extra
-    public void Read_SlotFamilyDefect_Throws(string defect)
-    {
-        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(Defective(defect), "Model"));
-        Assert.StartsWith("LcOpNwdLogicalHierarchy at byte ", ex.Message);
-    }
+    [InlineData("topLevelLeaf", "class 22, which this slot does not allow")]          // root's top-level slot holds a new 22 (observed: 53 or 32 only)
+    [InlineData("kZero", "header count k is below 1")]                                // header k = 0
+    [InlineData("extra200Null", "null pointer in a slot that needs an object")]       // class 200 with a null extra
+    public void Read_SlotFamilyDefect_Throws(string defect, string rule) => AssertRule(rule, Defective(defect));
 
     [Fact]
     public void Read_DeepChain_ThrowsBeforeStackExhaustion()
@@ -154,33 +151,49 @@ public class HierarchyParserTests
 
     // H1 byte edits (offsets from the H1 layout in FormatVectors)
     [Theory]
-    [InlineData(260, 107)]          // B's child -> B itself (unfinished)
-    [InlineData(260, 999)]          // back-reference to an unknown id
-    [InlineData(264, 2)]            // tail [2]
-    [InlineData(268, 1)]            // non-zero tail pad
-    [InlineData(192, 103)]          // L2 username -> class-40 object
-    [InlineData(80, 45)]            // unknown class 45
-    [InlineData(12, int.MaxValue)]  // count beyond remaining bytes
-    [InlineData(256, 0)]            // null child pointer
-    public void Read_InvalidGraph_Throws(int offset, int value)
-    {
-        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(FormatVectors.Patched(FormatVectors.H1, offset, BitConverter.GetBytes(value)), "Model"));
-        Assert.StartsWith("LcOpNwdLogicalHierarchy at byte ", ex.Message);
-    }
+    [InlineData(260, 107, "back-reference to unfinished object 107")]                     // B's child -> B itself (unfinished)
+    [InlineData(260, 999, "back-reference to unknown id 999")]                            // back-reference to an unknown id
+    [InlineData(264, 2, "hierarchy tail is not 1")]                                       // tail [2]
+    [InlineData(268, 1, "end pad is not zero")]                                           // non-zero tail pad
+    [InlineData(192, 103, "back-reference to class 40, which this slot does not allow")]  // L2 username -> class-40 object
+    [InlineData(80, 45, "class 45, which this slot does not allow")]                      // unknown class 45
+    [InlineData(12, int.MaxValue, "count 2147483647 is negative or exceeds the remaining bytes")] // count beyond remaining bytes
+    [InlineData(256, 0, "null pointer in a slot that needs an object")]                   // null child pointer
+    public void Read_InvalidGraph_Throws(int offset, int value, string rule)
+        => AssertRule(rule, FormatVectors.Patched(FormatVectors.H1, offset, BitConverter.GetBytes(value)));
 
     [Theory]
-    [InlineData(29, 0x01)]          // string pad of A's name
-    [InlineData(28, 0xFF)]          // invalid UTF-8 in A's name
-    public void Read_InvalidString_Throws(int offset, byte value)
-    {
-        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(FormatVectors.Patched(FormatVectors.H1, offset, [value]), "Model"));
-        Assert.StartsWith("LcOpNwdLogicalHierarchy at byte ", ex.Message);
-    }
+    [InlineData(29, 0x01, "pad after the bytes is not zero")]   // string pad of A's name
+    [InlineData(28, 0xFF, "string is not valid UTF-8")]         // invalid UTF-8 in A's name
+    public void Read_InvalidString_Throws(int offset, byte value, string rule)
+        => AssertRule(rule, FormatVectors.Patched(FormatVectors.H1, offset, [value]));
 
     [Fact]
     public void Read_PartitionNode_ThrowsNotSupported()
     {
-        Assert.Throws<NotSupportedException>(() => HierarchyParser.Read(PartitionHierarchy(), "Model"));
+        var ex = Assert.Throws<NotSupportedException>(() => HierarchyParser.Read(PartitionHierarchy(), "Model"));
+        Assert.Equal(
+            "LcOpNwdLogicalHierarchy holds .nwd partition nodes (class 32), which are not decoded; open with BuildSceneTree = false to read geometry and placement.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void Read_SharedPropertyTab_SharesRecords()
+    {
+        // two leaves of one group; the second back-references the first one's class-86 tab
+        var w = Begin();
+        Group(w, 2);
+        int tab = 0;
+        Leaf(w, 1, l =>
+        {
+            tab = l.Next;
+            PropertyTab(l, 2);
+        });
+        Leaf(w, 1, l => l.Ref(tab));
+        var nodes = HierarchyParser.Read(End(w), "Model");
+
+        Assert.Equal(2, nodes[2].Properties.Count);
+        Assert.All(Enumerable.Range(0, 2), i => Assert.Same(nodes[2].Properties[i], nodes[3].Properties[i]));
     }
 
     [Fact]
@@ -305,6 +318,13 @@ public class HierarchyParserTests
     // The tail [1] and the zero pad to a multiple of 8.
     private static byte[] End(LcGraphWriter w) => w.Int(1).ToArray();
 
+    private static void AssertRule(string rule, byte[] bytes)
+    {
+        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(bytes, "Model"));
+        Assert.StartsWith("LcOpNwdLogicalHierarchy at byte ", ex.Message);
+        Assert.EndsWith(": " + rule, ex.Message);
+    }
+
     // The read's error message and the bytes it allocated on this thread.
     private static (string Message, long Allocated) ReadFailing(byte[] bytes)
     {
@@ -377,15 +397,15 @@ public class HierarchyParserTests
         Doubles(w, 3);
     }
 
-    // Class 200 with a new class-185 extra holding one embedded item: 3 payload bytes 01 02 03, then the pad byte (payload's top byte).
-    private static void Extra(LcGraphWriter w, int itemFlag = 1, int payload = 0x00030201)
+    // Class 200 with a new class-185 extra holding one embedded item: length 3, payload bytes 01 02 03, then the pad byte (payload's top byte).
+    private static void Extra(LcGraphWriter w, int itemFlag = 1, int payload = 0x00030201, long length = 3)
     {
         w.New(200);
         w.Str("j").Int(0).Int(0);
         w.New(185);
         w.Str("j").Str("i").Int(1);
         w.Str("s").Int(itemFlag).Str("t");
-        w.Str("u").Long(3).Int(payload);
+        w.Str("u").Long(length).Int(payload);
     }
 
     private static byte[] Defective(string defect) => defect switch
@@ -397,6 +417,8 @@ public class HierarchyParserTests
         }),
         "payloadPad185" => GroupWithLeaf(1, w => Extra(w, payload: 0x01030201)),
         "itemFlag185" => GroupWithLeaf(1, w => Extra(w, itemFlag: 2)),
+        "lengthNegative185" => GroupWithLeaf(1, w => Extra(w, length: -1)),
+        "payloadPastEnd185" => GroupWithLeaf(1, w => Extra(w, length: 1000)),
         "valueType9" => GroupWithLeaf(1, w =>
         {
             w.New(86);

@@ -35,14 +35,33 @@ public class DbCacheParserTests
             db.Entries);
     }
 
+    // D1: [-1][2]; entry 0 at 8 (name length 29, flags at 44, offset at 48, length at 56), entry 1 at 72 (PAD8 at 100, offset at 104)
     [Theory]
-    [InlineData(100, 1)]   // PAD8 int non-zero
-    [InlineData(41, 1)]    // name pad byte non-zero
-    [InlineData(0, 0)]     // head byte 0 FF -> 00: head -256
-    [InlineData(4, 3)]     // n = 3 with two entries
-    [InlineData(-1, 0)]    // -1: append one trailing byte
-    public void Parse_DirectoryDefect_ReturnsNull(int offset, byte value)
-        => Assert.Null(DbCacheParser.Parse(FormatVectors.Patched(FormatVectors.D1, offset, [value])));
+    [InlineData(100, 1, "entry 1 alignment pad is not zero")]                // PAD8 int non-zero
+    [InlineData(41, 1, "entry 0 name padding is not zero")]                  // name pad byte non-zero
+    [InlineData(0, 0, "head is not -1")]                                     // head byte 0 FF -> 00: head -256
+    [InlineData(4, 3, "entry 2 is truncated")]                               // n = 3 with two entries
+    [InlineData(-1, 0, "bytes remain after the last entry")]                 // -1: append one trailing byte
+    [InlineData(7, 0x80, "entry count is negative or exceeds the data")]     // n negative
+    [InlineData(11, 0x80, "entry 0 name length is out of range")]            // name length negative
+    [InlineData(55, 0x80, "entry 0 has a negative offset or length")]        // offset negative
+    [InlineData(63, 0x80, "entry 0 has a negative offset or length")]        // length negative
+    public void Parse_DirectoryDefect_ReturnsNull(int offset, byte value, string error)
+        => AssertRejected(FormatVectors.Patched(FormatVectors.D1, offset, [value]), error);
+
+    // D1 cut short: before entry 1's fixed part, after its name, and after its PAD8
+    [Theory]
+    [InlineData(100)]
+    [InlineData(110)]
+    [InlineData(126)]
+    public void Parse_TruncatedEntry_ReturnsNull(int length) => AssertRejected(FormatVectors.D1[..length], "entry 1 is truncated");
+
+    private static void AssertRejected(byte[] data, string error)
+    {
+        Assert.False(DbCacheParser.TryParse(data, out _, out var actual));
+        Assert.Equal("DbCache directory: " + error, actual);
+        Assert.Null(DbCacheParser.Parse(data));
+    }
 
     [Fact]
     public void Parse_NonUtf8NamePrefix_MatchesFinalSegment()
