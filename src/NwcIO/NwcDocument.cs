@@ -452,7 +452,7 @@ public sealed class NwcDocument
         var tests = string.IsNullOrEmpty(testName)
             ? ClashTests
             : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
-        Model.Clash.NwcClashBcfExporter.Save(path, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Model.Clash.NwcClashBcfExporter.SaveTests(path, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
     }
 
     /// <summary>Exports detected clash results to a BCF 2.1 stream.</summary>
@@ -461,7 +461,7 @@ public sealed class NwcDocument
         var tests = string.IsNullOrEmpty(testName)
             ? ClashTests
             : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
-        Model.Clash.NwcClashBcfExporter.Write(stream, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Model.Clash.NwcClashBcfExporter.WriteTests(stream, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
     }
 
     /// <summary>Loads clash detective tests and results from a Navisworks Clash Report XML file.</summary>

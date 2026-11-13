@@ -61,13 +61,13 @@ public static class NwcClashBcfExporter
     public static void Write(Stream stream, NwcClashTest test, string projectName = "Navisworks Clash Coordination")
     {
         ArgumentNullException.ThrowIfNull(test);
-        Write(stream, [test], projectName);
+        WriteTests(stream, [test], projectName);
     }
 
     /// <summary>
     /// Saves clash tests, including both standalone results and grouped clashes, to one BCF 2.1 archive file.
     /// </summary>
-    public static void Save(string path, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
+    internal static void SaveTests(string path, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(tests);
@@ -79,14 +79,14 @@ public static class NwcClashBcfExporter
         }
 
         using var fs = File.Create(path);
-        Write(fs, tests, projectName);
+        WriteTests(fs, tests, projectName);
     }
 
     /// <summary>
     /// Writes clash tests, including both standalone results and grouped clashes, to one BCF 2.1 zip stream:
     /// a topic per clash group and a topic per clash that is in no group.
     /// </summary>
-    public static void Write(Stream stream, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
+    internal static void WriteTests(Stream stream, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(tests);

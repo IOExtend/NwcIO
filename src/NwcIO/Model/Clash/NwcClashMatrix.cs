@@ -371,6 +371,6 @@ public sealed class NwcClashMatrix
             .Select(c => c.ExecutedTest!)
             .ToList();
 
-        NwcClashBcfExporter.Save(filePath, tests, Name);
+        NwcClashBcfExporter.SaveTests(filePath, tests, Name);
     }
 }
