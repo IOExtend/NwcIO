@@ -61,6 +61,36 @@ internal static class TestFiles
     }
 
     /// <summary>
+    /// Every local fixture file in a stable order: only the file named by <see cref="EnvironmentVariable"/>
+    /// when it exists, otherwise all *.nwc and *.nwd files of the first search root that holds any,
+    /// ordered by (length, full path). Reports refer to files by position in this list.
+    /// </summary>
+    public static IReadOnlyList<string> EnumerateAll()
+    {
+        var env = Environment.GetEnvironmentVariable(EnvironmentVariable);
+        if (!string.IsNullOrEmpty(env) && File.Exists(env))
+        {
+            return [env];
+        }
+
+        foreach (var root in SearchRoots())
+        {
+            var files = Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
+                .Where(f => f.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase)
+                    || f.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => new FileInfo(f).Length)
+                .ThenBy(f => f, StringComparer.Ordinal)
+                .ToList();
+            if (files.Count > 0)
+            {
+                return files;
+            }
+        }
+
+        return [];
+    }
+
+    /// <summary>
     /// Returns a human-readable reason why no fixture could be resolved, or null when
     /// one is available. A set-but-unresolvable <see cref="EnvironmentVariable"/> value
     /// is called out so a broken fixture setup is visible in the test output.
