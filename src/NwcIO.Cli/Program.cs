@@ -81,6 +81,9 @@ internal static class Program
           3  Data format error or parsing failure
         """;
 
+    // The reader throws NotSupportedException only for a scene tree it cannot decode (class-32 partition nodes).
+    private const string NoTreeHint = " Use --no-tree to read geometry and placement without the scene tree.";
+
     public static int Main(string[] args)
     {
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
@@ -557,12 +560,12 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
+            Console.Error.WriteLine($"Error: {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
         }
 
@@ -590,7 +593,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error reading '{inputPath}': {ex.Message}");
+            Console.Error.WriteLine($"Error reading '{inputPath}': {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return 3;
         }
 
@@ -1376,10 +1379,11 @@ internal static class Program
         string? explicitClashMatrixMdPath = null,
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
-        string? explicitTimeLinerPrimaveraPath = null)
+        string? explicitTimeLinerPrimaveraPath = null,
+        bool includeTree = true)
     {
         outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
-        var assembly = NwcAssembly.OpenNwf(nwfPath);
+        var assembly = NwcAssembly.OpenNwf(nwfPath, new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {

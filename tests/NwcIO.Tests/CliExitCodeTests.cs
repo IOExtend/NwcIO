@@ -48,6 +48,25 @@ public class CliExitCodeTests
     }
 
     [Fact]
+    public void PartitionHierarchyNwc_Exits3WithoutNoTreeAndOpensWithIt()
+    {
+        string root = TempRoot();
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "p.nwc");
+        File.WriteAllBytes(path, ModelGraphReaderTests.PartitionFile());
+        try
+        {
+            Assert.Equal(3, NwcIO.Cli.Program.Main([path, Path.Combine(root, "out.json")]));
+            Assert.Equal(0, NwcIO.Cli.Program.Main([path, Path.Combine(root, "out.json"), "--no-tree"]));
+            Assert.True(File.Exists(Path.Combine(root, "out.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void CorruptNwfFile_Exits3WithoutThrowing()
     {
         string root = TempRoot();
