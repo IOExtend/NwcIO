@@ -356,4 +356,19 @@ public class MeshParserTests
         var meshes = MeshParser.Parse(container);
         Assert.Empty(meshes);
     }
+
+    [Fact]
+    public void IsStrip_AgreesWithBuildStripIndices_AndRejectsSwappedPair()
+    {
+        for (int n = 3; n <= 8; n++)
+        {
+            int[] strip = MeshParser.BuildStripIndices(n);
+            Assert.True(MeshParser.IsStrip(strip, n));
+
+            int[] swapped = (int[])strip.Clone();
+            (swapped[0], swapped[1]) = (swapped[1], swapped[0]);
+            Assert.False(MeshParser.IsStrip(swapped, n));
+            Assert.False(MeshParser.IsStrip(strip.Take(strip.Length - 1).ToArray(), n));
+        }
+    }
 }

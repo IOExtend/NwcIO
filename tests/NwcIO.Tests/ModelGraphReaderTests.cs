@@ -207,7 +207,7 @@ public class ModelGraphReaderTests
     {
         byte[] file = SyntheticNwcFile.Build(FormatVectors.H1, Fragments(new Frag(2, Vector3d.Zero, 1, 3, 4, Rec: 1, MaxZ: 1)), [FormatVectors.R2], [152]);
         var doc = NwcDocument.Open(new MemoryStream(file), new NwcReaderOptions { BuildSceneTree = false, ReadPropertyRecords = false });
-        Assert.Contains("Mesh 0", Assert.Throws<ArgumentException>(() => doc.ToByteArray()).Message);
+        Assert.Contains("Mesh 0 has triangles the .nwc writer cannot store", Assert.Throws<ArgumentException>(() => doc.ToByteArray()).Message);
     }
 
     [Fact]

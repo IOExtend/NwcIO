@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using NwcIO.Model;
 using NwcIO.Model.Clash;
 using NwcIO.Model.Appearance;
+using NwcIO.Model.Sectioning;
 using NwcIO.Model.Sets;
 using Xunit;
 
@@ -987,6 +988,25 @@ public sealed class ClashDetectiveTests
         var test = new NwcClashTest("Leaves", NwcClashTestType.Hard);
         NwcClashDetector.Run(doc, test);
         Assert.Single(test.Results);
+    }
+
+    [Fact]
+    public void Clash_ClippedMeshKeepsElementKey_NoClashWithSiblingWithoutTree()
+    {
+        var options = new NwcReaderOptions { BuildSceneTree = false };
+        var plane = new NwcSectionPlane { Normal = new Vector3d(1, 0, 0), Distance = -1e6, IsEnabled = true };
+
+        var siblings = NwcDocument.Open(new MemoryStream(QuadFile(2, 2)), options).Meshes;
+        var sameLeaf = NwcDocument.Create(meshes: [NwcMeshClipper.Clip(siblings[0], [plane]), siblings[1]]);
+        var sameTest = new NwcClashTest("Clipped sibling", NwcClashTestType.Hard);
+        NwcClashDetector.Run(sameLeaf, sameTest);
+        Assert.Empty(sameTest.Results);
+
+        var leaves = NwcDocument.Open(new MemoryStream(QuadFile(2, 3)), options).Meshes;
+        var otherLeaf = NwcDocument.Create(meshes: [NwcMeshClipper.Clip(leaves[0], [plane]), leaves[1]]);
+        var otherTest = new NwcClashTest("Clipped other leaf", NwcClashTestType.Hard);
+        NwcClashDetector.Run(otherLeaf, otherTest);
+        Assert.Single(otherTest.Results);
     }
 
     [Fact]

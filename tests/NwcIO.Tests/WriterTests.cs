@@ -199,7 +199,7 @@ public class WriterTests
     public void Writer_RejectsTopologyTheStripCannotRepresent_WithoutChangingDestination(int[] indices, int vertexCount)
     {
         var mesh = new NwcMesh { Id = 9, Vertices = StripVertices(vertexCount), Indices = indices };
-        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 9");
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 9 has triangles the .nwc writer cannot store");
     }
 
     [Theory]
