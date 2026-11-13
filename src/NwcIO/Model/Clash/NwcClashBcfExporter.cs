@@ -192,7 +192,7 @@ public static class NwcClashBcfExporter
     private static void WriteMarkupXml(XmlWriter xml, NwcClashResult clash, string projectName)
     {
         xml.WriteStartDocument();
-        xml.WriteStartElement("Markup", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteStartElement("Markup");
         xml.WriteAttributeString("xmlns", "xsi", null, "http://www.w3.org/2001/XMLSchema-instance");
 
         xml.WriteStartElement("Header");
@@ -224,7 +224,6 @@ public static class NwcClashBcfExporter
         {
             descBuilder.Append(CultureInfo.InvariantCulture, $" Location: {clash.GridLocation}.");
         }
-        xml.WriteElementString("Description", descBuilder.ToString());
 
         xml.WriteElementString("CreationDate", clash.CreatedDate.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture));
         xml.WriteElementString("CreationAuthor", "NwcIO Clash Detective");
@@ -234,12 +233,7 @@ public static class NwcClashBcfExporter
             xml.WriteElementString("AssignedTo", clash.AssignedTo);
         }
 
-        // Viewpoint link
-        xml.WriteStartElement("Viewpoints");
-        xml.WriteAttributeString("Guid", clash.ResultGuid.ToString("D"));
-        xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
-        xml.WriteEndElement(); // Viewpoints
-
+        xml.WriteElementString("Description", descBuilder.ToString());
         xml.WriteEndElement(); // Topic
 
         // Comments
@@ -256,6 +250,11 @@ public static class NwcClashBcfExporter
             }
         }
 
+        xml.WriteStartElement("Viewpoints");
+        xml.WriteAttributeString("Guid", clash.ResultGuid.ToString("D"));
+        xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
+        xml.WriteEndElement(); // Viewpoints
+
         xml.WriteEndElement(); // Markup
         xml.WriteEndDocument();
     }
@@ -263,8 +262,30 @@ public static class NwcClashBcfExporter
     private static void WriteViewpointXml(XmlWriter xml, NwcClashResult clash)
     {
         xml.WriteStartDocument();
-        xml.WriteStartElement("VisualizationInfo", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteStartElement("VisualizationInfo");
         xml.WriteAttributeString("Guid", clash.ResultGuid.ToString("D"));
+
+        // Components selection
+        var guids = new List<string>();
+        if (!string.IsNullOrEmpty(clash.Item1.IfcGuid)) guids.Add(clash.Item1.IfcGuid);
+        if (!string.IsNullOrEmpty(clash.Item2.IfcGuid)) guids.Add(clash.Item2.IfcGuid);
+
+        if (guids.Count > 0)
+        {
+            xml.WriteStartElement("Components");
+            xml.WriteStartElement("Selection");
+            foreach (var guid in guids)
+            {
+                xml.WriteStartElement("Component");
+                xml.WriteAttributeString("IfcGuid", guid);
+                xml.WriteEndElement();
+            }
+            xml.WriteEndElement(); // Selection
+            xml.WriteStartElement("Visibility");
+            xml.WriteAttributeString("DefaultVisibility", "true");
+            xml.WriteEndElement(); // Visibility
+            xml.WriteEndElement(); // Components
+        }
 
         // Camera positioning
         xml.WriteStartElement("PerspectiveCamera");
@@ -295,25 +316,6 @@ public static class NwcClashBcfExporter
         xml.WriteElementString("FieldOfView", "60");
         xml.WriteEndElement(); // PerspectiveCamera
 
-        // Components selection
-        var guids = new List<string>();
-        if (!string.IsNullOrEmpty(clash.Item1.IfcGuid)) guids.Add(clash.Item1.IfcGuid);
-        if (!string.IsNullOrEmpty(clash.Item2.IfcGuid)) guids.Add(clash.Item2.IfcGuid);
-
-        if (guids.Count > 0)
-        {
-            xml.WriteStartElement("Components");
-            xml.WriteStartElement("Selection");
-            foreach (var guid in guids)
-            {
-                xml.WriteStartElement("Component");
-                xml.WriteAttributeString("IfcGuid", guid);
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement(); // Selection
-            xml.WriteEndElement(); // Components
-        }
-
         xml.WriteEndElement(); // VisualizationInfo
         xml.WriteEndDocument();
     }
@@ -321,7 +323,7 @@ public static class NwcClashBcfExporter
     private static void WriteGroupMarkupXml(XmlWriter xml, NwcClashGroup group, string projectName)
     {
         xml.WriteStartDocument();
-        xml.WriteStartElement("Markup", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteStartElement("Markup");
         xml.WriteAttributeString("xmlns", "xsi", null, "http://www.w3.org/2001/XMLSchema-instance");
 
         xml.WriteStartElement("Header");
@@ -358,18 +360,12 @@ public static class NwcClashBcfExporter
         }
         xml.WriteElementString("Description", sb.ToString().TrimEnd());
 
-        xml.WriteStartElement("Viewpoints");
-        xml.WriteAttributeString("Guid", group.GroupGuid.ToString("D"));
-        xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
-        xml.WriteEndElement(); // Viewpoints
-
         xml.WriteEndElement(); // Topic
 
         // Comments
         var allComments = group.Comments.Concat(group.Clashes.SelectMany(c => c.Comments)).ToList();
         if (allComments.Count > 0)
         {
-            xml.WriteStartElement("Comment");
             foreach (var comment in allComments)
             {
                 xml.WriteStartElement("Comment");
@@ -379,8 +375,12 @@ public static class NwcClashBcfExporter
                 xml.WriteElementString("Comment", comment.Body);
                 xml.WriteEndElement(); // Comment
             }
-            xml.WriteEndElement();
         }
+
+        xml.WriteStartElement("Viewpoints");
+        xml.WriteAttributeString("Guid", group.GroupGuid.ToString("D"));
+        xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
+        xml.WriteEndElement(); // Viewpoints
 
         xml.WriteEndElement(); // Markup
         xml.WriteEndDocument();
@@ -389,8 +389,33 @@ public static class NwcClashBcfExporter
     private static void WriteGroupViewpointXml(XmlWriter xml, NwcClashGroup group)
     {
         xml.WriteStartDocument();
-        xml.WriteStartElement("VisualizationInfo", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteStartElement("VisualizationInfo");
         xml.WriteAttributeString("Guid", group.GroupGuid.ToString("D"));
+
+        // Components selection
+        var guids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var clash in group.Clashes)
+        {
+            if (!string.IsNullOrEmpty(clash.Item1.IfcGuid)) guids.Add(clash.Item1.IfcGuid);
+            if (!string.IsNullOrEmpty(clash.Item2.IfcGuid)) guids.Add(clash.Item2.IfcGuid);
+        }
+
+        if (guids.Count > 0)
+        {
+            xml.WriteStartElement("Components");
+            xml.WriteStartElement("Selection");
+            foreach (var guid in guids)
+            {
+                xml.WriteStartElement("Component");
+                xml.WriteAttributeString("IfcGuid", guid);
+                xml.WriteEndElement();
+            }
+            xml.WriteEndElement(); // Selection
+            xml.WriteStartElement("Visibility");
+            xml.WriteAttributeString("DefaultVisibility", "true");
+            xml.WriteEndElement(); // Visibility
+            xml.WriteEndElement(); // Components
+        }
 
         // Camera positioning
         xml.WriteStartElement("PerspectiveCamera");
@@ -420,28 +445,6 @@ public static class NwcClashBcfExporter
 
         xml.WriteElementString("FieldOfView", "60");
         xml.WriteEndElement(); // PerspectiveCamera
-
-        // Components selection
-        var guids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var clash in group.Clashes)
-        {
-            if (!string.IsNullOrEmpty(clash.Item1.IfcGuid)) guids.Add(clash.Item1.IfcGuid);
-            if (!string.IsNullOrEmpty(clash.Item2.IfcGuid)) guids.Add(clash.Item2.IfcGuid);
-        }
-
-        if (guids.Count > 0)
-        {
-            xml.WriteStartElement("Components");
-            xml.WriteStartElement("Selection");
-            foreach (var guid in guids)
-            {
-                xml.WriteStartElement("Component");
-                xml.WriteAttributeString("IfcGuid", guid);
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement(); // Selection
-            xml.WriteEndElement(); // Components
-        }
 
         xml.WriteEndElement(); // VisualizationInfo
         xml.WriteEndDocument();

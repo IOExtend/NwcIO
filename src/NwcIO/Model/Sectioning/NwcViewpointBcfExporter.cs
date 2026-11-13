@@ -21,6 +21,9 @@ public static class NwcViewpointBcfExporter
     };
 
     /// <summary>Saves a collection of saved viewpoints as a BCF 2.1 (.bcfzip) file to disk.</summary>
+    /// <param name="path">The destination archive path.</param>
+    /// <param name="viewpoints">The saved viewpoints to export.</param>
+    /// <param name="projectName">Retained for API compatibility; unused because BCF 2.1 markup has no field for a project name.</param>
     public static void Save(string path, IEnumerable<NwcSavedViewpoint> viewpoints, string projectName = "Navisworks Viewpoint Coordination")
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -37,6 +40,9 @@ public static class NwcViewpointBcfExporter
     }
 
     /// <summary>Writes saved viewpoints into a stream as a BCF 2.1 zip archive.</summary>
+    /// <param name="stream">The destination stream, which remains open after writing.</param>
+    /// <param name="viewpoints">The saved viewpoints to export.</param>
+    /// <param name="projectName">Retained for API compatibility; unused because BCF 2.1 markup has no field for a project name.</param>
     public static void Write(Stream stream, IEnumerable<NwcSavedViewpoint> viewpoints, string projectName = "Navisworks Viewpoint Coordination")
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -62,7 +68,7 @@ public static class NwcViewpointBcfExporter
             using (var s = markupEntry.Open())
             using (var xml = XmlWriter.Create(s, Settings))
             {
-                WriteMarkupXml(xml, vp, projectName);
+                WriteMarkupXml(xml, vp);
             }
 
             // Write viewpoint.bcfv
@@ -75,16 +81,15 @@ public static class NwcViewpointBcfExporter
         }
     }
 
-    private static void WriteMarkupXml(XmlWriter xml, NwcSavedViewpoint vp, string projectName)
+    private static void WriteMarkupXml(XmlWriter xml, NwcSavedViewpoint vp)
     {
         xml.WriteStartDocument();
-        xml.WriteStartElement("Markup", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteStartElement("Markup");
 
         xml.WriteStartElement("Header");
         xml.WriteStartElement("File");
-        xml.WriteAttributeString("IfcProject", projectName);
-        xml.WriteAttributeString("Date", DateTime.UtcNow.ToString("s", CultureInfo.InvariantCulture) + "Z");
         xml.WriteElementString("Filename", "Navisworks.nwd");
+        xml.WriteElementString("Date", DateTime.UtcNow.ToString("s", CultureInfo.InvariantCulture) + "Z");
         xml.WriteEndElement();
         xml.WriteEndElement();
 
@@ -96,14 +101,9 @@ public static class NwcViewpointBcfExporter
 
         xml.WriteElementString("Title", vp.Name);
         xml.WriteElementString("CreationDate", DateTime.UtcNow.ToString("s", CultureInfo.InvariantCulture) + "Z");
+        xml.WriteElementString("CreationAuthor", "NwcIO");
         xml.WriteElementString("Description", $"Navisworks viewpoint '{vp.Name}' with {vp.Redlines.Count} redlines and {vp.SectionPlanes.Count} section planes.");
         xml.WriteEndElement(); // Topic
-
-        // Viewpoint reference
-        xml.WriteStartElement("Viewpoints");
-        xml.WriteAttributeString("Guid", vp.Id.ToString("D"));
-        xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
-        xml.WriteEndElement();
 
         // Comments
         foreach (var c in vp.Comments)
@@ -129,6 +129,12 @@ public static class NwcViewpointBcfExporter
             }
         }
 
+        // Viewpoint reference
+        xml.WriteStartElement("Viewpoints");
+        xml.WriteAttributeString("Guid", vp.Id.ToString("D"));
+        xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
+        xml.WriteEndElement();
+
         xml.WriteEndElement(); // Markup
         xml.WriteEndDocument();
     }
@@ -136,7 +142,7 @@ public static class NwcViewpointBcfExporter
     private static void WriteViewpointXml(XmlWriter xml, NwcSavedViewpoint vp)
     {
         xml.WriteStartDocument();
-        xml.WriteStartElement("VisualizationInfo", "http://www.buildingsmart-tech.org/specifications/bcf-releases");
+        xml.WriteStartElement("VisualizationInfo");
         xml.WriteAttributeString("Guid", vp.Id.ToString("D"));
 
         var cam = vp.Camera;
@@ -174,6 +180,31 @@ public static class NwcViewpointBcfExporter
             xml.WriteEndElement();
         }
 
+        // Redlines (Lines and Arrows as BCF Lines)
+        var lines = new List<(Vector3d Start, Vector3d End)>();
+        foreach (var r in vp.Redlines)
+        {
+            if (r is NwcRedlineArrow a) lines.Add((a.StartPoint, a.EndPoint));
+            else if (r is NwcRedlineLine l) lines.Add((l.StartPoint, l.EndPoint));
+        }
+
+        if (lines.Count > 0)
+        {
+            xml.WriteStartElement("Lines");
+            foreach (var (p0, p1) in lines)
+            {
+                xml.WriteStartElement("Line");
+                xml.WriteStartElement("StartPoint");
+                WritePoint(xml, p0);
+                xml.WriteEndElement();
+                xml.WriteStartElement("EndPoint");
+                WritePoint(xml, p1);
+                xml.WriteEndElement();
+                xml.WriteEndElement();
+            }
+            xml.WriteEndElement();
+        }
+
         // Section clipping planes
         var allPlanes = new List<NwcSectionPlane>(vp.SectionPlanes);
         if (vp.SectionBox is not null && vp.SectionBox.IsEnabled)
@@ -195,31 +226,6 @@ public static class NwcViewpointBcfExporter
                 xml.WriteEndElement();
                 xml.WriteStartElement("Direction");
                 WritePoint(xml, n);
-                xml.WriteEndElement();
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement();
-        }
-
-        // Redlines (Lines and Arrows as BCF Lines)
-        var lines = new List<(Vector3d Start, Vector3d End)>();
-        foreach (var r in vp.Redlines)
-        {
-            if (r is NwcRedlineArrow a) lines.Add((a.StartPoint, a.EndPoint));
-            else if (r is NwcRedlineLine l) lines.Add((l.StartPoint, l.EndPoint));
-        }
-
-        if (lines.Count > 0)
-        {
-            xml.WriteStartElement("Lines");
-            foreach (var (p0, p1) in lines)
-            {
-                xml.WriteStartElement("Line");
-                xml.WriteStartElement("StartPoint");
-                WritePoint(xml, p0);
-                xml.WriteEndElement();
-                xml.WriteStartElement("EndPoint");
-                WritePoint(xml, p1);
                 xml.WriteEndElement();
                 xml.WriteEndElement();
             }

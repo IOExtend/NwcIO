@@ -162,8 +162,7 @@ internal static class BcfExporter
         // Header
         xml.WriteStartElement("Header");
         xml.WriteStartElement("File");
-        xml.WriteAttributeString("IfcProject", "0$W1402280000000000000");
-        xml.WriteAttributeString("IsExternal", "true");
+        xml.WriteAttributeString("isExternal", "true");
         xml.WriteElementString("Filename", CleanXml(assemblyName));
         xml.WriteElementString("Date", timestamp);
         xml.WriteEndElement(); // File
@@ -215,6 +214,10 @@ internal static class BcfExporter
         xml.WriteAttributeString("IfcGuid", clash.IfcGuidB);
         xml.WriteEndElement();
         xml.WriteEndElement(); // Selection
+
+        xml.WriteStartElement("Visibility");
+        xml.WriteAttributeString("DefaultVisibility", "true");
+        xml.WriteEndElement(); // Visibility
 
         xml.WriteStartElement("Coloring");
 
@@ -292,8 +295,7 @@ internal static class BcfExporter
 
         xml.WriteStartElement("Header");
         xml.WriteStartElement("File");
-        xml.WriteAttributeString("IfcProject", "0$W1402280000000000000");
-        xml.WriteAttributeString("IsExternal", "true");
+        xml.WriteAttributeString("isExternal", "true");
         xml.WriteElementString("Filename", CleanXml(assemblyName));
         xml.WriteElementString("Date", timestamp);
         xml.WriteEndElement();
