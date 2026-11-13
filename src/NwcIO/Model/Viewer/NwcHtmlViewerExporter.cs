@@ -341,7 +341,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   let currentCamAnim = null;
 
   // Update HUD
-  const totalVerts = modelData.meshes.reduce((acc, m) => acc + (m.vertices.length / 3), 0);
+  const totalVerts = modelData.meshes.reduce((acc, m) => acc + m.chunks.reduce((sum, chunk) => sum + chunk.vertices.length / 3, 0), 0);
   document.getElementById('hud-stats').textContent = `Meshes: ${modelData.meshes.length} | Vertices: ${Math.round(totalVerts).toLocaleString()}`;
 
   // Shaders
@@ -435,50 +435,53 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
   // Upload Meshes to GPU
   const gpuMeshes = modelData.meshes.map((m, idx) => {
-    const vbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(m.vertices), gl.STATIC_DRAW);
+    const chunks = m.chunks.map(chunk => {
+      const vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(chunk.vertices), gl.STATIC_DRAW);
 
-    // Compute normals
-    const norms = new Float32Array(m.vertices.length);
-    for (let i = 0; i < m.indices.length; i += 3) {
-      const i0 = m.indices[i]*3, i1 = m.indices[i+1]*3, i2 = m.indices[i+2]*3;
-      const ax = m.vertices[i1]-m.vertices[i0], ay = m.vertices[i1+1]-m.vertices[i0+1], az = m.vertices[i1+2]-m.vertices[i0+2];
-      const bx = m.vertices[i2]-m.vertices[i0], by = m.vertices[i2+1]-m.vertices[i0+1], bz = m.vertices[i2+2]-m.vertices[i0+2];
-      const nx = ay*bz - az*by, ny = az*bx - ax*bz, nz = ax*by - ay*bx;
-      norms[i0]+=nx; norms[i0+1]+=ny; norms[i0+2]+=nz;
-      norms[i1]+=nx; norms[i1+1]+=ny; norms[i1+2]+=nz;
-      norms[i2]+=nx; norms[i2+1]+=ny; norms[i2+2]+=nz;
-    }
-    const nbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, nbo);
-    gl.bufferData(gl.ARRAY_BUFFER, norms, gl.STATIC_DRAW);
+      // Compute normals
+      const norms = new Float32Array(chunk.vertices.length);
+      for (let i = 0; i < chunk.indices.length; i += 3) {
+        const i0 = chunk.indices[i]*3, i1 = chunk.indices[i+1]*3, i2 = chunk.indices[i+2]*3;
+        const ax = chunk.vertices[i1]-chunk.vertices[i0], ay = chunk.vertices[i1+1]-chunk.vertices[i0+1], az = chunk.vertices[i1+2]-chunk.vertices[i0+2];
+        const bx = chunk.vertices[i2]-chunk.vertices[i0], by = chunk.vertices[i2+1]-chunk.vertices[i0+1], bz = chunk.vertices[i2+2]-chunk.vertices[i0+2];
+        const nx = ay*bz - az*by, ny = az*bx - ax*bz, nz = ax*by - ay*bx;
+        norms[i0]+=nx; norms[i0+1]+=ny; norms[i0+2]+=nz;
+        norms[i1]+=nx; norms[i1+1]+=ny; norms[i1+2]+=nz;
+        norms[i2]+=nx; norms[i2+1]+=ny; norms[i2+2]+=nz;
+      }
+      const nbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, nbo);
+      gl.bufferData(gl.ARRAY_BUFFER, norms, gl.STATIC_DRAW);
 
-    // Colors
-    const colArr = new Float32Array(m.vertices.length / 3 * 4);
-    const c = m.color || [0.8, 0.8, 0.8, 1.0];
-    for (let i = 0; i < colArr.length; i += 4) {
-      colArr[i]=c[0]; colArr[i+1]=c[1]; colArr[i+2]=c[2]; colArr[i+3]=c[3];
-    }
-    const cbo = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, cbo);
-    gl.bufferData(gl.ARRAY_BUFFER, colArr, gl.STATIC_DRAW);
+      // Colors
+      const colArr = new Float32Array(chunk.vertices.length / 3 * 4);
+      const c = m.color || [0.8, 0.8, 0.8, 1.0];
+      for (let i = 0; i < colArr.length; i += 4) {
+        colArr[i]=c[0]; colArr[i+1]=c[1]; colArr[i+2]=c[2]; colArr[i+3]=c[3];
+      }
+      const cbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, cbo);
+      gl.bufferData(gl.ARRAY_BUFFER, colArr, gl.STATIC_DRAW);
 
-    const ibo = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(m.indices), gl.STATIC_DRAW);
+      const ibo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(chunk.indices), gl.STATIC_DRAW);
 
-    let mbMin = [Infinity, Infinity, Infinity];
-    let mbMax = [-Infinity, -Infinity, -Infinity];
-    for (let i = 0; i < m.vertices.length; i += 3) {
-      const vx = m.vertices[i], vy = m.vertices[i+1], vz = m.vertices[i+2];
-      if (vx < mbMin[0]) mbMin[0] = vx; if (vx > mbMax[0]) mbMax[0] = vx;
-      if (vy < mbMin[1]) mbMin[1] = vy; if (vy > mbMax[1]) mbMax[1] = vy;
-      if (vz < mbMin[2]) mbMin[2] = vz; if (vz > mbMax[2]) mbMax[2] = vz;
-    }
-    const meshBounds = (mbMin[0] <= mbMax[0]) ? { min: mbMin, max: mbMax } : null;
+      // Each triangle contributes its three edges, without joining adjacent triangles.
+      const lineIndices = new Uint16Array(Math.floor(chunk.indices.length / 3) * 6);
+      for (let i = 0; i + 2 < chunk.indices.length; i += 3) {
+        const a = chunk.indices[i], b = chunk.indices[i + 1], c = chunk.indices[i + 2];
+        lineIndices.set([a, b, b, c, c, a], i * 2);
+      }
+      const lineIbo = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lineIbo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lineIndices, gl.STATIC_DRAW);
 
-    return { vbo, nbo, cbo, ibo, count: m.indices.length, raw: m, index: idx, bounds: meshBounds };
+      return { vbo, nbo, cbo, ibo, lineIbo, lineCount: lineIndices.length, count: chunk.indices.length };
+    });
+    return { chunks, raw: m, index: idx, bounds: m.bounds };
   });
 
   // Matrix Math
@@ -557,20 +560,6 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     for (const gm of gpuMeshes) {
       if (gm.hidden) continue;
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, gm.vbo);
-      gl.vertexAttribPointer(loc.aPos, 3, gl.FLOAT, false, 0, 0);
-      gl.enableVertexAttribArray(loc.aPos);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, gm.nbo);
-      gl.vertexAttribPointer(loc.aNorm, 3, gl.FLOAT, false, 0, 0);
-      gl.enableVertexAttribArray(loc.aNorm);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, gm.cbo);
-      gl.vertexAttribPointer(loc.aCol, 4, gl.FLOAT, false, 0, 0);
-      gl.enableVertexAttribArray(loc.aCol);
-
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gm.ibo);
-
       if (gm.index === selectedMeshIndex) {
         gl.uniform4f(loc.uHigh, 1.0, 0.75, 0.0, 0.7);
       } else if (selectedSetMeshIndices.has(gm.index)) {
@@ -581,8 +570,24 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         gl.uniform4f(loc.uHigh, 0, 0, 0, 0);
       }
 
-      const mode = wireframeMode ? gl.LINES : gl.TRIANGLES;
-      gl.drawElements(mode, gm.count, gl.UNSIGNED_SHORT, 0);
+      for (const chunk of gm.chunks) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, chunk.vbo);
+        gl.vertexAttribPointer(loc.aPos, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(loc.aPos);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, chunk.nbo);
+        gl.vertexAttribPointer(loc.aNorm, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(loc.aNorm);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, chunk.cbo);
+        gl.vertexAttribPointer(loc.aCol, 4, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(loc.aCol);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, wireframeMode ? chunk.lineIbo : chunk.ibo);
+
+        const mode = wireframeMode ? gl.LINES : gl.TRIANGLES;
+        gl.drawElements(mode, wireframeMode ? chunk.lineCount : chunk.count, gl.UNSIGNED_SHORT, 0);
+      }
     }
 
     drawOverlay(pMat, vMat);
@@ -859,15 +864,17 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     let bestPt = null;
 
     for (const m of modelData.meshes) {
-      const v = m.vertices;
-      for (let i = 0; i < v.length; i += 3) {
-        const pt = [v[i], v[i+1], v[i+2]];
-        const sp = worldToScreen(pt, lastPMat, lastVMat);
-        if (sp) {
-          const d = Math.hypot(sp[0] - mx, sp[1] - my);
-          if (d < bestDist) {
-            bestDist = d;
-            bestPt = pt;
+      for (const chunk of m.chunks) {
+        const v = chunk.vertices;
+        for (let i = 0; i < v.length; i += 3) {
+          const pt = [v[i], v[i+1], v[i+2]];
+          const sp = worldToScreen(pt, lastPMat, lastVMat);
+          if (sp) {
+            const d = Math.hypot(sp[0] - mx, sp[1] - my);
+            if (d < bestDist) {
+              bestDist = d;
+              bestPt = pt;
+            }
           }
         }
       }
@@ -1437,6 +1444,60 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
 
+    // WebGL1 supports unsigned short indices without requiring an extension.
+    private static IEnumerable<(IReadOnlyList<Vector3d> Vertices, IReadOnlyList<int> Indices)> SplitMesh(NwcMesh mesh)
+    {
+        const int maxVertices = 65535;
+        if (mesh.Vertices.Count <= maxVertices)
+        {
+            yield return (mesh.Vertices, mesh.Indices);
+            yield break;
+        }
+
+        var remap = new Dictionary<int, int>();
+        var vertices = new List<Vector3d>();
+        var indices = new List<int>();
+        for (var i = 0; i + 2 < mesh.Indices.Count; i += 3)
+        {
+            // Reject the whole triangle before adding vertices or splitting a chunk.
+            var a = mesh.Indices[i];
+            var b = mesh.Indices[i + 1];
+            var c = mesh.Indices[i + 2];
+            if (a < 0 || a >= mesh.Vertices.Count ||
+                b < 0 || b >= mesh.Vertices.Count ||
+                c < 0 || c >= mesh.Vertices.Count)
+            {
+                continue;
+            }
+
+            // Reserve room for a complete triangle so no face straddles chunks.
+            if (remap.Count + 3 > maxVertices)
+            {
+                yield return (vertices, indices);
+                remap.Clear();
+                vertices = [];
+                indices = [];
+            }
+
+            for (var j = 0; j < 3; j++)
+            {
+                var sourceIndex = mesh.Indices[i + j];
+                if (!remap.TryGetValue(sourceIndex, out var index))
+                {
+                    index = vertices.Count;
+                    remap.Add(sourceIndex, index);
+                    vertices.Add(mesh.Vertices[sourceIndex]);
+                }
+                indices.Add(index);
+            }
+        }
+
+        if (indices.Count > 0)
+        {
+            yield return (vertices, indices);
+        }
+    }
+
     private static string BuildJsonPayload(
         IReadOnlyList<NwcMesh> meshes,
         IReadOnlyList<NwcSavedViewpoint> viewpoints,
@@ -1492,25 +1553,6 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteNumberValue(col.A / 255.0);
             writer.WriteEndArray();
 
-            // Vertices
-            writer.WriteStartArray("vertices");
-            foreach (var v in mesh.Vertices)
-            {
-                // JSON has no non-finite numbers; writing 0 keeps the vertex count the indices refer to
-                writer.WriteNumberValue(double.IsFinite(v.X) ? v.X : 0);
-                writer.WriteNumberValue(double.IsFinite(v.Y) ? v.Y : 0);
-                writer.WriteNumberValue(double.IsFinite(v.Z) ? v.Z : 0);
-            }
-            writer.WriteEndArray();
-
-            // Indices
-            writer.WriteStartArray("indices");
-            foreach (var idx in mesh.Indices)
-            {
-                writer.WriteNumberValue(idx);
-            }
-            writer.WriteEndArray();
-
             // Properties
             if (options.IncludeProperties && mesh.Node is not null && mesh.Node.Properties.Count > 0)
             {
@@ -1528,6 +1570,56 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                     }
                     writer.WriteEndObject();
                 }
+                writer.WriteEndObject();
+            }
+
+            var meshBounds = BoundingBox3d.Empty;
+            writer.WriteStartArray("chunks");
+            foreach (var chunk in SplitMesh(mesh))
+            {
+                writer.WriteStartObject();
+                // Vertices
+                writer.WriteStartArray("vertices");
+                foreach (var v in chunk.Vertices)
+                {
+                    // JSON has no non-finite numbers; writing 0 keeps the vertex count the indices refer to
+                    var position = new Vector3d(
+                        double.IsFinite(v.X) ? v.X : 0,
+                        double.IsFinite(v.Y) ? v.Y : 0,
+                        double.IsFinite(v.Z) ? v.Z : 0);
+                    meshBounds = meshBounds.Union(position);
+                    writer.WriteNumberValue(position.X);
+                    writer.WriteNumberValue(position.Y);
+                    writer.WriteNumberValue(position.Z);
+                }
+                writer.WriteEndArray();
+
+                // Indices
+                writer.WriteStartArray("indices");
+                foreach (var idx in chunk.Indices)
+                {
+                    writer.WriteNumberValue(idx);
+                }
+                writer.WriteEndArray();
+
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            // Fit Selection uses all emitted chunks, including sanitized coordinates.
+            if (!meshBounds.IsEmpty)
+            {
+                writer.WriteStartObject("bounds");
+                writer.WriteStartArray("min");
+                writer.WriteNumberValue(meshBounds.Min.X);
+                writer.WriteNumberValue(meshBounds.Min.Y);
+                writer.WriteNumberValue(meshBounds.Min.Z);
+                writer.WriteEndArray();
+                writer.WriteStartArray("max");
+                writer.WriteNumberValue(meshBounds.Max.X);
+                writer.WriteNumberValue(meshBounds.Max.Y);
+                writer.WriteNumberValue(meshBounds.Max.Z);
+                writer.WriteEndArray();
                 writer.WriteEndObject();
             }
 
