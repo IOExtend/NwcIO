@@ -53,15 +53,24 @@ public class CliExitCodeTests
         string root = TempRoot();
         Directory.CreateDirectory(root);
         string path = Path.Combine(root, "p.nwc");
+        string json = Path.Combine(root, "out.json");
         File.WriteAllBytes(path, ModelGraphReaderTests.PartitionFile());
+        using var error = new StringWriter();
+        var originalError = Console.Error;
         try
         {
-            Assert.Equal(3, NwcIO.Cli.Program.Main([path, Path.Combine(root, "out.json")]));
-            Assert.Equal(0, NwcIO.Cli.Program.Main([path, Path.Combine(root, "out.json"), "--no-tree"]));
-            Assert.True(File.Exists(Path.Combine(root, "out.json")));
+            Console.SetError(error);
+            Assert.Equal(3, NwcIO.Cli.Program.Main([path, json]));
+            Console.SetError(originalError);
+            Assert.Contains("Use --no-tree", error.ToString());
+            Assert.False(File.Exists(json));
+
+            Assert.Equal(0, NwcIO.Cli.Program.Main([path, json, "--no-tree"]));
+            Assert.True(File.Exists(json));
         }
         finally
         {
+            Console.SetError(originalError);
             Directory.Delete(root, true);
         }
     }
