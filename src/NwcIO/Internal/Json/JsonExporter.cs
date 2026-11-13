@@ -80,6 +80,12 @@ public static class JsonExporter
                 WriteSafeNumber(writer, "w", transform.Rotation.W);
                 writer.WriteEndObject();
 
+                // Translation and rotation alone cannot express a scaled or mirrored pose; omitted at 1 so other output is unchanged.
+                if (transform.Scale != 1.0)
+                {
+                    WriteSafeNumber(writer, "scale", transform.Scale);
+                }
+
                 if (transform.BoundingBox is { } bbox)
                 {
                     writer.WriteStartObject("boundingBox");
