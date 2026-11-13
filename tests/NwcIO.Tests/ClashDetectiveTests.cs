@@ -857,4 +857,15 @@ public sealed class ClashDetectiveTests
             BoundingBox = new BoundingBox3d(min, max),
         };
     }
+
+    [Fact]
+    public void MeshClashDetection_LineMeshCrossingBox_ReportsNoClash()
+    {
+        var box = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var line = new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
+        var doc = new NwcDocumentBuilder().AddMesh(box).AddMesh(line).Build();
+        var test = new NwcClashTest("Lines", NwcClashTestType.Hard, tolerance: 0.001);
+        doc.RunClashDetection(test);
+        Assert.Empty(test.Results);
+    }
 }

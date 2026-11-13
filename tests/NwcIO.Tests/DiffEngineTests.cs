@@ -364,4 +364,28 @@ public sealed class DiffEngineTests
         Assert.Empty(report.Deleted);
         Assert.Equal(2, report.Unchanged.Count);
     }
+
+    [Fact]
+    public void Compare_NodeWithSeveralMeshes_UsesUnionOfMeshBounds()
+    {
+        var guid = Guid.NewGuid();
+
+        static (NwcNode Node, NwcDocument Doc) Build(Guid guid, double secondX)
+        {
+            var first = CreateBoxMesh(1, "A", new Vector3d(0, 0, 0));
+            var second = CreateBoxMesh(2, "B", new Vector3d(secondX, 0, 0));
+            var node = new NwcNode { Id = 5, Name = "Multi", Class = "LcRevitData_Element", ElementGuid = guid, Mesh = first };
+            node.Meshes.Add(first);
+            node.Meshes.Add(second);
+            return (node, NwcDocument.Create(rootNode: node, meshes: [first, second]));
+        }
+
+        var docBase = Build(guid, 10).Doc;
+        var docRev = Build(guid, 12).Doc;
+
+        var report = docBase.Compare(docRev);
+
+        Assert.Single(report.Modified);
+        Assert.True(report.Modified[0].GeometryChanged);
+    }
 }

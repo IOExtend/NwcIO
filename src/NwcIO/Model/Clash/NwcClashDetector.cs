@@ -272,6 +272,12 @@ public static class NwcClashDetector
         clashPoint = Vector3d.Zero;
         penetrationDepth = 0.0;
 
+        // A line mesh has no triangles; its points must not trigger the bounding-box fallback.
+        if ((a.Indices.Count < 3 && a.LineIndices.Count > 0) || (b.Indices.Count < 3 && b.LineIndices.Count > 0))
+        {
+            return false;
+        }
+
         var vertsA = a.GetWorldVertices();
         var vertsB = b.GetWorldVertices();
 

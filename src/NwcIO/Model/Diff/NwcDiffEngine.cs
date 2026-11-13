@@ -324,12 +324,20 @@ public static class NwcDiffEngine
                 // An item represents an element if it has GUID, Mesh, or properties and is a leaf or designated category
                 bool isElement = node.ElementGuid.HasValue ||
                                  node.Mesh is not null ||
+                                 node.Meshes.Count > 0 ||
                                  (node.Children.Count == 0 && (node.Properties.Count > 0 || !string.IsNullOrEmpty(node.Name)));
 
                 if (isElement)
                 {
                     var bounds = BoundingBox3d.Empty;
-                    if (node.Mesh is not null)
+                    if (node.Meshes.Count > 0)
+                    {
+                        foreach (var nodeMesh in node.Meshes)
+                        {
+                            bounds = bounds.Union(nodeMesh.GetWorldBoundingBox());
+                        }
+                    }
+                    else if (node.Mesh is not null)
                     {
                         bounds = node.Mesh.GetWorldBoundingBox();
                     }
