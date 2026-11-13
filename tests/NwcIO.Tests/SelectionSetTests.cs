@@ -148,6 +148,29 @@ public class SelectionSetTests
     }
 
     [Theory]
+    [InlineData("nonnumeric")]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("-Infinity")]
+    [InlineData("1e999")]
+    public void SearchCondition_IdNotEqualsRejectsInvalidNumericTarget(string value)
+    {
+        var node = new NwcNode { Id = 7, Name = "Wall", Class = "LcRevitData_Element" };
+
+        Assert.False(new NwcSearchCondition("Item", "Id", NwcSearchOperator.NotEquals, value).Evaluate(node));
+    }
+
+    [Theory]
+    [InlineData("7", false)]
+    [InlineData("8", true)]
+    public void SearchCondition_IdNotEqualsComparesValidNumericTarget(string value, bool expected)
+    {
+        var node = new NwcNode { Id = 7, Name = "Wall", Class = "LcRevitData_Element" };
+
+        Assert.Equal(expected, new NwcSearchCondition("Item", "Id", NwcSearchOperator.NotEquals, value).Evaluate(node));
+    }
+
+    [Theory]
     [InlineData("Element", "Missing")]
     [InlineData("Element", "NullValue")]
     [InlineData("Item", "Guid")]

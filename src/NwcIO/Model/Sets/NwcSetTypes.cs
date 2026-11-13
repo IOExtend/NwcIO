@@ -157,8 +157,17 @@ public sealed class NwcSearchCondition
         }
 
         var comparison = Operator == NwcSearchOperator.NotEquals ? NwcSearchOperator.Equals : Operator;
+        var hasValidCandidate = false;
         foreach (var candidate in candidates)
         {
+            if (candidate.IsNumeric &&
+                (!double.TryParse(Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double target) ||
+                 !double.IsFinite(target)))
+            {
+                continue;
+            }
+
+            hasValidCandidate = true;
             var matches = candidate.IsNumeric
                 ? MatchNumericString(candidate.Value, Value, comparison)
                 : MatchString(candidate.Value, Value, comparison);
@@ -168,7 +177,7 @@ public sealed class NwcSearchCondition
             }
         }
 
-        return Operator == NwcSearchOperator.NotEquals && candidates.Count > 0;
+        return Operator == NwcSearchOperator.NotEquals && hasValidCandidate;
     }
 
     private static bool MatchString(string actual, string target, NwcSearchOperator op)
