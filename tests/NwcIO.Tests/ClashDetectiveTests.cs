@@ -158,6 +158,135 @@ public sealed class ClashDetectiveTests
         Assert.All(test.Results, clash => Assert.NotEqual(clash.Item1.ModelName, clash.Item2.ModelName));
     }
 
+    private static NwcDocument CreateClashingDocument(string name, params Model.Sets.NwcSetItem[] sets)
+    {
+        var builder = new NwcDocumentBuilder().SetFileInfo(name)
+            .AddMesh(CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2)))
+            .AddMesh(CreateBoxMesh(2, new(1, 0, 0), new(3, 2, 2)));
+        foreach (var set in sets)
+        {
+            builder.AddSelectionSet(set);
+        }
+
+        return builder.Build();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void SetSelection_ExplicitNodeIds_OverrideMissingSet(bool useAssembly, bool selectionB)
+    {
+        var doc = CreateClashingDocument("Model.nwc");
+        var test = new NwcClashTest("Explicit IDs", NwcClashTestType.Hard, tolerance: 0.01);
+        var selection = selectionB ? test.SelectionB : test.SelectionA;
+        selection.ExplicitNodeIds.Add(1);
+        selection.SetNames.Add("unused missing set");
+
+        if (useAssembly)
+        {
+            NwcClashDetector.Run(NwcAssembly.Create("Federated", doc), test);
+        }
+        else
+        {
+            NwcClashDetector.Run(doc, test);
+        }
+
+        Assert.Single(test.Results);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void SetSelection_FilterCondition_OverridesMissingSet(bool useAssembly, bool selectionB)
+    {
+        var meshA = CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2));
+        var node = new NwcNode { Id = 1, Name = "Selected", Class = "LcOaNode", Mesh = meshA };
+        meshA.Node = node;
+        var doc = new NwcDocumentBuilder().SetFileInfo("Model.nwc")
+            .SetRootNode(node)
+            .AddMesh(meshA)
+            .AddMesh(CreateBoxMesh(2, new(1, 0, 0), new(3, 2, 2)))
+            .Build();
+        var test = new NwcClashTest("Filter", NwcClashTestType.Hard, tolerance: 0.01);
+        var selection = selectionB ? test.SelectionB : test.SelectionA;
+        selection.FilterCondition = new Model.Sets.NwcSearchCondition { Value = "Selected" };
+        selection.SetNames.Add("unused missing set");
+
+        if (useAssembly)
+        {
+            NwcClashDetector.Run(NwcAssembly.Create("Federated", doc), test);
+        }
+        else
+        {
+            NwcClashDetector.Run(doc, test);
+        }
+
+        Assert.Single(test.Results);
+    }
+
+    [Fact]
+    public void SetSelection_UnknownSetName_Throws()
+    {
+        var doc = CreateClashingDocument("Model.nwc");
+        var test = new NwcClashTest("Typo", NwcClashTestType.Hard, tolerance: 0.01)
+        {
+            SelectionA = NwcClashSelection.FromSet("NoSuchSet"),
+            SelectionB = NwcClashSelection.All(),
+        };
+
+        var ex = Assert.Throws<ArgumentException>(() => NwcClashDetector.Run(doc, test));
+        Assert.Contains("NoSuchSet", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetSelection_SetWithoutMeshes_SelectsNothing()
+    {
+        var doc = CreateClashingDocument("Model.nwc", new Model.Sets.NwcSelectionSet("Empty", [999]));
+        var test = new NwcClashTest("Empty set", NwcClashTestType.Hard, tolerance: 0.01)
+        {
+            SelectionA = NwcClashSelection.FromSet("Empty"),
+            SelectionB = NwcClashSelection.All(),
+        };
+
+        NwcClashDetector.Run(doc, test);
+
+        Assert.Equal(0, test.TotalClashCount);
+    }
+
+    [Fact]
+    public void SetSelection_SetInOneModelOnly_SelectsNothingFromTheOthers()
+    {
+        var architecture = CreateClashingDocument("Architecture.nwc", new Model.Sets.NwcSelectionSet("Empty", [999]));
+        var mep = CreateClashingDocument("MEP.nwc");
+        var test = new NwcClashTest("Federated", NwcClashTestType.Hard, tolerance: 0.01)
+        {
+            SelectionA = NwcClashSelection.FromSet("Empty"),
+            SelectionB = NwcClashSelection.All(),
+        };
+
+        NwcClashDetector.Run(NwcAssembly.Create("Federated", architecture, mep), test);
+
+        Assert.Equal(0, test.TotalClashCount);
+    }
+
+    [Fact]
+    public void SetSelection_SetMissingFromEveryModel_Throws()
+    {
+        var assembly = NwcAssembly.Create("Federated", CreateClashingDocument("A.nwc"), CreateClashingDocument("B.nwc"));
+        var test = new NwcClashTest("Typo", NwcClashTestType.Hard, tolerance: 0.01)
+        {
+            SelectionA = NwcClashSelection.All(),
+            SelectionB = NwcClashSelection.FromSet("NoSuchSet"),
+        };
+
+        var ex = Assert.Throws<ArgumentException>(() => NwcClashDetector.Run(assembly, test));
+        Assert.Contains("NoSuchSet", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void IgnoreSameLayerRuleFiltersOutSameLayerClashes()
     {
