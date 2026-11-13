@@ -113,6 +113,7 @@ internal static class ModelGraphReader
             var records = GeometrySegmentReader.Read(segments.GeometryChunks, segments.Toc);
             Fragment[] fragments = segments.Fragments is null ? [] : FragmentParser.Read(segments.Fragments.Data);
             CheckLinks(fragments, records, preorder);
+            object? elementKey = null;
             for (int k = 0; k < fragments.Length; k++)
             {
                 var fragment = fragments[k];
@@ -135,6 +136,8 @@ internal static class ModelGraphReader
                     // Meshes of one record share its arrays: it is decoded once.
                     var record = records[fragment.Record - 1];
                     var leaf = preorder?[fragment.Seq];
+                    // Seq never decreases, so the fragments of one leaf are consecutive; a new object keeps keys apart across documents.
+                    elementKey = k > 0 && fragment.Seq == fragments[k - 1].Seq ? elementKey : new object();
                     var mesh = new NwcMesh
                     {
                         Id = k,
@@ -146,6 +149,7 @@ internal static class ModelGraphReader
                         BoundingBox = record.Bounds,
                         Transform = transform,
                         Node = leaf,
+                        ElementKey = elementKey,
                     };
                     meshes.Add(mesh);
                     if (leaf is not null)

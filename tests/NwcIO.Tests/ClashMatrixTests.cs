@@ -140,4 +140,20 @@ public class ClashMatrixTests
             if (File.Exists(tempBcf)) File.Delete(tempBcf);
         }
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ClashMatrix_SiblingFragmentsOfOneLeaf_Skipped(bool tree)
+    {
+        // Meshes 0 and 1 are fragments of leaf 2, mesh 2 of leaf 3; all three quads overlap.
+        var doc = NwcDocument.Open(new MemoryStream(ClashDetectiveTests.QuadFile(2, 2, 3)), new NwcReaderOptions { BuildSceneTree = tree });
+        var matrix = new NwcClashMatrix();
+        matrix.AddDiscipline("All");
+        matrix.Cells.Add(new NwcClashMatrixCell("All", "All", tolerance: 0)); // the quads are flat, so their overlap has no depth
+
+        matrix.Run(NwcAssembly.Create("Model", doc));
+
+        Assert.Equal(new[] { (0, 2), (1, 2) }, matrix.Cells[0].Clashes.Select(c => (c.Item1.Mesh!.Id, c.Item2.Mesh!.Id)));
+    }
 }

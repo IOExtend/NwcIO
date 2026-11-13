@@ -353,8 +353,11 @@ public static class NwcClashDetector
         return false;
     }
 
-    // Fragments of one element are separate meshes on the same node and never clash with each other.
-    private static bool IsSameElement(NwcMesh a, NwcMesh b) => a.Node is not null && ReferenceEquals(a.Node, b.Node);
+    // Fragments of one element are separate meshes and never clash with each other. The element key works without
+    // the scene tree; the node rule covers documents built in code.
+    internal static bool IsSameElement(NwcMesh a, NwcMesh b) =>
+        (a.ElementKey is not null && ReferenceEquals(a.ElementKey, b.ElementKey)) ||
+        (a.Node is not null && ReferenceEquals(a.Node, b.Node));
 
     private static List<int> CreateDefaultIndices(int count)
     {

@@ -260,10 +260,10 @@ public class ModelGraphReaderTests
         new(7, new(0, 0, 5), 1, 2, 4, Rec: 1));
 
     /// <summary>One fragment: <paramref name="S"/> 1 writes a class-15 pose, else class 16; a new class 93 with bbox (0,0,0)-(1,1,MaxZ), or a back-reference to fragment <paramref name="SharesGeometryOf"/>'s.</summary>
-    private sealed record Frag(int Seq, Vector3d T, double S, int A, int B, int Rec = 0, float MaxZ = 0, int SharesGeometryOf = -1);
+    internal sealed record Frag(int Seq, Vector3d T, double S, int A, int B, int Rec = 0, float MaxZ = 0, int SharesGeometryOf = -1);
 
     // The F1 layout generalised: fragment 0 holds the class-55 appearance, the others back-reference it.
-    private static byte[] Fragments(params Frag[] fragments)
+    internal static byte[] Fragments(params Frag[] fragments)
     {
         var w = new LcGraphWriter();
         w.Int(fragments.Length);

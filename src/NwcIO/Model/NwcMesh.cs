@@ -51,6 +51,12 @@ public sealed class NwcMesh
     /// <summary>Owning scene hierarchy node associated with this mesh.</summary>
     public NwcNode? Node { get; set; }
 
+    /// <summary>
+    /// Identity of the element this mesh belongs to, shared by every fragment of one leaf of one document;
+    /// null when unknown.
+    /// </summary>
+    internal object? ElementKey { get; init; }
+
     /// <summary>Number of triangle faces in this mesh.</summary>
     public int TriangleCount => Indices.Count / 3;
 

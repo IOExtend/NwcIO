@@ -50,6 +50,7 @@ public static class NwcMeshClipper
             Material = mesh.Material,
             Transform = mesh.Transform,
             Node = mesh.Node,
+            ElementKey = mesh.ElementKey,
         };
     }
 

@@ -966,4 +966,48 @@ public sealed class ClashDetectiveTests
         doc.RunClashDetection(test);
         Assert.Empty(test.Results);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Clash_SiblingFragmentsOfOneLeaf_NoClashWithOrWithoutTree(bool tree)
+    {
+        var doc = NwcDocument.Open(new MemoryStream(QuadFile(2, 2)), new NwcReaderOptions { BuildSceneTree = tree });
+        var test = new NwcClashTest("Siblings", NwcClashTestType.Hard);
+        NwcClashDetector.Run(doc, test);
+        Assert.Empty(test.Results);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Clash_FragmentsOfDifferentLeaves_ClashWithOrWithoutTree(bool tree)
+    {
+        var doc = NwcDocument.Open(new MemoryStream(QuadFile(2, 3)), new NwcReaderOptions { BuildSceneTree = tree });
+        var test = new NwcClashTest("Leaves", NwcClashTestType.Hard);
+        NwcClashDetector.Run(doc, test);
+        Assert.Single(test.Results);
+    }
+
+    [Fact]
+    public void FederatedClash_SameLeafSeqInTwoDocuments_Clash()
+    {
+        byte[] file = QuadFile(2, 2);
+        var options = new NwcReaderOptions { BuildSceneTree = false };
+        var first = NwcDocument.Open(new MemoryStream(file), options);
+        var second = NwcDocument.Open(new MemoryStream(file), options);
+        var test = new NwcClashTest("Federated", NwcClashTestType.Hard);
+        NwcClashDetector.Run(NwcAssembly.Create("Federated", first, second), test);
+
+        // Every pair across the documents clashes; the sibling pair inside each document does not.
+        Assert.Equal(4, test.Results.Count);
+        Assert.All(test.Results, clash => Assert.NotEqual(first.Meshes.Contains(clash.Item1.Mesh!), first.Meshes.Contains(clash.Item2.Mesh!)));
+    }
+
+    /// <summary>H1 + [R1] with one identity-posed class-15 fragment per seq, so every two of its quads overlap exactly.</summary>
+    internal static byte[] QuadFile(params int[] seqs) => SyntheticNwcFile.Build(
+        FormatVectors.H1,
+        ModelGraphReaderTests.Fragments(seqs.Select(seq => new ModelGraphReaderTests.Frag(seq, Vector3d.Zero, 1, 2, 4, Rec: 1)).ToArray()),
+        [FormatVectors.R1],
+        [120]);
 }
