@@ -77,8 +77,38 @@ public static class GlbExporter
 
             int vCount = vertices.Count;
 
+            if (vertices.Any(position =>
+                !float.IsFinite((float)position.X) ||
+                !float.IsFinite((float)position.Y) ||
+                !float.IsFinite((float)position.Z)))
+            {
+                continue;
+            }
+
+            // Keep only complete triangles that reference existing vertices.
+            var indices = new List<int>();
+            for (int i = 0; i <= mesh.Indices.Count - 3; i += 3)
+            {
+                int i0 = mesh.Indices[i];
+                int i1 = mesh.Indices[i + 1];
+                int i2 = mesh.Indices[i + 2];
+                if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount || i2 < 0 || i2 >= vCount)
+                {
+                    continue;
+                }
+
+                indices.Add(i0);
+                indices.Add(i1);
+                indices.Add(i2);
+            }
+
+            if (indices.Count == 0)
+            {
+                continue;
+            }
+
             // Compute vertex normals
-            var normals = ComputeNormals(vertices, mesh.Indices);
+            var normals = ComputeNormals(vertices, indices);
 
             // A. Vertex Positions
             AlignStream(binMs, 4);
@@ -154,7 +184,7 @@ public static class GlbExporter
             // C. Indices
             AlignStream(binMs, 4);
             int idxOffset = (int)binMs.Position;
-            int idxCount = mesh.Indices.Count;
+            int idxCount = indices.Count;
             bool useShort = vCount <= 65535;
 
             byte[] idxSpan;
@@ -163,7 +193,7 @@ public static class GlbExporter
                 idxSpan = new byte[idxCount * 2];
                 for (int i = 0; i < idxCount; i++)
                 {
-                    BinaryPrimitives.WriteUInt16LittleEndian(idxSpan.AsSpan(i * 2), (ushort)mesh.Indices[i]);
+                    BinaryPrimitives.WriteUInt16LittleEndian(idxSpan.AsSpan(i * 2), (ushort)indices[i]);
                 }
             }
             else
@@ -171,7 +201,7 @@ public static class GlbExporter
                 idxSpan = new byte[idxCount * 4];
                 for (int i = 0; i < idxCount; i++)
                 {
-                    BinaryPrimitives.WriteUInt32LittleEndian(idxSpan.AsSpan(i * 4), (uint)mesh.Indices[i]);
+                    BinaryPrimitives.WriteUInt32LittleEndian(idxSpan.AsSpan(i * 4), (uint)indices[i]);
                 }
             }
 
@@ -230,7 +260,7 @@ public static class GlbExporter
         int jsonChunkLength = jsonData.Length + jsonPadding;
 
         // 3. Write binary GLB container
-        int totalLength = 12 + (8 + jsonChunkLength) + (8 + binData.Length);
+        int totalLength = 12 + (8 + jsonChunkLength) + (binData.Length > 0 ? 8 + binData.Length : 0);
 
         using var bw = new BinaryWriter(output, System.Text.Encoding.UTF8, leaveOpen: true);
 
@@ -249,9 +279,12 @@ public static class GlbExporter
         }
 
         // Chunk 1: BIN
-        bw.Write((uint)binData.Length);
-        bw.Write(ChunkTypeBin);
-        bw.Write(binData);
+        if (binData.Length > 0)
+        {
+            bw.Write((uint)binData.Length);
+            bw.Write(ChunkTypeBin);
+            bw.Write(binData);
+        }
 
         bw.Flush();
     }
@@ -287,18 +320,18 @@ public static class GlbExporter
             // scenes
             writer.WriteStartArray("scenes");
             writer.WriteStartObject();
-            writer.WriteStartArray("nodes");
+            if (totalNodes > 0) writer.WriteStartArray("nodes");
             for (int i = 0; i < totalNodes; i++)
             {
                 writer.WriteNumberValue(i);
             }
 
-            writer.WriteEndArray();
+            if (totalNodes > 0) writer.WriteEndArray();
             writer.WriteEndObject();
             writer.WriteEndArray();
 
             // nodes
-            writer.WriteStartArray("nodes");
+            if (totalNodes > 0) writer.WriteStartArray("nodes");
             for (int i = 0; i < meshes.Count; i++)
             {
                 writer.WriteStartObject();
@@ -334,7 +367,7 @@ public static class GlbExporter
                 }
             }
 
-            writer.WriteEndArray();
+            if (totalNodes > 0) writer.WriteEndArray();
 
             // cameras
             if (cameras is not null && cameras.Count > 0)
@@ -376,7 +409,7 @@ public static class GlbExporter
             }
 
             // meshes
-            writer.WriteStartArray("meshes");
+            if (meshes.Count > 0) writer.WriteStartArray("meshes");
             for (int i = 0; i < meshes.Count; i++)
             {
                 var m = meshes[i];
@@ -402,10 +435,10 @@ public static class GlbExporter
                 writer.WriteEndObject();
             }
 
-            writer.WriteEndArray();
+            if (meshes.Count > 0) writer.WriteEndArray();
 
             // materials
-            writer.WriteStartArray("materials");
+            if (materials.Count > 0) writer.WriteStartArray("materials");
             for (int i = 0; i < materials.Count; i++)
             {
                 var mat = materials[i];
@@ -427,10 +460,10 @@ public static class GlbExporter
                 writer.WriteEndObject();
             }
 
-            writer.WriteEndArray();
+            if (materials.Count > 0) writer.WriteEndArray();
 
             // accessors
-            writer.WriteStartArray("accessors");
+            if (accessors.Count > 0) writer.WriteStartArray("accessors");
             for (int i = 0; i < accessors.Count; i++)
             {
                 var acc = accessors[i];
@@ -455,10 +488,10 @@ public static class GlbExporter
                 writer.WriteEndObject();
             }
 
-            writer.WriteEndArray();
+            if (accessors.Count > 0) writer.WriteEndArray();
 
             // bufferViews
-            writer.WriteStartArray("bufferViews");
+            if (bufferViews.Count > 0) writer.WriteStartArray("bufferViews");
             for (int i = 0; i < bufferViews.Count; i++)
             {
                 var bv = bufferViews[i];
@@ -470,14 +503,17 @@ public static class GlbExporter
                 writer.WriteEndObject();
             }
 
-            writer.WriteEndArray();
+            if (bufferViews.Count > 0) writer.WriteEndArray();
 
             // buffers
-            writer.WriteStartArray("buffers");
-            writer.WriteStartObject();
-            writer.WriteNumber("byteLength", binByteLength);
-            writer.WriteEndObject();
-            writer.WriteEndArray();
+            if (binByteLength > 0)
+            {
+                writer.WriteStartArray("buffers");
+                writer.WriteStartObject();
+                writer.WriteNumber("byteLength", binByteLength);
+                writer.WriteEndObject();
+                writer.WriteEndArray();
+            }
 
             writer.WriteEndObject();
         }
@@ -485,7 +521,7 @@ public static class GlbExporter
         return ms.ToArray();
     }
 
-    private static (float X, float Y, float Z)[] ComputeNormals(IReadOnlyList<Vector3d> vertices, IReadOnlyList<int> indices)
+    private static (float X, float Y, float Z)[] ComputeNormals(IReadOnlyList<Vector3d> vertices, List<int> indices)
     {
         var normals = new (double X, double Y, double Z)[vertices.Count];
 
