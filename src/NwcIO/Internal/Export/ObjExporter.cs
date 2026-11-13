@@ -70,11 +70,12 @@ public static class ObjExporter
             }
 
             // Triangle faces (1-based global indices)
-            for (int i = 0; i <= mesh.Indices.Count - 3; i += 3)
+            var faces = worldCoordinates ? mesh.GetWorldIndices() : mesh.Indices;
+            for (int i = 0; i <= faces.Count - 3; i += 3)
             {
-                int i0 = baseVertexIndex + mesh.Indices[i];
-                int i1 = baseVertexIndex + mesh.Indices[i + 1];
-                int i2 = baseVertexIndex + mesh.Indices[i + 2];
+                int i0 = baseVertexIndex + faces[i];
+                int i1 = baseVertexIndex + faces[i + 1];
+                int i2 = baseVertexIndex + faces[i + 2];
                 writer.WriteLine(FormattableString.Invariant($"f {i0} {i1} {i2}"));
             }
 

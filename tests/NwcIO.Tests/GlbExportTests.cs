@@ -179,10 +179,20 @@ public class GlbExportTests
         Assert.Equal(20 + (int)BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12)), glb.Length);
     }
 
-    private static void AssertExportedTriangles(NwcMesh mesh, int[] expectedIndices, int componentType)
+    [Theory]
+    [InlineData(true, new[] { 0, 2, 1, 2, 3, 1 }, -1f)]
+    [InlineData(false, new[] { 0, 1, 2, 2, 1, 3 }, 1f)]
+    public void GlbExporter_MirroredTransform_ReversesOnlyWorldTriangles(bool world, int[] expected, float normalZ)
+    {
+        var mesh = TestMeshes.MirroredQuad();
+        AssertExportedTriangles(mesh, expected, 5123, world, normalZ);
+        Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
+    }
+
+    private static void AssertExportedTriangles(NwcMesh mesh, int[] expectedIndices, int componentType, bool worldCoordinates = false, float normalZ = 1f)
     {
         using var output = new MemoryStream();
-        GlbExporter.Write([mesh], [], output, worldCoordinates: false);
+        GlbExporter.Write([mesh], [], output, worldCoordinates: worldCoordinates);
         var glb = output.ToArray();
         using var json = ReadGlbJson(glb);
         var root = json.RootElement;
@@ -210,7 +220,7 @@ public class GlbExportTests
         {
             Assert.Equal(0f, BitConverter.ToSingle(glb, normalOffset + i * 12));
             Assert.Equal(0f, BitConverter.ToSingle(glb, normalOffset + i * 12 + 4));
-            Assert.Equal(1f, BitConverter.ToSingle(glb, normalOffset + i * 12 + 8));
+            Assert.Equal(normalZ, BitConverter.ToSingle(glb, normalOffset + i * 12 + 8));
         }
     }
 

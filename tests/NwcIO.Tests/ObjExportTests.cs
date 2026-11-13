@@ -6,6 +6,17 @@ namespace NwcIO.Tests;
 
 public class ObjExportTests
 {
+    [Theory]
+    [InlineData(true, "f 1 3 2", "f 3 4 2")]
+    [InlineData(false, "f 1 2 3", "f 3 2 4")]
+    public void Write_MirroredTransform_ReversesOnlyWorldFaces(bool world, string first, string second)
+    {
+        using var sw = new StringWriter();
+        ObjExporter.Write([TestMeshes.MirroredQuad()], sw, worldCoordinates: world);
+        Assert.Contains(first, sw.ToString());
+        Assert.Contains(second, sw.ToString());
+    }
+
     [Fact]
     public void Write_SingleMesh_ProducesValidWavefrontObj()
     {

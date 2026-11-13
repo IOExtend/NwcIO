@@ -6,6 +6,16 @@ namespace NwcIO.Tests;
 
 public class IfcExportTests
 {
+    [Theory]
+    [InlineData(true, "((1,3,2),(3,4,2))")]
+    [InlineData(false, "((1,2,3),(3,2,4))")]
+    public void SaveIfc_MirroredTransform_ReversesOnlyWorldFaces(bool world, string coordIndex)
+    {
+        string ifc = NwcDocument.Create(meshes: [TestMeshes.MirroredQuad()]).ToIfcString(new NwcIfcExportOptions
+            { SchemaVersion = NwcIfcSchemaVersion.Ifc4, UseTessellationInIfc4 = true, WorldCoordinates = world });
+        Assert.Contains(coordIndex, ifc);
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]
