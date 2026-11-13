@@ -237,7 +237,21 @@ public static class MeshParser
             if (z > maxZ) maxZ = z;
         }
 
-        // Generate triangle strip indices: (vCount - 2) triangles with alternating orientation
+        return new NwcMesh
+        {
+            Id = meshId,
+            Name = $"Mesh_{meshId}",
+            Vertices = vertices,
+            Indices = BuildStripIndices(vertexCount),
+            BoundingBox = new BoundingBox3d(new Vector3d(minX, minY, minZ), new Vector3d(maxX, maxY, maxZ)),
+        };
+    }
+
+    /// <summary>
+    /// The single triangle strip rebuilt over the vertices: (vertexCount - 2) triangles with alternating orientation.
+    /// </summary>
+    internal static int[] BuildStripIndices(int vertexCount)
+    {
         int triangleCount = vertexCount - 2;
         var indices = new int[triangleCount * 3];
         int idx = 0;
@@ -258,13 +272,6 @@ public static class MeshParser
             }
         }
 
-        return new NwcMesh
-        {
-            Id = meshId,
-            Name = $"Mesh_{meshId}",
-            Vertices = vertices,
-            Indices = indices,
-            BoundingBox = new BoundingBox3d(new Vector3d(minX, minY, minZ), new Vector3d(maxX, maxY, maxZ)),
-        };
+        return indices;
     }
 }

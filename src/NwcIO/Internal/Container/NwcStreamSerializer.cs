@@ -88,6 +88,14 @@ internal static class NwcStreamSerializer
                 throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} holds line segments, which the .nwc writer cannot store.", nameof(doc));
             }
 
+            // The length check comes first, so only a mesh of strip length builds the strip to compare with.
+            if (mesh.Indices.Count > 0 &&
+                (mesh.Indices.Count != (mesh.Vertices.Count - 2) * 3 ||
+                 !mesh.Indices.SequenceEqual(MeshParser.BuildStripIndices(mesh.Vertices.Count))))
+            {
+                throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} has triangles the .nwc writer cannot store: it writes positions only and the reader rebuilds one strip over them.", nameof(doc));
+            }
+
             if (mesh.Vertices.Count < MeshParser.MinMeshVertices ||
                 mesh.Vertices.Count > MeshParser.MaxPlausibleVertices)
             {

@@ -199,6 +199,15 @@ public class ModelGraphReaderTests
         Assert.Equal(2, reopened.Meshes.Count);
         Assert.Equal(doc.Meshes.Select(m => m.Vertices), reopened.Meshes.Select(m => m.Vertices));
         Assert.Equal(doc.Meshes.Select(m => m.Transform!.Translation), reopened.Meshes.Select(m => m.Transform!.Translation));
+        Assert.Equal(doc.Meshes.Select(m => m.Indices), reopened.Meshes.Select(m => m.Indices));
+    }
+
+    [Fact]   // R2 holds three strips; the reader of a saved file would rebuild one strip over its seven vertices
+    public void Save_StrictlyReadMultiStripMesh_Rejects()
+    {
+        byte[] file = SyntheticNwcFile.Build(FormatVectors.H1, Fragments(new Frag(2, Vector3d.Zero, 1, 3, 4, Rec: 1, MaxZ: 1)), [FormatVectors.R2], [152]);
+        var doc = NwcDocument.Open(new MemoryStream(file), new NwcReaderOptions { BuildSceneTree = false, ReadPropertyRecords = false });
+        Assert.Contains("Mesh 0", Assert.Throws<ArgumentException>(() => doc.ToByteArray()).Message);
     }
 
     [Fact]
