@@ -60,15 +60,51 @@ public static class NwcClashBcfExporter
     /// </summary>
     public static void Write(Stream stream, NwcClashTest test, string projectName = "Navisworks Clash Coordination")
     {
-        ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(test);
+        WriteTests(stream, [test], projectName);
+    }
+
+    /// <summary>
+    /// Saves clash tests, including both standalone results and grouped clashes, to one BCF 2.1 archive file.
+    /// </summary>
+    internal static void SaveTests(string path, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(tests);
+
+        string? dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        using var fs = File.Create(path);
+        WriteTests(fs, tests, projectName);
+    }
+
+    /// <summary>
+    /// Writes clash tests, including both standalone results and grouped clashes, to one BCF 2.1 zip stream:
+    /// a topic per clash group and a topic per clash that is in no group.
+    /// </summary>
+    internal static void WriteTests(Stream stream, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(tests);
 
         using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
 
         // 1. Root bcf.version
         WriteBcfVersion(archive);
 
-        // 2. Export Clash Groups as unified topics
+        foreach (var test in tests)
+        {
+            WriteTest(archive, test, projectName);
+        }
+    }
+
+    private static void WriteTest(ZipArchive archive, NwcClashTest test, string projectName)
+    {
+        // Export Clash Groups as unified topics
         foreach (var group in test.Groups)
         {
             string topicFolder = group.GroupGuid.ToString("D");
@@ -88,7 +124,7 @@ public static class NwcClashBcfExporter
             }
         }
 
-        // 3. Export standalone clash results
+        // Export standalone clash results
         foreach (var clash in test.Results)
         {
             string topicFolder = clash.ResultGuid.ToString("D");

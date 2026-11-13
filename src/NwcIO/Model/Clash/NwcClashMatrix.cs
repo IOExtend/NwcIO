@@ -61,7 +61,8 @@ public sealed class NwcClashMatrixCell
     public NwcClashTest? ExecutedTest { get; set; }
 
     public int ClashCount => ExecutedTest?.TotalClashCount ?? 0;
-    public IReadOnlyList<NwcClashResult> Clashes => ExecutedTest?.Results ?? (IReadOnlyList<NwcClashResult>)Array.Empty<NwcClashResult>();
+    public IReadOnlyList<NwcClashResult> Clashes =>
+        ExecutedTest?.AllClashes.ToList() ?? (IReadOnlyList<NwcClashResult>)Array.Empty<NwcClashResult>();
 
     public NwcClashMatrixCell() { }
 
@@ -335,10 +336,10 @@ public sealed class NwcClashMatrix
             writer.WriteNumber("tolerance", c.Tolerance);
             writer.WriteNumber("clashesCount", c.ClashCount);
 
-            if (c.ExecutedTest is not null && c.ExecutedTest.Results.Count > 0)
+            if (c.ExecutedTest is not null && c.ExecutedTest.TotalClashCount > 0)
             {
                 writer.WriteStartArray("clashes");
-                foreach (var clash in c.ExecutedTest.Results)
+                foreach (var clash in c.ExecutedTest.AllClashes)
                 {
                     writer.WriteStartObject();
                     writer.WriteString("name", clash.Name);
@@ -365,11 +366,11 @@ public sealed class NwcClashMatrix
     public void SaveBcf(string filePath)
     {
         ArgumentNullException.ThrowIfNull(filePath);
-        var allClashes = Cells
+        var tests = Cells
             .Where(c => c.ExecutedTest is not null)
-            .SelectMany(c => c.ExecutedTest!.Results)
+            .Select(c => c.ExecutedTest!)
             .ToList();
 
-        NwcClashBcfExporter.Save(filePath, allClashes, Name);
+        NwcClashBcfExporter.SaveTests(filePath, tests, Name);
     }
 }
