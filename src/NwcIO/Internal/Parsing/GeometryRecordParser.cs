@@ -65,6 +65,7 @@ internal static class GeometryRecordParser
             throw Fail("render vertex count is not positive", at);
         }
 
+        CheckDensity(p1, record, "render vertex count is above the record length", at);
         int p2 = ReadInt32(record, ref pos);
         if (p2 <= 0 || p2 % 3 != 0)
         {
@@ -251,6 +252,13 @@ internal static class GeometryRecordParser
                 throw Fail("corner count is not above p1", at);
             }
 
+            int cornerCount = s == 0 ? p1 : s;
+            if (3L * (cornerCount - (2L * count)) > Array.MaxLength)
+            {
+                throw Fail("triangle index count is above the array limit", at);
+            }
+
+            CheckDensity(cornerCount, record, "corner count is above the record length", at);
             corners = s == 0 ? Enumerable.Range(0, p1).ToArray() : Tokens(record, ref pos, s, p1, false);
             if (sum != corners.Length)
             {
@@ -260,6 +268,10 @@ internal static class GeometryRecordParser
         else if (sum != p1)
         {
             throw Fail("primitive lengths do not sum to p1", lengthsAt);
+        }
+        else if (2L * (p1 - count) > Array.MaxLength)
+        {
+            throw Fail("line index count is above the array limit", at);
         }
 
         Pad(record, ref pos, 8);
@@ -457,6 +469,15 @@ internal static class GeometryRecordParser
         }
 
         pos += 4 * (int)words;
+    }
+
+    // shortcut: a record never yields more render vertices or corners than it has bytes (real records peak at 0.22 per byte); raise it if a real exporter writes denser records
+    private static void CheckDensity(int count, ReadOnlySpan<byte> record, string rule, int at)
+    {
+        if (count > record.Length)
+        {
+            throw Fail(rule, at);
+        }
     }
 
     private static int[] Tokens(ReadOnlySpan<byte> data, ref int pos, int count, int fresh, bool axisCodes)

@@ -180,11 +180,16 @@ public class GeometryRecordParserTests
         Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
     }
 
-    // Further grammar rules of RS §7, as R1/R2/R3/R4 byte edits; the first three are crafted counts (Review Focus 2)
+    // Further grammar rules of RS §7, as R1/R2/R3/R4 byte edits; the first six are crafted counts (Review Focus 2)
     [Theory]
-    [InlineData("R1", 16, "FFFFFF7F")]  // p1 = int.MaxValue: VMAP count beyond 64 x remaining bytes
+    [InlineData("R1", 16, "FFFFFF7F")]  // p1 = int.MaxValue: above the record length
     [InlineData("R1", 20, "FEFFFF7F")]  // p2 = 2147483646: positions past the end
     [InlineData("R2", 144, "FFFFFF7F")] // S = int.MaxValue
+    // P L = [716,000,000] (31 bits), S = 716,000,000: 3 * (S - 2) passes Array.MaxLength
+    [InlineData("R1", 100, "010000001F0000000100000000965A55004BAD2A", "triangle index count is above the array limit")]
+    // Density cap: counts above the record length that the 64 x remaining-bytes token bound still allows
+    [InlineData("R1", 16, "C8000000", "render vertex count is above the record length")] // p1 = 200 > 120
+    [InlineData("R2", 144, "C8000000", "corner count is above the record length")]       // S = 200 > 152
     [InlineData("R1", 84, "FDFFFFFF")]  // N count -3 != -p1
     [InlineData("R3", 88, "FBFFFFFF")]  // C count -5 != -p1
     [InlineData("R1", 104, "20000000")] // P bits = 32
@@ -203,10 +208,14 @@ public class GeometryRecordParserTests
     [InlineData("R1", 4, "5F000000")]   // class 95 with an N slot: slot set
     [InlineData("R4", 80, "05000000")]  // UV count neither p1 nor -p1
     [InlineData("R3", 92, "00000000")]  // colour palette size 0
-    public void Parse_GrammarViolation_Throws(string vector, int offset, string bytes)
+    public void Parse_GrammarViolation_Throws(string vector, int offset, string bytes, string? rule = null)
     {
         var record = FormatVectors.Patched(Vector(vector), offset, Convert.FromHexString(bytes));
-        Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
+        var ex = Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
+        if (rule is not null)
+        {
+            Assert.StartsWith(rule, ex.Message, StringComparison.Ordinal);
+        }
     }
 
     [Theory]
