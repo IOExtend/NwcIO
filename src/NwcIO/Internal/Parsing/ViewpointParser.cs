@@ -10,6 +10,9 @@ namespace NwcIO.Internal.Parsing;
 /// </summary>
 internal static class ViewpointParser
 {
+    internal const int MinNameBytes = 2;
+    internal const int MaxNameBytes = 120;
+
     private static readonly Encoding Encoding866;
     private static readonly Encoding Encoding1251;
 
@@ -110,6 +113,18 @@ internal static class ViewpointParser
         return results;
     }
 
+    internal static bool IsWritableName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Trim() != name)
+        {
+            return false;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(name);
+        return bytes.Length >= MinNameBytes && bytes.Length <= MaxNameBytes &&
+            DecodeString(bytes, 0, bytes.Length) == name && IsMeaningfulName(name);
+    }
+
     private static string ExtractViewName(byte[] data, int tagOffset, int fallbackIndex)
     {
         int minBack = Math.Max(0, tagOffset - 350);
@@ -119,7 +134,7 @@ internal static class ViewpointParser
         for (int i = tagOffset - 4; i >= minBack; i--)
         {
             int len = ReadInt32(data, i);
-            if (len >= 2 && len <= 120 && i + 4 + len <= tagOffset)
+            if (len >= MinNameBytes && len <= MaxNameBytes && i + 4 + len <= tagOffset)
             {
                 string candidate = DecodeString(data, i + 4, len);
                 if (!string.IsNullOrWhiteSpace(candidate) && IsMeaningfulName(candidate))

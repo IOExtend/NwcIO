@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
+using NwcIO.Internal.Parsing;
 using NwcIO.Model;
 
 namespace NwcIO.Internal.Container;
@@ -14,6 +15,8 @@ internal static class NwcStreamSerializer
     public static List<byte[]> SerializeDocument(NwcDocument doc)
     {
         ArgumentNullException.ThrowIfNull(doc);
+
+        ValidateDocument(doc);
 
         var streams = new List<byte[]>();
 
@@ -66,6 +69,76 @@ internal static class NwcStreamSerializer
         }
 
         return streams;
+    }
+
+    private static void ValidateDocument(NwcDocument doc)
+    {
+        foreach (var mesh in doc.Meshes)
+        {
+            if (mesh.Vertices.Count < MeshParser.MinMeshVertices ||
+                mesh.Vertices.Count > MeshParser.MaxPlausibleVertices)
+            {
+                throw new ArgumentException($"Mesh {mesh.Id} has {mesh.Vertices.Count} vertices; expected {MeshParser.MinMeshVertices}..{MeshParser.MaxPlausibleVertices}.", nameof(doc));
+            }
+
+            for (var i = 0; i < mesh.Vertices.Count; i++)
+            {
+                var vertex = mesh.Vertices[i];
+                if (!IsValidCoordinate(vertex.X) || !IsValidCoordinate(vertex.Y) || !IsValidCoordinate(vertex.Z))
+                {
+                    throw new ArgumentException($"Mesh {mesh.Id}, vertex {i} has a non-finite coordinate or magnitude greater than {MeshParser.MaxCoordinateMagnitude}.", nameof(doc));
+                }
+            }
+        }
+
+        foreach (var record in doc.PropertyRecords)
+        {
+            if (record.Tag is 52 or 53)
+            {
+                ValidateRecord(record.FirstInt, record.Name, record.Class, record.Tag == 52);
+            }
+        }
+
+        // The serializer uses the node tree only when no flat records are supplied.
+        if (doc.PropertyRecords.Count == 0 && doc.RootNode is not null)
+        {
+            ValidateNode(doc.RootNode);
+        }
+
+        for (var i = 0; i < doc.SavedViewpoints.Count; i++)
+        {
+            var name = doc.SavedViewpoints[i].Name;
+            // Blank names are serialized as "Viewpoint {i + 1}" by BuildSavedViewsStream.
+            if (!string.IsNullOrWhiteSpace(name) && !ViewpointParser.IsWritableName(name))
+            {
+                throw new ArgumentException($"Viewpoint at index {i} has a name the reader would rename.", nameof(doc));
+            }
+        }
+    }
+
+    private static bool IsValidCoordinate(double value) =>
+        double.IsFinite(value) && Math.Abs(value) <= MeshParser.MaxCoordinateMagnitude;
+
+    private static void ValidateRecord(int id, string name, string className, bool requireClass)
+    {
+        if (string.IsNullOrEmpty(name) || (requireClass && string.IsNullOrEmpty(className)))
+        {
+            throw new ArgumentException($"Record {id} must have a non-empty Name{(requireClass ? " and Class" : "")}.");
+        }
+    }
+
+    private static void ValidateNode(NwcNode node)
+    {
+        ValidateRecord(node.Id, node.Name, node.Class, true);
+        foreach (var property in node.Properties)
+        {
+            ValidateRecord(property.FirstInt, property.Name, property.Class, true);
+        }
+
+        foreach (var child in node.Children)
+        {
+            ValidateNode(child);
+        }
     }
 
     public static byte[] BuildSelectionSetsStream(IReadOnlyList<Model.Sets.NwcSetItem> sets)

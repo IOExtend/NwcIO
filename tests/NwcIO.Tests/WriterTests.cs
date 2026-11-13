@@ -8,6 +8,195 @@ namespace NwcIO.Tests;
 
 public class WriterTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(200001)]
+    public void Writer_RejectsInvalidMeshCount_WithoutChangingDestination(int count)
+    {
+        var mesh = new NwcMesh { Id = 42, Vertices = new Vector3d[count], Indices = [] };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 42");
+    }
+
+    [Theory]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    [InlineData(double.NegativeInfinity)]
+    [InlineData(2e8)]
+    [InlineData(-2e8)]
+    public void Writer_RejectsInvalidMeshCoordinates_WithoutChangingDestination(double value)
+    {
+        for (var axis = 0; axis < 3; axis++)
+        {
+            var vertex = new Vector3d(axis == 0 ? value : 0, axis == 1 ? value : 0, axis == 2 ? value : 0);
+            var mesh = new NwcMesh { Id = 42, Vertices = [Vector3d.Zero, new(1, 0, 0), vertex], Indices = [0, 1, 2] };
+            AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 42, vertex 2");
+        }
+    }
+
+    [Theory]
+    [InlineData(52, "", "Class")]
+    [InlineData(52, "Name", "")]
+    [InlineData(53, "", "")]
+    public void Writer_RejectsEmptyRecordFields_WithoutChangingDestination(int tag, string name, string className)
+    {
+        var record = new NwcPropertyRecord { FirstInt = 73, Tag = tag, Name = name, Class = className };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(propertyRecords: [record]), "Record 73");
+    }
+
+    [Theory]
+    [InlineData(false, "", "Class")]
+    [InlineData(false, "Name", "")]
+    [InlineData(true, "", "Class")]
+    [InlineData(true, "Name", "")]
+    public void Writer_RejectsEmptyNodeFields_WithoutChangingDestination(bool property, string name, string className)
+    {
+        var root = new NwcNode { Id = 1, Name = "Root", Class = "RootClass" };
+        var child = new NwcNode { Id = 73, Name = property ? "Child" : name, Class = property ? "ChildClass" : className };
+        root.Children.Add(child);
+        if (property)
+        {
+            child.Properties.Add(new NwcPropertyRecord { FirstInt = 73, Tag = 52, Name = name, Class = className });
+        }
+
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(rootNode: root), "Record 73");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("garbage header")]
+    [InlineData("#lcUStream")]
+    public void Writer_RejectsInvalidHeader_WithoutChangingDestination(string header)
+    {
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(), "Header", header);
+        using var output = new MemoryStream();
+        output.Write([1, 2, 3]);
+        var position = output.Position;
+        var error = Assert.Throws<ArgumentException>(() => NwcContainerWriter.Write(output, [], header));
+        Assert.Equal("header", error.ParamName);
+        Assert.Equal(new byte[] { 1, 2, 3 }, output.ToArray());
+        Assert.Equal(position, output.Position);
+    }
+
+    [Theory]
+    [InlineData("A")]
+    [InlineData("LcView")]
+    [InlineData("HTTP view")]
+    [InlineData("--")]
+    [InlineData("Front\0View")]
+    [InlineData("Front\u0001View")]
+    public void Writer_RejectsUnrecognizedViewpointName_WithoutChangingDestination(string name)
+    {
+        var viewpoint = new NwcSavedViewpoint { Name = name, Camera = new NwcCamera() };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(savedViewpoints: [viewpoint]), "index 0");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t\r\n")]
+    public void Writer_BlankViewpointNames_RoundtripUsesIndexedFallback(string? name)
+    {
+        var viewpoints = new[]
+        {
+            new NwcSavedViewpoint { Name = "Front", Camera = new NwcCamera() },
+            new NwcSavedViewpoint { Name = name!, Camera = new NwcCamera() },
+            new NwcSavedViewpoint { Name = name!, Camera = new NwcCamera() },
+        };
+        var doc = NwcDocument.Create(savedViewpoints: viewpoints);
+        using var input = new MemoryStream(doc.ToByteArray());
+        var reopened = NwcDocument.Open(input);
+
+        Assert.Collection(reopened.SavedViewpoints,
+            v => Assert.Equal("Front", v.Name),
+            v => Assert.Equal("Viewpoint 2", v.Name),
+            v => Assert.Equal("Viewpoint 3", v.Name));
+    }
+
+    [Theory]
+    [InlineData(" ab")]
+    [InlineData("ab ")]
+    [InlineData(" Front ")]
+    [InlineData("\tab")]
+    [InlineData("ab\u00a0")]
+    public void Writer_RejectsTrimmedViewpointName_WithoutChangingDestination(string name)
+    {
+        var viewpoint = new NwcSavedViewpoint { Name = name, Camera = new NwcCamera() };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(savedViewpoints: [viewpoint]), "index 0");
+    }
+
+    [Fact]
+    public void Writer_RejectsOversizedUtf8ViewpointName_WithoutChangingDestination()
+    {
+        // 61 characters, but 122 UTF-8 bytes.
+        var viewpoint = new NwcSavedViewpoint { Name = new string('é', 61), Camera = new NwcCamera() };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(savedViewpoints: [viewpoint]), "index 0");
+    }
+
+    [Fact]
+    public void Writer_ValidReaderBoundaries_RoundtripPreservesContent()
+    {
+        var meshes = new[]
+        {
+            new NwcMesh { Id = 1, Vertices = [new(-1e8, 0, 0), new(1e8, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] },
+            new NwcMesh { Id = 2, Vertices = Enumerable.Range(0, 200000).Select(i => new Vector3d(i, i % 2, 1)).ToArray(), Indices = [] },
+        };
+        var records = new[]
+        {
+            new NwcPropertyRecord { FirstInt = 1, Tag = 53, Name = "Root", Class = "Node" },
+            new NwcPropertyRecord { FirstInt = 2, Tag = 52, Name = "Property", Class = "Class", ValueType = 4, Value = "Value" },
+        };
+        var viewpoints = new[]
+        {
+            new NwcSavedViewpoint { Name = "AB", Camera = new NwcCamera() },
+            new NwcSavedViewpoint { Name = new string('é', 60), Camera = new NwcCamera() },
+        };
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100, Translation = new(1, 2, 3) },
+            new NwcTransform { Id = 101, Translation = new(4, 5, 6) },
+        };
+        var doc = NwcDocument.Create(meshes: meshes, propertyRecords: records, savedViewpoints: viewpoints, transforms: transforms);
+        using var input = new MemoryStream(doc.ToByteArray("#LcUStream custom é\nextra header\n"));
+        var reopened = NwcDocument.Open(input);
+
+        Assert.Equal(meshes.Length, reopened.Meshes.Count);
+        for (var i = 0; i < meshes.Length; i++)
+        {
+            Assert.Equal(meshes[i].Vertices, reopened.Meshes[i].Vertices);
+            Assert.Equal(transforms[i].Translation, reopened.Meshes[i].Transform!.Translation);
+        }
+
+        Assert.Equal(records.Select(r => (r.FirstInt, r.Tag, r.Name, r.Class, r.Value)),
+            reopened.PropertyRecords.Select(r => (r.FirstInt, r.Tag, r.Name, r.Class, r.Value)));
+        Assert.Equal(viewpoints.Select(v => v.Name), reopened.SavedViewpoints.Select(v => v.Name));
+    }
+
+    private static void AssertRejectedWithoutChangingDestination(NwcDocument doc, string item, string? header = null)
+    {
+        Assert.Contains(item, Assert.Throws<ArgumentException>(() => doc.ToByteArray(header)).Message);
+        var original = new byte[] { 10, 20, 30, 40, 50 };
+        using var output = new MemoryStream();
+        output.Write(original);
+        output.Position = 2;
+        Assert.Contains(item, Assert.Throws<ArgumentException>(() => NwcWriter.Write(doc, output, header)).Message);
+        Assert.Equal(original, output.ToArray());
+        Assert.Equal(2, output.Position);
+
+        var path = Path.Combine(Path.GetTempPath(), $"nwcio_validation_{Guid.NewGuid():N}.nwc");
+        try
+        {
+            File.WriteAllBytes(path, original);
+            Assert.Contains(item, Assert.Throws<ArgumentException>(() => doc.Save(path, header)).Message);
+            Assert.Equal(original, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void Document_TocShapedGuidTable_ReopensWithGuids()
     {

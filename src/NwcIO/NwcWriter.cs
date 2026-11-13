@@ -17,6 +17,7 @@ public static class NwcWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         // Serialize first, so that a document which can't be written doesn't truncate or create the file
+        NwcContainerWriter.ValidateHeader(header);
         var streams = NwcStreamSerializer.SerializeDocument(document);
         using var fs = File.Create(path);
         NwcContainerWriter.Write(fs, streams, header);
@@ -30,6 +31,7 @@ public static class NwcWriter
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(stream);
 
+        NwcContainerWriter.ValidateHeader(header);
         var streams = NwcStreamSerializer.SerializeDocument(document);
         NwcContainerWriter.Write(stream, streams, header);
     }
