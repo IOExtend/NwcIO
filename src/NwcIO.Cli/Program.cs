@@ -549,7 +549,7 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
             }
 
             if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
@@ -909,7 +909,7 @@ internal static class Program
                     Console.Error.WriteLine($"Error: Baseline file '{explicitDiffBaseline}' not found.");
                     return 2;
                 }
-                var baseDoc = NwcDocument.Open(explicitDiffBaseline);
+                var baseDoc = NwcDocument.Open(explicitDiffBaseline, new NwcReaderOptions { BuildSceneTree = includeTree });
                 var diffReport = baseDoc.Compare(doc, new Model.Diff.NwcDiffOptions { GeometricTolerance = diffTolerance });
 
                 if (!string.IsNullOrEmpty(explicitDiffJsonPath))
@@ -1104,11 +1104,12 @@ internal static class Program
         string? explicitClashMatrixMdPath = null,
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
-        string? explicitTimeLinerPrimaveraPath = null)
+        string? explicitTimeLinerPrimaveraPath = null,
+        bool includeTree = true)
     {
         outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
 
-        var assembly = NwcAssembly.LoadFromDirectory(dirPath);
+        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
