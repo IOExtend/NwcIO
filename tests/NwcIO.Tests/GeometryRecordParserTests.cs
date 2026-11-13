@@ -72,7 +72,7 @@ public class GeometryRecordParserTests
     [InlineData(8)]
     public void Parse_R1AxisQuad_DecodesTrianglesAndAxisNormals(int bits) => AssertR1(GeometryRecordParser.Parse(FormatVectors.R1, bits));
 
-    // REC Normals: D0 +X, D1 -X, D2 +Y, D3 -Y, D4 +Z, D5 -Z; R1 bytes 92..95 are its four NTOK codes
+    // Normals (docs/format-notes.md §2.6): D0 +X, D1 -X, D2 +Y, D3 -Y, D4 +Z, D5 -Z; R1 bytes 92..95 are its four NTOK codes
     [Theory]
     [InlineData("D0D0D0D0", 1, 0, 0)]
     [InlineData("D1D1D1D1", -1, 0, 0)]
@@ -134,7 +134,7 @@ public class GeometryRecordParserTests
     [Fact]
     public void Parse_QuantisedUvSlot_DecodesAsR1() => AssertR1(GeometryRecordParser.Parse(BuildR1q(), 16));
 
-    // R1q header: w at +100, m at +104 (RS §7 UV quantised)
+    // R1q header: w at +100, m at +104 (quantised UV, docs/format-notes.md §2.6)
     [Theory]
     [InlineData(100, "08000000")] // bv = 0
     [InlineData(100, "08080100")] // w >> 16 != 0
@@ -143,7 +143,7 @@ public class GeometryRecordParserTests
     public void Parse_QuantisedUvHeaderDefect_Throws(int offset, string bytes)
         => Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(FormatVectors.Patched(BuildR1q(), offset, Convert.FromHexString(bytes)), 16));
 
-    // REC Triangles: S > p1. R1 with S = 4 at +116, token 03 (-> [0,1,2,3]) and 7 zero pad bytes (128 bytes)
+    // Triangles with S > p1 (docs/format-notes.md §2.6): R1 with S = 4 at +116, token 03 (-> [0,1,2,3]) and 7 zero pad bytes (128 bytes)
     [Fact]
     public void Parse_CornerCountNotAboveP1_Throws()
         => Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse([.. FormatVectors.R1[..116], 4, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0], 16));
@@ -161,7 +161,7 @@ public class GeometryRecordParserTests
         Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(FormatVectors.R5, 16));
     }
 
-    // RS §12 mutation table: (vector, byte offset, new little-endian bytes as hex)
+    // Mutation table: (vector, byte offset, new little-endian bytes as hex)
     [Theory]
     [InlineData("R1", 92, "D6")]
     [InlineData("R1", 92, "C0")]                // undefined NTOK lead
@@ -180,7 +180,7 @@ public class GeometryRecordParserTests
         Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
     }
 
-    // Further grammar rules of RS §7, as R1/R2/R3/R4 byte edits; the first six are crafted counts (Review Focus 2)
+    // Further grammar rules of docs/format-notes.md §2.6, as R1/R2/R3/R4 byte edits; the first six are crafted counts
     [Theory]
     [InlineData("R1", 16, "FFFFFF7F")]  // p1 = int.MaxValue: above the record length
     [InlineData("R1", 20, "FEFFFF7F")]  // p2 = 2147483646: positions past the end

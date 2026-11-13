@@ -3,7 +3,7 @@ using NwcIO.Model;
 
 namespace NwcIO.Internal.Parsing;
 
-/// <summary>The model segments a DbCache directory locates (RS §1.4); an absent segment is null or empty.</summary>
+/// <summary>The model segments a DbCache directory locates (docs/format-notes.md §2.7); an absent segment is null or empty.</summary>
 internal sealed record ModelSegments(
     NwcDbCacheDirectory Directory,
     LcRawStream? Hierarchy,
@@ -15,8 +15,8 @@ internal sealed record ModelSegments(
 internal sealed record ModelGraph(NwcNode? Root, IReadOnlyList<NwcMesh> Meshes, IReadOnlyList<NwcTransform> Transforms);
 
 /// <summary>
-/// Reads a Navisworks model file through its DbCache directory (RS §1.1-1.4): the hierarchy, geometry and fragments
-/// segments, linked as RS §6 says. Every defect throws; nothing falls back to the lenient parsers.
+/// Reads a Navisworks model file through its DbCache directory (docs/format-notes.md §2.7): the hierarchy, geometry and fragments
+/// segments, linked as docs/format-notes.md §2.2 and §2.4 say. Every defect throws; nothing falls back to the lenient parsers.
 /// </summary>
 internal static class ModelGraphReader
 {
@@ -30,7 +30,7 @@ internal static class ModelGraphReader
     {
         var section1 = container.Streams.Where(s => s.SectionIndex == 1).Take(2).ToList();
 
-        // Not a directory means not a model file (decision D3), so the parse error is not needed.
+        // Not a directory means not a model file, so the parse error is not needed.
         if (section1.Count != 1 || !DbCacheParser.TryParse(section1[0].Data, out var directory, out _))
         {
             return null;
@@ -245,7 +245,7 @@ internal static class ModelGraphReader
 
     private static long EndOf(LcRawStream stream) => stream.FileOffset + stream.CompressedLength;
 
-    // RS §6.1-6.2, all checked before any mesh or transform is built.
+    // The links of docs/format-notes.md §2.2, §2.4 and §2.5, all checked before any mesh or transform is built.
     private static void CheckLinks(Fragment[] fragments, GeometryRecord[] records, IReadOnlyList<NwcNode>? preorder)
     {
         for (int k = 0; k < fragments.Length; k++)

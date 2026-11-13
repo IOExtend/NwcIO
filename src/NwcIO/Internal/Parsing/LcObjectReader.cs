@@ -5,7 +5,7 @@ using System.Text.Unicode;
 namespace NwcIO.Internal.Parsing;
 
 /// <summary>
-/// Strict reader of one object-graph stream (RS §2): little-endian primitives, f64 and i64 aligned to 8 from the stream
+/// Strict reader of one object-graph stream (docs/format-notes.md §2.2): little-endian primitives, f64 and i64 aligned to 8 from the stream
 /// start, zero-padded UTF-8 strings, and pointers that are null, a back-reference to a finished object or a new object.
 /// </summary>
 internal sealed class LcObjectReader
@@ -105,7 +105,7 @@ internal sealed class LcObjectReader
         return count;
     }
 
-    /// <summary>The hierarchy's implicit root (RS §2.1): an id with no class and no body, never finished.</summary>
+    /// <summary>The hierarchy's implicit root (docs/format-notes.md §2.2): an id with no class and no body, never finished.</summary>
     public void ReadImplicitRoot()
     {
         int expected = Next;
@@ -118,7 +118,7 @@ internal sealed class LcObjectReader
     }
 
     /// <summary>
-    /// Reads a pointer slot (RS §2.1): <c>0</c> null, <c>[1][id]</c> a finished object, <c>[Next][class]</c> a new object
+    /// Reads a pointer slot (docs/format-notes.md §2.2): <c>0</c> null, <c>[1][id]</c> a finished object, <c>[Next][class]</c> a new object
     /// whose body <paramref name="readBody"/> reads from its class id. Only <paramref name="allowedClasses"/> may fill the slot.
     /// </summary>
     public object? ReadPointer(

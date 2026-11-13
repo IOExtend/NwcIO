@@ -6,7 +6,7 @@ namespace NwcIO.Internal.Parsing;
 
 /// <summary>
 /// Strict reader of the <c>LcOpNwdGeometry</c> segment: checks the TOC against the inflated chunk streams,
-/// cuts the records and decodes them under the one normal width B every record accepts (RS §1.5, §8.2).
+/// cuts the records and decodes them under the one normal width B every record accepts (docs/format-notes.md §2.5, §2.6).
 /// </summary>
 internal static class GeometrySegmentReader
 {
@@ -17,7 +17,7 @@ internal static class GeometrySegmentReader
     {
         var records = Cut(chunks, ReadToc(chunks, toc.Data));
 
-        // 16 wins when both widths parse: a file without palettes, or a palette valid under both (RS §8.2).
+        // 16 wins when both widths parse: a file without palettes, or a palette valid under both (docs/format-notes.md §2.6).
         if (TryParseAll(records, 16, out var parsed, out int wideAt, out var wideError)
             || TryParseAll(records, 8, out parsed, out int narrowAt, out var narrowError))
         {

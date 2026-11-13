@@ -4,8 +4,8 @@ using NwcIO.Model;
 namespace NwcIO.Internal.Parsing;
 
 /// <summary>
-/// Strict reader of the <c>LcOpNwdLogicalHierarchy</c> object graph (RS §2.3, §3). The stored nodes form a DAG; it is
-/// expanded into one <see cref="NwcNode"/> per occurrence in depth-first preorder, the order fragments index (RS §6.1).
+/// Strict reader of the <c>LcOpNwdLogicalHierarchy</c> object graph (docs/format-notes.md §2.2). The stored nodes form a DAG; it is
+/// expanded into one <see cref="NwcNode"/> per occurrence in depth-first preorder, the order fragments index (docs/format-notes.md §2.2).
 /// </summary>
 internal static class HierarchyParser
 {
@@ -20,7 +20,7 @@ internal static class HierarchyParser
     // Attribute bodies other than class 86 are parsed and dropped.
     private static readonly object Dropped = new();
 
-    // Slot families as observed (RS §3, decision D12).
+    // Slot families as observed (docs/format-notes.md §2.2).
     private static ReadOnlySpan<int> TopLevelClasses => [53, 32];
 
     private static ReadOnlySpan<int> ChildClasses => [22, 53];
@@ -41,7 +41,7 @@ internal static class HierarchyParser
         return Expand(top, rootName, total, includeProperties);
     }
 
-    /// <summary>Reads a class-185 body (material JSON with embedded files, RS §3.4), which the fragments stream holds too.</summary>
+    /// <summary>Reads a class-185 body (material JSON with embedded files, docs/format-notes.md §2.2), which the fragments stream holds too.</summary>
     internal static object ReadMaterialJson(LcObjectReader reader)
     {
         reader.ReadString();
@@ -129,7 +129,7 @@ internal static class HierarchyParser
             _readBody = ReadBody;
         }
 
-        // [k][k ints][100][n][n ptr][1], then the zero pad to 8 (RS §2.3).
+        // [k][k ints][100][n][n ptr][1], then the zero pad to 8 (docs/format-notes.md §2.2).
         public (Node[] Top, long Total) ReadStream()
         {
             int k = _reader.ReadCount(4);
@@ -186,7 +186,7 @@ internal static class HierarchyParser
             return [.. nodes];
         }
 
-        // NODE53 / NODE22 (RS §3.1): name, username, flags, X, Y attributes, and for 53 the children.
+        // NODE53 / NODE22 (docs/format-notes.md §2.2): name, username, flags, X, Y attributes, and for 53 the children.
         private Node ReadNode(int classId)
         {
             string? name = _reader.ReadString();
@@ -252,7 +252,7 @@ internal static class HierarchyParser
             return new Username(id, display, _reader.ReadString());
         }
 
-        // Class 86 (RS §3.4): [str name][ptr username][i32 flags][i32 n] n x ([ptr key][i32 type][value]); one record per item.
+        // Class 86 (docs/format-notes.md §2.2): [str name][ptr username][i32 flags][i32 n] n x ([ptr key][i32 type][value]); one record per item.
         private List<NwcPropertyRecord> ReadPropertyTab()
         {
             string? name = _reader.ReadString();
@@ -271,7 +271,7 @@ internal static class HierarchyParser
                 {
                     0 => null,
 
-                    // Type 5 was never seen; RS §3.4 reads it as f64 like the other real types.
+                    // Type 5 was never seen; it is read as f64 like the other real types (docs/format-notes.md §2.2).
                     1 or 5 or 6 or 7 or 10 or 11 => _reader.ReadDouble().ToString(CultureInfo.InvariantCulture),
                     2 or 3 => _reader.ReadInt32().ToString(CultureInfo.InvariantCulture),
                     4 => _reader.ReadString(),
@@ -338,7 +338,7 @@ internal static class HierarchyParser
                 _reader.ReadString();
                 _reader.ReadString();
 
-                // The item pointer's class family was not measured (RS §11), so any class this parser knows, or null, is accepted.
+                // The item pointer's class family was not measured, so any class this parser knows, or null, is accepted.
                 _reader.ReadPointer(KnownClasses, _readBody);
                 int points = _reader.ReadCount(24);
                 for (int p = 0; p < 3 * points; p++)

@@ -126,7 +126,7 @@ public class ModelGraphReaderTests
         Assert.Equal(mixed.Meshes.Select(m => m.LineIndices), doc.Meshes.Select(m => m.LineIndices));
     }
 
-    [Fact]   // Review Focus 1: a .nwf-like multi-section file
+    [Fact]   // a .nwf-like multi-section file
     public void Open_MultiSectionFileWithoutModelSegments_KeepsTodaysPath()
     {
         byte[] xrefs = Encoding.UTF8.GetBytes(
@@ -156,7 +156,7 @@ public class ModelGraphReaderTests
         Assert.Equal(expected, leaf.Properties.Count);
     }
 
-    [Fact]   // Review Focus 4
+    [Fact]
     public void Save_StrictlyReadMeshesAndTransforms_ReopenWithSamePlacement()
     {
         // F1 with fragment 1's pose turned into class 15: two class-15 fragments on leaves 2 and 3 sharing record 1
@@ -175,7 +175,7 @@ public class ModelGraphReaderTests
         Assert.Throws<ArgumentException>(() => doc.ToByteArray());
     }
 
-    /// <summary>The hierarchy with a class-32 top-level node (Task 8 bytes) + F1 + [R1].</summary>
+    /// <summary>The hierarchy with a class-32 top-level node (the H1 bytes with the first node as class 32) + F1 + [R1].</summary>
     internal static byte[] PartitionFile() =>
         SyntheticNwcFile.Build(HierarchyParserTests.PartitionHierarchy(), FormatVectors.F1, [FormatVectors.R1], [120]);
 

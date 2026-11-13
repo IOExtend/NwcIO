@@ -94,7 +94,7 @@ public class HierarchyParserTests
     }
 
     [Theory]
-    [InlineData("trailingIntIn79")]   // the refuted V79 'b' variant: the parser meets 7 where the tail must be 1
+    [InlineData("trailingIntIn79")]   // the parser meets 7 where the tail must be 1
     [InlineData("payloadPad185")]     // the 185 item with its pad byte 0x01
     [InlineData("itemFlag185")]       // the 185 item with e = 2
     [InlineData("valueType9")]        // unknown class-86 value type
@@ -152,7 +152,7 @@ public class HierarchyParserTests
         Assert.Contains("exceeds 256 levels", Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(bytes, "Model")).Message);
     }
 
-    // H1 byte edits (offsets from the H1 layout in Appendix A)
+    // H1 byte edits (offsets from the H1 layout in FormatVectors)
     [Theory]
     [InlineData(260, 107)]          // B's child -> B itself (unfinished)
     [InlineData(260, 999)]          // back-reference to an unknown id

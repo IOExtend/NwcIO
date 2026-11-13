@@ -16,7 +16,7 @@ public class FragmentParserTests
         Assert.Equal(new Fragment(7, 1, 2, Vector3d.Zero, Quaterniond.Identity, -1.0, box), f[1]);
     }
 
-    // F1 byte edits (offsets from the F1 layout in Appendix A), applied with FormatVectors.Patched
+    // F1 byte edits (offsets from the F1 layout in FormatVectors), applied with FormatVectors.Patched
     [Theory]
     [InlineData(252, new[] { 0 })]                 // null fragment pointer
     [InlineData(252, new[] { 1, 100 })]            // fragment pointer as back-reference
@@ -81,7 +81,7 @@ public class FragmentParserTests
     public void Read_AppearanceWithExtraSlot_ReadsLikeF1(string defect) =>
         Assert.Equal(FragmentParser.Read(FormatVectors.F1), FragmentParser.Read(BuildF1(defect)));
 
-    // The F1 layout of Appendix A; a defect changes the shared class 55 or fragment 1 as its row says.
+    // The F1 layout documented in FormatVectors; a defect changes the shared class 55 or fragment 1 as its row says.
     private static byte[] BuildF1(string? defect = null)
     {
         var w = new LcGraphWriter();

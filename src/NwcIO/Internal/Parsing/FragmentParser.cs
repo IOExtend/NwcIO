@@ -3,7 +3,7 @@ using NwcIO.Model;
 namespace NwcIO.Internal.Parsing;
 
 /// <summary>
-/// One class-13 fragment (RS §5): <paramref name="Seq"/> is its leaf's expanded preorder index, <paramref name="Record"/>
+/// One class-13 fragment (docs/format-notes.md §2.4): <paramref name="Seq"/> is its leaf's expanded preorder index, <paramref name="Record"/>
 /// the 1-based geometry record (class-93 <c>rec</c>), <paramref name="PrimitiveCount"/> the fragment int <c>a</c>, and
 /// the pose places the record's positions as <c>Scale * R(Rotation) * v + Translation</c>.
 /// </summary>
@@ -16,7 +16,7 @@ internal readonly record struct Fragment(
     double Scale,
     BoundingBox3d Bounds);
 
-/// <summary>Strict reader of the <c>LcOpNwdFragments</c> object graph (RS §2.3, §5).</summary>
+/// <summary>Strict reader of the <c>LcOpNwdFragments</c> object graph (docs/format-notes.md §2.2, §2.4).</summary>
 internal static class FragmentParser
 {
     private const string Segment = "LcOpNwdFragments";
@@ -24,7 +24,7 @@ internal static class FragmentParser
     // Appearance, material and extra bodies are parsed and dropped.
     private static readonly object Dropped = new();
 
-    // Slot families as observed (RS §5).
+    // Slot families as observed (docs/format-notes.md §2.4).
     private static ReadOnlySpan<int> FragmentClasses => [13];
 
     private static ReadOnlySpan<int> PoseClasses => [15, 16];
@@ -57,7 +57,7 @@ internal static class FragmentParser
             _readBody = ReadBody;
         }
 
-        // [n] PTR{n}, each a new class 13, then the zero pad to 8 (RS §2.3).
+        // [n] PTR{n}, each a new class 13, then the zero pad to 8 (docs/format-notes.md §2.4).
         public Fragment[] ReadStream()
         {
             var fragments = new Fragment[_reader.ReadCount(MinFragmentBytes)];

@@ -3,7 +3,7 @@ using System.Text;
 
 namespace NwcIO.Tests;
 
-/// <summary>Writes object-graph streams byte for byte as <c>LcObjectReader</c> reads them (RS §2).</summary>
+/// <summary>Writes object-graph streams byte for byte as <c>LcObjectReader</c> reads them (docs/format-notes.md §2.2).</summary>
 internal sealed class LcGraphWriter
 {
     private readonly List<byte> _bytes = [];

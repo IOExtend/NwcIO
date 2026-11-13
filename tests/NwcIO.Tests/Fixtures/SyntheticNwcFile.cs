@@ -6,7 +6,7 @@ using NwcIO.Model;
 
 namespace NwcIO.Tests;
 
-/// <summary>Builds a two-section Navisworks model file whose DbCache directory locates its segments (RS §1).</summary>
+/// <summary>Builds a two-section Navisworks model file whose DbCache directory locates its segments (docs/format-notes.md §2.7).</summary>
 internal static class SyntheticNwcFile
 {
     private const string Hierarchy = "LcOpNwdLogicalHierarchy";
@@ -96,7 +96,7 @@ internal static class SyntheticNwcFile
 
         editDirectory?.Invoke(entries);
 
-        // [i32 -1][i32 n], then per entry [str name][i32 flags] PAD8 [i64 offset][i64 length][i32 a][i32 b] (RS §1.2).
+        // [i32 -1][i32 n], then per entry [str name][i32 flags] PAD8 [i64 offset][i64 length][i32 a][i32 b] (docs/format-notes.md §2.7).
         var directory = new LcGraphWriter().Int(-1).Int(entries.Count);
         foreach (var entry in entries)
         {
