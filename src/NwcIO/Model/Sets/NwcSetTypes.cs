@@ -122,45 +122,53 @@ public sealed class NwcSearchCondition
     {
         ArgumentNullException.ThrowIfNull(node);
 
-        // 1. Built-in node properties
+        // Resolve built-ins and attached records before applying the operator.
+        var candidates = new List<(string Value, bool IsNumeric)>();
         if (Category.Equals("Item", StringComparison.OrdinalIgnoreCase))
         {
-            if (Property.Equals("Name", StringComparison.OrdinalIgnoreCase) && MatchString(node.Name, Value, Operator))
+            if (Property.Equals("Name", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                candidates.Add((node.Name, false));
             }
-            if ((Property.Equals("Class", StringComparison.OrdinalIgnoreCase) || Property.Equals("Type", StringComparison.OrdinalIgnoreCase)) && MatchString(node.Class, Value, Operator))
+            if (Property.Equals("Class", StringComparison.OrdinalIgnoreCase) || Property.Equals("Type", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                candidates.Add((node.Class, false));
             }
-            if (Property.Equals("Id", StringComparison.OrdinalIgnoreCase) && MatchNumeric(node.Id, Value, Operator))
+            if (Property.Equals("Id", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                candidates.Add((node.Id.ToString(CultureInfo.InvariantCulture), true));
             }
-            if (Property.Equals("Guid", StringComparison.OrdinalIgnoreCase) && node.ElementGuid.HasValue && MatchString(node.ElementGuid.Value.ToString(), Value, Operator))
+            if (Property.Equals("Guid", StringComparison.OrdinalIgnoreCase) && node.ElementGuid.HasValue)
             {
-                return true;
+                candidates.Add((node.ElementGuid.Value.ToString(), false));
             }
         }
 
-        // 2. Attached PropertyRecords
         for (int i = 0; i < node.Properties.Count; i++)
         {
             var p = node.Properties[i];
-            bool categoryMatch = string.IsNullOrEmpty(Category) ||
-                                 Category.Equals("Item", StringComparison.OrdinalIgnoreCase) ||
-                                 p.Class.Contains(Category, StringComparison.OrdinalIgnoreCase);
+            var categoryMatch = string.IsNullOrEmpty(Category) ||
+                                p.Class.Equals(Category, StringComparison.OrdinalIgnoreCase);
 
-            if (categoryMatch && p.Name.Equals(Property, StringComparison.OrdinalIgnoreCase))
+            if (categoryMatch && p.Name.Equals(Property, StringComparison.OrdinalIgnoreCase) && p.Value is not null)
             {
-                if (p.Value is not null && MatchString(p.Value, Value, Operator))
-                {
-                    return true;
-                }
+                candidates.Add((p.Value, false));
             }
         }
 
-        return false;
+        var comparison = Operator == NwcSearchOperator.NotEquals ? NwcSearchOperator.Equals : Operator;
+        foreach (var candidate in candidates)
+        {
+            var matches = candidate.IsNumeric
+                ? MatchNumericString(candidate.Value, Value, comparison)
+                : MatchString(candidate.Value, Value, comparison);
+            if (matches)
+            {
+                return Operator != NwcSearchOperator.NotEquals;
+            }
+        }
+
+        return Operator == NwcSearchOperator.NotEquals && candidates.Count > 0;
     }
 
     private static bool MatchString(string actual, string target, NwcSearchOperator op)

@@ -69,6 +69,99 @@ public class SelectionSetTests
         Assert.Contains(matching, n => n.Id == 11);
     }
 
+    [Theory]
+    [InlineData("Name", "Wall")]
+    [InlineData("Class", "LcRevitData_Element")]
+    [InlineData("Type", "LcRevitData_Element")]
+    [InlineData("Id", "7")]
+    [InlineData("Guid", "11111111-1111-1111-1111-111111111111")]
+    public void SearchCondition_ItemBuiltInsAndItemRecordsAreCandidates(string property, string value)
+    {
+        var node = new NwcNode
+        {
+            Id = 7,
+            Name = "Wall",
+            Class = "LcRevitData_Element",
+            ElementGuid = Guid.Parse("11111111-1111-1111-1111-111111111111")
+        };
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Class = "Element", Name = property, Value = "456" });
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Class = "Item", Name = property, Value = "123" });
+
+        Assert.True(new NwcSearchCondition("item", property, NwcSearchOperator.Equals, "123").Evaluate(node));
+        Assert.False(new NwcSearchCondition("item", property, NwcSearchOperator.NotEquals, value).Evaluate(node));
+        Assert.True(new NwcSearchCondition("item", property, NwcSearchOperator.Equals, value).Evaluate(node));
+        Assert.False(new NwcSearchCondition("item", property, NwcSearchOperator.NotEquals, "123").Evaluate(node));
+        Assert.False(new NwcSearchCondition("item", property, NwcSearchOperator.Equals, "456").Evaluate(node));
+        Assert.True(new NwcSearchCondition("item", property, NwcSearchOperator.NotEquals, "456").Evaluate(node));
+    }
+
+    [Theory]
+    [InlineData("Type", NwcSearchOperator.Contains, "HVAC")]
+    [InlineData("Custom", NwcSearchOperator.Equals, "HVAC Duct")]
+    [InlineData("Guid", NwcSearchOperator.Equals, "HVAC Duct")]
+    public void SearchCondition_ItemRecordCanSupplyMatchingValue(string property, NwcSearchOperator op, string value)
+    {
+        var node = new NwcNode { Id = 7, Name = "Wall", Class = "LcRevitData_Element" };
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Class = "iTeM", Name = property, Value = "HVAC Duct" });
+
+        Assert.True(new NwcSearchCondition("Item", property, op, value).Evaluate(node));
+        Assert.False(new NwcSearchCondition("Item", property, NwcSearchOperator.NotEquals, "HVAC Duct").Evaluate(node));
+        Assert.True(new NwcSearchCondition("Item", property, NwcSearchOperator.NotEquals, "Other").Evaluate(node));
+    }
+
+    [Theory]
+    [InlineData("Item", "item")]
+    [InlineData("Element", "element")]
+    public void SearchCondition_ExplicitCategoryMatchesExactlyIgnoringCase(string category, string recordClass)
+    {
+        var node = new NwcNode { Id = 7, Name = "Wall", Class = "LcRevitData_Element" };
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Class = category + " ID", Name = "Value", Value = "123" });
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Class = recordClass, Name = "Value", Value = "999" });
+
+        Assert.False(new NwcSearchCondition(category, "Value", NwcSearchOperator.Equals, "123").Evaluate(node));
+        Assert.True(new NwcSearchCondition(category, "value", NwcSearchOperator.Equals, "999").Evaluate(node));
+        Assert.True(new NwcSearchCondition(category, "Value", NwcSearchOperator.NotEquals, "123").Evaluate(node));
+        Assert.False(new NwcSearchCondition(category, "Value", NwcSearchOperator.NotEquals, "999").Evaluate(node));
+    }
+
+    [Theory]
+    [InlineData("Element", false)]
+    [InlineData("Element", true)]
+    [InlineData("Item", false)]
+    [InlineData("Item", true)]
+    [InlineData("", false)]
+    [InlineData("", true)]
+    public void SearchCondition_NotEqualsRejectsAnyEqualCandidate(string category, bool reverse)
+    {
+        var node = new NwcNode { Id = 7, Name = "Wall", Class = "LcRevitData_Element" };
+        var recordClass = string.IsNullOrEmpty(category) ? "Element" : category;
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Class = recordClass, Name = "Value", Value = "999" });
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Class = recordClass, Name = "Value", Value = "123" });
+        if (reverse)
+        {
+            node.Properties.Reverse();
+        }
+
+        Assert.False(new NwcSearchCondition(category, "Value", NwcSearchOperator.NotEquals, "123").Evaluate(node));
+        Assert.True(new NwcSearchCondition(category, "Value", NwcSearchOperator.NotEquals, "456").Evaluate(node));
+        Assert.True(new NwcSearchCondition(category, "Value", NwcSearchOperator.Equals, "123").Evaluate(node));
+    }
+
+    [Theory]
+    [InlineData("Element", "Missing")]
+    [InlineData("Element", "NullValue")]
+    [InlineData("Item", "Guid")]
+    [InlineData("Item", "Missing")]
+    public void SearchCondition_NotEqualsRequiresAnExistingValue(string category, string property)
+    {
+        var node = new NwcNode { Id = 7, Name = "Wall", Class = "LcRevitData_Element" };
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Class = "Element", Name = "NullValue" });
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Class = "Other", Name = "Missing", Value = "123" });
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 3, Tag = 52, Class = "Item", Name = "Guid" });
+
+        Assert.False(new NwcSearchCondition(category, property, NwcSearchOperator.NotEquals, "456").Evaluate(node));
+    }
+
     [Fact]
     public void SelectionSets_RoundtripThroughNavisworksXml()
     {
