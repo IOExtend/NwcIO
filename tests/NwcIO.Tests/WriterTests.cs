@@ -197,6 +197,27 @@ public class WriterTests
         }
     }
 
+    [Theory]
+    [InlineData(253402300800L)]
+    [InlineData(long.MaxValue)]
+    public void Open_OutOfRangePartitionTimestamp_IgnoresTimestamp(long seconds)
+    {
+        using var header = new MemoryStream();
+        using var writer = new BinaryWriter(header);
+        writer.Write(7L);
+        writer.Write(4);
+        writer.Write(System.Text.Encoding.UTF8.GetBytes("a.rv"));
+        writer.Write(-1);
+        writer.Write(seconds);
+        writer.Write(0L);
+        using var file = new MemoryStream(NwcContainerWriter.Write([header.ToArray()]));
+
+        var doc = NwcDocument.Open(file);
+
+        Assert.Equal("a.rv", doc.FileInfo.SourcePath);
+        Assert.Null(doc.FileInfo.SourceTimestampUtc);
+    }
+
     [Fact]
     public void Document_TocShapedGuidTable_ReopensWithGuids()
     {

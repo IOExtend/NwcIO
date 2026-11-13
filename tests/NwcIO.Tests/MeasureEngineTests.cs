@@ -179,4 +179,80 @@ public sealed class MeasureEngineTests
         Assert.Equal(1.0, m.PointA.X, 3);
         Assert.Equal(3.0, m.PointB.X, 3);
     }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.05)]
+    public void MeshToMesh_CrossingBeams_ReturnsCommonSurfacePoint(double offsetZ)
+    {
+        var a = CreateBox(new(-10, -0.1, 0), new(10, 0.1, 0.2));
+        var b = CreateBox(new(-0.1, -10, offsetZ), new(0.1, 10, 0.2 + offsetZ));
+
+        var result = NwcMeasureEngine.MeasureMeshToMesh(a, b);
+
+        Assert.Equal(0.0, result.Distance);
+        Assert.Equal(result.PointA, result.PointB);
+        Assert.Equal(0.0, NwcMeasureEngine.MeasurePointToMesh(result.PointA, a).Distance, 8);
+        Assert.Equal(0.0, NwcMeasureEngine.MeasurePointToMesh(result.PointB, b).Distance, 8);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MeshToMesh_SeparatedBeams_ReturnsFacingSurfacePoints(bool useWorldCoordinates)
+    {
+        var a = CreateBox(new(-10, -0.1, 0), new(10, 0.1, 0.2));
+        var b = CreateBox(new(-0.1, -10, 0.4), new(0.1, 10, 0.6));
+        a.Transform = new NwcTransform { Id = 1, Translation = new(3, 4, 5) };
+        b.Transform = new NwcTransform { Id = 2, Translation = new(3, 4, 6) };
+
+        var result = NwcMeasureEngine.MeasureMeshToMesh(a, b, useWorldCoordinates);
+
+        Assert.Equal(useWorldCoordinates ? 1.2 : 0.2, result.Distance, 8);
+        Assert.Equal(useWorldCoordinates ? 5.2 : 0.2, result.PointA.Z, 8);
+        Assert.Equal(useWorldCoordinates ? 6.4 : 0.4, result.PointB.Z, 8);
+        Assert.Equal(result.PointA.X, result.PointB.X, 8);
+        Assert.Equal(result.PointA.Y, result.PointB.Y, 8);
+        Assert.Equal(0.0, NwcMeasureEngine.MeasurePointToMesh(result.PointA, a, useWorldCoordinates).Distance, 8);
+        Assert.Equal(0.0, NwcMeasureEngine.MeasurePointToMesh(result.PointB, b, useWorldCoordinates).Distance, 8);
+    }
+
+    [Fact]
+    public void MeshToMesh_ClosestEdges_ReturnsInteriorEdgePoints()
+    {
+        var a = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(-2, 0, 0), new(2, 0, 0), new(0, -2, -2)],
+            Indices = [0, 1, 2],
+        };
+        var b = new NwcMesh
+        {
+            Id = 2,
+            Vertices = [new(0, -1, 1), new(0, 1, 1), new(0, 0, 3)],
+            Indices = [0, 1, 2],
+        };
+
+        var result = NwcMeasureEngine.MeasureMeshToMesh(a, b);
+
+        Assert.Equal(1.0, result.Distance, 8);
+        Assert.Equal(new Vector3d(0, 0, 0), result.PointA);
+        Assert.Equal(new Vector3d(0, 0, 1), result.PointB);
+    }
+
+    private static NwcMesh CreateBox(Vector3d min, Vector3d max)
+    {
+        var cube = CreateUnitCubeMesh();
+        return new NwcMesh
+        {
+            Id = 1,
+            Vertices = cube.Vertices.Select(v => new Vector3d(
+                min.X + v.X * (max.X - min.X),
+                min.Y + v.Y * (max.Y - min.Y),
+                min.Z + v.Z * (max.Z - min.Z))).ToList(),
+            Indices = cube.Indices,
+            BoundingBox = new BoundingBox3d(min, max),
+        };
+    }
+
 }
