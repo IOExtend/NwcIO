@@ -77,30 +77,49 @@ public class ModelGraphReaderTests
 
     // F1 edits through FormatVectors.Patched (link rules) and file-level defects
     [Theory]
-    [InlineData("seqDecreasing")]  // F1 int@284 = 1
-    [InlineData("seqOnGroup")]     // F1 int@284 = 4 (node B)
-    [InlineData("recOutOfRange")]  // F1 int@248 = 2 with N = 1
-    [InlineData("bboxChanged")]    // F1 f32@200 = 2.0
-    [InlineData("countChanged")]   // F1 int@24 = 3
-    public void Open_LinkDefect_Throws(string defect)
-    { Assert.StartsWith("LcOpNwdFragments fragment ", Assert.Throws<InvalidDataException>(() => Open(defect)).Message); }
+    [InlineData("seqDecreasing", "fragment 1: seq is less than the previous fragment's")]  // F1 int@36 = 3, int@284 = 2: both leaves
+    [InlineData("seqOnGroup", "fragment 1: seq does not name a class-22 leaf")]            // F1 int@284 = 4 (node B)
+    [InlineData("recOutOfRange", "fragment 0: record 2 is outside 1..1")]                  // F1 int@248 = 2 with N = 1
+    [InlineData("bboxChanged", "fragment 0: bounding box differs from the record's")]      // F1 f32@200 = 2.0
+    [InlineData("countChanged", "fragment 0: primitive count differs from the record's")]  // F1 int@24 = 3
+    public void Open_LinkDefect_Throws(string defect, string rule)
+    { Assert.Equal("LcOpNwdFragments " + rule, Assert.Throws<InvalidDataException>(() => Open(defect)).Message); }
 
     [Theory]
-    [InlineData("fragmentsWithoutGeometry")] // Build(H1, F1, [], []): message contains "fragments without geometry"
-    [InlineData("duplicateGeometryEntry")] // editDirectory adds a second "...\LcOpNwdGeometry"
-    [InlineData("wrongB")]                 // geometry entry b + 1
-    [InlineData("wrongHierarchyLength")]   // hierarchy entry length + 1
-    [InlineData("tocPad")]                 // mixed file TOC byte 28 = 1
-    [InlineData("tocChunkCount")]          // TOC ch = 3
-    [InlineData("tocChunkSize")]           // TOC size[0] + 1
-    public void Open_SegmentDefect_Throws(string defect)
+    [InlineData("fragmentsWithoutGeometry", "LcOpNwdFragments: fragments without geometry")] // Build(H1, F1, [], [])
+    [InlineData("duplicateGeometryEntry", ": named more than once in the directory")]      // editDirectory adds a second "...\LcOpNwdGeometry"
+    [InlineData("wrongB", ": b is not the last stream's compressed length")]                // geometry entry b + 1
+    [InlineData("wrongHierarchyLength", ": no stream spans exactly the entry's offset and length")] // hierarchy entry length + 1
+    [InlineData("tocPad", "LcOpNwdGeometry TOC: pad byte is not zero at +28")]              // mixed file TOC byte 28 = 1
+    [InlineData("tocChunkCount", "LcOpNwdGeometry TOC: chunk count does not match the chunk streams at +4")] // TOC ch = 3
+    [InlineData("tocChunkSize", "LcOpNwdGeometry TOC: chunk size does not match the compressed length at +8")] // TOC size[0] + 1
+    public void Open_SegmentDefect_Throws(string defect, string rule)
     {
         var ex = Assert.Throws<InvalidDataException>(() => Open(defect));
         Assert.StartsWith("LcOpNwd", ex.Message);
-        if (defect == "fragmentsWithoutGeometry")
-        {
-            Assert.Contains("fragments without geometry", ex.Message);
-        }
+        Assert.EndsWith(rule, ex.Message);
+    }
+
+    [Fact]
+    public void Open_FragmentsWithoutHierarchy_NeedTreeOff()
+    {
+        var file = SyntheticNwcFile.Build(null, FormatVectors.F1, [FormatVectors.R1], [120]);
+        var ex = Assert.Throws<InvalidDataException>(() => NwcDocument.Open(new MemoryStream(file)));
+        Assert.Equal("LcOpNwdFragments fragment 0: seq is outside the hierarchy preorder", ex.Message);
+
+        var doc = NwcDocument.Open(new MemoryStream(file), new NwcReaderOptions { BuildSceneTree = false });
+        Assert.Equal(2, doc.Meshes.Count);
+        Assert.Null(doc.RootNode);
+    }
+
+    [Fact]
+    public void Open_GeometryWithoutHierarchyOrFragments_GivesNamedEmptyRoot()
+    {
+        var doc = NwcDocument.Open(new MemoryStream(SyntheticNwcFile.Build(null, null, [FormatVectors.R1], [120])), fallbackName: "plan.nwc");
+        var root = doc.RootNode!;
+        Assert.Equal(("plan", "Model", 0), (root.Name, root.Class, root.Id));
+        Assert.Empty(root.Children);
+        Assert.Empty(doc.Meshes);
     }
 
     [Fact]
@@ -131,10 +150,24 @@ public class ModelGraphReaderTests
     {
         byte[] xrefs = Encoding.UTF8.GetBytes(
             """{"Type":"XRefTable","Version":1,"SavedFilename":"fed.nwf","Table":[{"OriginalPath":"a.nwc","RemappedPath":""}]}""");
-        var doc = NwcDocument.Open(new MemoryStream(SyntheticNwcFile.Build(null, null, [], [], extraStreams: [("LcOpXRefTable", xrefs)])));
+        var doc = NwcDocument.Open(new MemoryStream(SyntheticNwcFile.Build(
+            null, null, [], [], extraStreams: [("LcOpXRefTable", xrefs), ("transforms", LegacyTransformStream())])));
         Assert.Single(doc.XRefs!.References);
+        Assert.Equal(new Vector3d(5, 6, 7), Assert.Single(doc.Transforms).Translation);   // only the lenient TransformParser reads it
         Assert.Empty(doc.Meshes);
     }
+
+    [Fact]
+    public void Open_SectionOneNotADirectory_KeepsTodaysPath()
+    {
+        var file = SyntheticNwcFile.Build(FormatVectors.H1, FormatVectors.F1, [FormatVectors.R1], [120], section1: LegacyTransformStream());
+        var doc = NwcDocument.Open(new MemoryStream(file));
+        Assert.Contains(doc.Transforms, t => t.Translation == new Vector3d(5, 6, 7));
+    }
+
+    [Fact]
+    public void Fragments_RebuildsF1ByteForByte() =>
+        Assert.Equal(FormatVectors.F1, Fragments(new(2, new(10, 0, 0), 1, 2, 4, Rec: 1), new(7, Vector3d.Zero, -1, 2, 4, SharesGeometryOf: 0)));
 
     [Fact]
     public void Open_PartitionHierarchy_NeedsBuildSceneTreeOff()
@@ -180,6 +213,26 @@ public class ModelGraphReaderTests
         SyntheticNwcFile.Build(HierarchyParserTests.PartitionHierarchy(), FormatVectors.F1, [FormatVectors.R1], [120]);
 
     private static IEnumerable<NwcNode> Preorder(NwcNode node) => [node, .. node.Children.SelectMany(Preorder)];
+
+    // A stream in the lenient transform layout TransformParser reads: [n = 1][100][13][101][15], t = (5, 6, 7), q = (0, 0, 0, 1), unaligned.
+    private static byte[] LegacyTransformStream()
+    {
+        using var stream = new MemoryStream();
+        using (var w = new BinaryWriter(stream))
+        {
+            w.Write(1);
+            w.Write(100);
+            w.Write(13);
+            w.Write(101);
+            w.Write(15);
+            foreach (double value in new double[] { 5, 6, 7, 0, 0, 0, 1 })
+            {
+                w.Write(value);
+            }
+        }
+
+        return stream.ToArray();
+    }
 
     // H1 + Fmix + R1..R3 cut at byte 200, so R2 crosses the chunk boundary.
     private static byte[] MixedFile(bool geometryFirst = false, Action<byte[]>? editToc = null)
@@ -254,7 +307,7 @@ public class ModelGraphReaderTests
 
     private static NwcDocument Open(string defect) => NwcDocument.Open(new MemoryStream(defect switch
     {
-        "seqDecreasing" => F1File(FormatVectors.Patched(FormatVectors.F1, 284, BitConverter.GetBytes(1))),
+        "seqDecreasing" => F1File(FormatVectors.Patched(FormatVectors.Patched(FormatVectors.F1, 36, BitConverter.GetBytes(3)), 284, BitConverter.GetBytes(2))),
         "seqOnGroup" => F1File(FormatVectors.Patched(FormatVectors.F1, 284, BitConverter.GetBytes(4))),
         "recOutOfRange" => F1File(FormatVectors.Patched(FormatVectors.F1, 248, BitConverter.GetBytes(2))),
         "bboxChanged" => F1File(FormatVectors.Patched(FormatVectors.F1, 200, BitConverter.GetBytes(2.0f))),

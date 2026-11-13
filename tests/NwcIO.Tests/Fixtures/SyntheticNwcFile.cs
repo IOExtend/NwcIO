@@ -20,12 +20,13 @@ internal static class SyntheticNwcFile
     /// from the compressed sizes and padded to 8, <paramref name="editToc"/> applied before compression. Each extra stream is one
     /// zlib stream with a (0,0) entry named exactly its name. Section 1: the header line + zlib(directory); model entries are
     /// named <paramref name="namePrefix"/> + segment name, with absolute offsets, (0,0) for single streams and (4, b) for geometry.
-    /// <paramref name="editDirectory"/> runs on the entries before the directory is written.
+    /// <paramref name="editDirectory"/> runs on the entries before the directory is written; <paramref name="section1"/>, when set,
+    /// is written as section 1's one stream in place of the directory.
     /// </summary>
     public static byte[] Build(byte[]? hierarchy, byte[]? fragments, IReadOnlyList<byte[]> chunks, IReadOnlyList<int> recordLengths,
                                string namePrefix = @"cache\", bool geometryFirst = false, Action<byte[]>? editToc = null,
                                Action<List<NwcDbCacheEntry>>? editDirectory = null,
-                               IReadOnlyList<(string Name, byte[] Data)>? extraStreams = null)
+                               IReadOnlyList<(string Name, byte[] Data)>? extraStreams = null, byte[]? section1 = null)
     {
         var header = Encoding.ASCII.GetBytes(NwcContainerWriter.DefaultHeader);
         var file = new List<byte>(header);
@@ -104,7 +105,7 @@ internal static class SyntheticNwcFile
         }
 
         file.AddRange(header);
-        file.AddRange(Zlib(directory.ToArray()));
+        file.AddRange(Zlib(section1 ?? directory.ToArray()));
         return [.. file];
     }
 
