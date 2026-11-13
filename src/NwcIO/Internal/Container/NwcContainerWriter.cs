@@ -16,6 +16,7 @@ public static class NwcContainerWriter
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(decompressedStreams);
 
+        ValidateHeader(header);
         header ??= DefaultHeader;
         if (!header.EndsWith('\n'))
         {
@@ -33,6 +34,14 @@ public static class NwcContainerWriter
         }
 
         output.Flush();
+    }
+
+    internal static void ValidateHeader(string? header)
+    {
+        if (header is not null && !header.StartsWith("#LcUStream", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Header must start with '#LcUStream'.", nameof(header));
+        }
     }
 
     public static byte[] Write(IReadOnlyList<byte[]> decompressedStreams, string? header = null)

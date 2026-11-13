@@ -9,9 +9,9 @@ namespace NwcIO.Internal.Parsing;
 /// </summary>
 public static class MeshParser
 {
-    private const int MinMeshVertices = 3;
-    private const int MaxPlausibleVertices = 200_000;
-    private const double MaxCoordinateMagnitude = 1e8;
+    internal const int MinMeshVertices = 3;
+    internal const int MaxPlausibleVertices = 200_000;
+    internal const double MaxCoordinateMagnitude = 1e8;
 
     /// <summary>
     /// Parses all 3D meshes found in the container streams.
