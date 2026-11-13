@@ -189,7 +189,7 @@ internal static class IfcExporter
             string elemGuid = IfcGuid.FromElementId(mesh.Id, "NwcMesh");
             string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
-            int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture));
+            int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
             elementIds.Add(elemId);
 
             // Type assignment
@@ -417,7 +417,7 @@ internal static class IfcExporter
                 string elemGuid = IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
                 string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
-                int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture));
+                int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
                 modelElementIds.Add(elemId);
 
                 // Type assignment
@@ -564,7 +564,8 @@ internal static class IfcExporter
         string name,
         int placementId,
         int shapeId,
-        string tag)
+        string tag,
+        bool isIfc4)
     {
         string commonArgs = $"{StepWriter.Str(guid)},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(name)},$,$,{StepWriter.Ref(placementId)},{StepWriter.Ref(shapeId)},{StepWriter.Str(tag)}";
 
@@ -581,8 +582,8 @@ internal static class IfcExporter
             "IFCRAILING" => w.Add("IFCRAILING", $"{commonArgs},.GUARDRAIL."),
             "IFCSTAIR" => w.Add("IFCSTAIR", $"{commonArgs},.STRAIGHT_RUN_STAIR."),
             "IFCROOF" => w.Add("IFCROOF", $"{commonArgs},.FLAT_ROOF."),
-            "IFCPIPESEGMENT" => w.Add("IFCPIPESEGMENT", commonArgs),
-            "IFCDUCTSEGMENT" => w.Add("IFCDUCTSEGMENT", commonArgs),
+            "IFCPIPESEGMENT" => w.Add(isIfc4 ? "IFCPIPESEGMENT" : "IFCFLOWSEGMENT", commonArgs),
+            "IFCDUCTSEGMENT" => w.Add(isIfc4 ? "IFCDUCTSEGMENT" : "IFCFLOWSEGMENT", commonArgs),
             _ => w.Add("IFCBUILDINGELEMENTPROXY", $"{commonArgs},.ELEMENT."),
         };
     }
@@ -754,7 +755,9 @@ internal static class IfcExporter
                 ? w.Add("IFCFOOTINGTYPE", $"{prefix},.NOTDEFINED.")
                 : w.Add("IFCBUILDINGELEMENTPROXYTYPE", $"{prefix},.NOTDEFINED."),
             "IFCRAILING" => w.Add("IFCRAILINGTYPE", $"{prefix},.NOTDEFINED."),
-            "IFCROOF" => w.Add("IFCROOFTYPE", $"{prefix},.NOTDEFINED."),
+            "IFCROOF" => isIfc4
+                ? w.Add("IFCROOFTYPE", $"{prefix},.NOTDEFINED.")
+                : w.Add("IFCBUILDINGELEMENTPROXYTYPE", $"{prefix},.NOTDEFINED."),
             "IFCSTAIR" => w.Add("IFCSTAIRFLIGHTTYPE", $"{prefix},.NOTDEFINED."),
             "IFCPIPESEGMENT" => w.Add("IFCPIPESEGMENTTYPE", $"{prefix},.NOTDEFINED."),
             "IFCDUCTSEGMENT" => w.Add("IFCDUCTSEGMENTTYPE", $"{prefix},.NOTDEFINED."),
