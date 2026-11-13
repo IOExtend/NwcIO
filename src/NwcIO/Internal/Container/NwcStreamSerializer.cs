@@ -73,8 +73,21 @@ internal static class NwcStreamSerializer
 
     private static void ValidateDocument(NwcDocument doc)
     {
+        foreach (var transform in doc.Transforms)
+        {
+            if (transform.Scale != 1.0)
+            {
+                throw new ArgumentException($"Transform {transform.Id.ToString(CultureInfo.InvariantCulture)} has scale {transform.Scale.ToString(CultureInfo.InvariantCulture)}; the .nwc writer stores only rotation and translation.", nameof(doc));
+            }
+        }
+
         foreach (var mesh in doc.Meshes)
         {
+            if (mesh.LineIndices.Count > 0)
+            {
+                throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} holds line segments, which the .nwc writer cannot store.", nameof(doc));
+            }
+
             if (mesh.Vertices.Count < MeshParser.MinMeshVertices ||
                 mesh.Vertices.Count > MeshParser.MaxPlausibleVertices)
             {

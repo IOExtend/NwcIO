@@ -173,6 +173,23 @@ public class WriterTests
         Assert.Equal(viewpoints.Select(v => v.Name), reopened.SavedViewpoints.Select(v => v.Name));
     }
 
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(100.0)]
+    public void Writer_RejectsScaledTransform_WithoutChangingDestination(double scale)
+    {
+        var transform = new NwcTransform { Id = 7, Scale = scale };
+        var mesh = new NwcMesh { Id = 3, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2], Transform = transform };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh], transforms: [transform]), "Transform 7");
+    }
+
+    [Fact]
+    public void Writer_RejectsLineMesh_WithoutChangingDestination()
+    {
+        var mesh = new NwcMesh { Id = 5, Vertices = [new(0, 0, 0), new(1, 0, 0), new(1, 1, 0)], Indices = [], LineIndices = [0, 1, 1, 2] };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 5");
+    }
+
     private static void AssertRejectedWithoutChangingDestination(NwcDocument doc, string item, string? header = null)
     {
         Assert.Contains(item, Assert.Throws<ArgumentException>(() => doc.ToByteArray(header)).Message);
