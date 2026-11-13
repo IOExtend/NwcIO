@@ -6,6 +6,80 @@ namespace NwcIO.Tests;
 public class AssemblyTests
 {
     [Fact]
+    public void ToNwfManifest_StreamOpenedModelsFallBackToSourcePaths()
+    {
+        using var firstStream = new MemoryStream();
+        using var secondStream = new MemoryStream();
+        CreateComponentModel("Original-A.rvt", 1, 0).Save(firstStream);
+        CreateComponentModel("Original-B.ifc", 2, 10).Save(secondStream);
+        firstStream.Position = 0;
+        secondStream.Position = 0;
+        var first = NwcDocument.Open(firstStream);
+        var second = NwcDocument.Open(secondStream);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        var manifest = assembly.ToNwfManifest();
+
+        Assert.Collection(manifest.ModelPaths,
+            path => Assert.Equal("Original-A.rvt", path),
+            path => Assert.Equal("Original-B.ifc", path));
+        Assert.Equal(assembly.Models.Count, manifest.ModelPaths.Count);
+    }
+
+    [Fact]
+    public void SaveNwf_UsesLoadedCachePathsRelativeToManifest()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "nwcio-manifest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var first = Path.Combine(directory, "A.nwc");
+            var second = Path.Combine(directory, "B.nwd");
+            CreateComponentModel("Original-A.rvt", 1, 0).Save(first);
+            CreateComponentModel("Original-B.ifc", 2, 10).Save(second);
+            var assembly = NwcAssembly.Create("Federation", NwcDocument.Open(first), NwcDocument.Open(second));
+
+            Assert.Equal(new[] { first, second }, assembly.ToNwfManifest().ModelPaths);
+            var path = Path.Combine(directory, "manifests", "project.nwf.xml");
+            assembly.SaveNwf(path);
+            var manifest = Model.Clash.NwcNwfManifest.Open(path);
+            Assert.Equal(new[] { Path.Combine("..", "A.nwc"), Path.Combine("..", "B.nwd") }, manifest.ModelPaths);
+            foreach (var modelPath in manifest.ModelPaths)
+            {
+                var reopened = NwcDocument.Open(Path.Combine(Path.GetDirectoryName(path)!, modelPath));
+                Assert.Single(reopened.Meshes);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ToNwfManifest_CopiesAssemblySetsAndModelAppearanceRules()
+    {
+        var first = CreateComponentModel("A.rvt", 1, 0);
+        var second = CreateComponentModel("B.rvt", 2, 10);
+        first.AppearanceProfiler = new Model.Appearance.NwcAppearanceProfiler();
+        second.AppearanceProfiler = new Model.Appearance.NwcAppearanceProfiler();
+        var ruleA = new Model.Appearance.NwcAppearanceRule { Name = "A" };
+        var ruleB = new Model.Appearance.NwcAppearanceRule { Name = "B" };
+        first.AppearanceProfiler.Rules.Add(ruleA);
+        second.AppearanceProfiler.Rules.Add(ruleB);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+        var selection = new Model.Sets.NwcSelectionSet("Selected", [1]);
+        assembly.SelectionSets.Add(selection);
+
+        var manifest = assembly.ToNwfManifest();
+
+        Assert.Same(selection, Assert.Single(manifest.Sets));
+        Assert.Equal(new[] { ruleA, ruleB }, manifest.AppearanceProfiler.Rules);
+        Assert.Equal(assembly.SavedViewpoints, manifest.SavedViewpoints);
+        Assert.Equal(new[] { first.FileInfo.SourcePath, second.FileInfo.SourcePath }, manifest.ModelPaths);
+    }
+
+    [Fact]
     public void Create_CombinesMultipleDocumentsIntoFederatedAssembly()
     {
         var meshA = new NwcMesh

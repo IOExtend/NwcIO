@@ -255,7 +255,7 @@ public static class NwcXmlViewpointSerializer
             new XAttribute("alpha", color.A.ToString("R", CultureInfo.InvariantCulture)));
     }
 
-    private static NwcSavedViewpoint? DeserializeViewpoint(XElement vpElem)
+    internal static NwcSavedViewpoint? DeserializeViewpoint(XElement vpElem)
     {
         string name = (string?)vpElem.Attribute("name") ?? "Viewpoint";
         string? guidStr = (string?)vpElem.Attribute("guid");

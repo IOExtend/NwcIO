@@ -2,6 +2,8 @@ using System.IO.Compression;
 using System.Xml.Linq;
 using NwcIO.Model;
 using NwcIO.Model.Clash;
+using NwcIO.Model.Appearance;
+using NwcIO.Model.Sets;
 using Xunit;
 
 namespace NwcIO.Tests;
@@ -606,6 +608,165 @@ public sealed class ClashDetectiveTests
         finally
         {
             if (File.Exists(tempNwf)) File.Delete(tempNwf);
+        }
+    }
+
+    [Fact]
+    public void NwfManifestRead_PairsLegacyCameraWithItsOwnElement()
+    {
+        const string xml = """
+            <NavisworksFederation>
+              <Viewpoints>
+                <exchange><viewpoints><viewpoint name="Modern">
+                  <camera><position><pos3f x="10" y="20" z="30" /></position></camera>
+                </viewpoint></viewpoints></exchange>
+                <Viewpoint name="Legacy" cameraX="1" cameraY="2" cameraZ="3" />
+              </Viewpoints>
+            </NavisworksFederation>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
+
+        var manifest = NwcNwfManifest.Read(stream);
+
+        Assert.Collection(manifest.SavedViewpoints,
+            modern =>
+            {
+                Assert.Equal("Modern", modern.Name);
+                Assert.Equal(new Vector3d(10, 20, 30), modern.Camera.Position);
+            },
+            legacy =>
+            {
+                Assert.Equal("Legacy", legacy.Name);
+                Assert.Equal(new Vector3d(1, 2, 3), legacy.Camera.Position);
+            });
+    }
+
+    [Theory]
+    [InlineData("2026-01-01T09:00:00.1234567", 0)]
+    [InlineData("2026-01-01T09:00:00.1234567Z", 0)]
+    [InlineData("2026-01-01T12:00:00.1234567+03:00", 3)]
+    public void NwfManifestRead_AssumesUtcForDatesWithoutOffset(string date, int offsetHours)
+    {
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+            $"<NavisworksFederation date=\"{date}\" />"));
+
+        var manifest = NwcNwfManifest.Read(stream);
+
+        var expected = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero).AddTicks(1234567);
+        Assert.Equal(expected, manifest.CreatedDate);
+        Assert.Equal(TimeSpan.FromHours(offsetHours), manifest.CreatedDate.Offset);
+        using var output = new MemoryStream();
+        manifest.Write(output);
+        output.Position = 0;
+        Assert.Equal("2026-01-01T09:00:00.1234567Z", (string?)XDocument.Load(output).Root!.Attribute("date"));
+        output.Position = 0;
+        Assert.Equal(expected, NwcNwfManifest.Read(output).CreatedDate);
+    }
+
+    [Fact]
+    public void NwfManifestRead_PreservesLegacyViewpointsAndAppearanceRules()
+    {
+        const string xml = """
+            <NavisworksFederation project="Legacy">
+              <Viewpoints><Viewpoint name="Review" cameraX="1.25" cameraY="2" cameraZ="3" /></Viewpoints>
+              <AppearanceRules><Rule name="Red" category="Item" property="Name" value="Wall" color="rgba(255, 0, 0, 1.00)" /></AppearanceRules>
+              <ClashDetective><Test name="Old test" tolerance="0.01" /></ClashDetective>
+            </NavisworksFederation>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
+
+        var manifest = NwcNwfManifest.Read(stream);
+
+        var viewpoint = Assert.Single(manifest.SavedViewpoints);
+        Assert.Equal("Review", viewpoint.Name);
+        Assert.Equal(new Vector3d(1.25, 2, 3), viewpoint.Camera.Position);
+        var rule = Assert.Single(manifest.AppearanceProfiler.Rules);
+        Assert.Equal(new RgbaColor(1, 0, 0), rule.Color);
+        Assert.Equal("Wall", rule.Condition.Value);
+        Assert.Equal(NwcClashTestType.Hard, Assert.Single(manifest.ClashTests).TestType);
+    }
+
+    [Theory]
+    [InlineData("date")]
+    [InlineData("viewpoints")]
+    [InlineData("sets")]
+    [InlineData("appearance")]
+    [InlineData("type")]
+    public void NwfManifestRoundtripPreservesCoordinationData(string aspect)
+    {
+        var manifest = new NwcNwfManifest("Coordination")
+        {
+            CreatedDate = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(3)).AddTicks(1234567),
+        };
+        manifest.ModelPaths.Add("a.nwc");
+        var bounds = new BoundingBox3d(new(0, 0, 0), new(1, 2, 3));
+        manifest.SavedViewpoints.Add(NwcSavedViewpoint.CreateDefault(bounds, "Overview"));
+        manifest.SavedViewpoints.Add(NwcSavedViewpoint.CreateTop(bounds, "Top"));
+        var folder = new NwcSelectionSetFolder("Review");
+        var selection = new NwcSelectionSet("Selected", [7, 9]) { Comment = "Check these" };
+        selection.NodePaths.Add("Model/Wall");
+        var search = new NwcSearchSet("Walls") { MatchAllConditions = false };
+        search.Conditions.Add(new NwcSearchCondition("Item", "Name", NwcSearchOperator.Contains, "Wall"));
+        folder.Children.AddRange([selection, search]);
+        manifest.Sets.Add(folder);
+        var rule = new NwcAppearanceRule("Highlight", search.Conditions[0], new RgbaColor(0.25f, 0.5f, 0.75f), 0.4f)
+        {
+            Enabled = false,
+        };
+        manifest.AppearanceProfiler.Rules.Add(rule);
+        manifest.ClashTests.Add(new NwcClashTest("Clearance", NwcClashTestType.Clearance, 0.05));
+
+        using var stream = new MemoryStream();
+        manifest.Write(stream);
+        stream.Position = 0;
+        var xml = XDocument.Load(stream);
+        stream.Position = 0;
+        var loaded = NwcNwfManifest.Read(stream);
+
+        switch (aspect)
+        {
+            case "date":
+                Assert.Equal("2026-01-01T09:00:00.1234567Z", (string?)xml.Root!.Attribute("date"));
+                Assert.Equal(manifest.CreatedDate, loaded.CreatedDate);
+                break;
+            case "viewpoints":
+                Assert.Equal(2, loaded.SavedViewpoints.Count);
+                for (var i = 0; i < 2; i++)
+                {
+                    var expected = manifest.SavedViewpoints[i];
+                    var actual = loaded.SavedViewpoints[i];
+                    Assert.Equal(expected.Id, actual.Id);
+                    Assert.Equal(expected.Name, actual.Name);
+                    Assert.Equal(expected.Camera.Position, actual.Camera.Position);
+                    Assert.Equal(expected.Camera.Rotation, actual.Camera.Rotation);
+                    Assert.Equal(expected.Camera.Projection, actual.Camera.Projection);
+                }
+                break;
+            case "sets":
+                var loadedFolder = Assert.IsType<NwcSelectionSetFolder>(Assert.Single(loaded.Sets));
+                Assert.Equal(folder.SetGuid, loadedFolder.SetGuid);
+                var loadedSelection = Assert.IsType<NwcSelectionSet>(loadedFolder.Children[0]);
+                Assert.Equal(selection.NodeIds, loadedSelection.NodeIds);
+                Assert.Equal(selection.NodePaths, loadedSelection.NodePaths);
+                Assert.Equal(selection.Comment, loadedSelection.Comment);
+                var loadedSearch = Assert.IsType<NwcSearchSet>(loadedFolder.Children[1]);
+                Assert.False(loadedSearch.MatchAllConditions);
+                Assert.Equal(search.Conditions[0].Operator, Assert.Single(loadedSearch.Conditions).Operator);
+                Assert.Equal("Wall", loadedSearch.Conditions[0].Value);
+                break;
+            case "appearance":
+                var loadedRule = Assert.Single(loaded.AppearanceProfiler.Rules);
+                Assert.Equal(rule.Name, loadedRule.Name);
+                Assert.Equal(rule.Enabled, loadedRule.Enabled);
+                Assert.Equal(rule.Color, loadedRule.Color);
+                Assert.Equal(rule.Transparency, loadedRule.Transparency);
+                Assert.Equal(rule.Condition.Operator, loadedRule.Condition.Operator);
+                Assert.Equal(rule.Condition.Value, loadedRule.Condition.Value);
+                break;
+            case "type":
+                Assert.Equal(NwcClashTestType.Clearance, Assert.Single(loaded.ClashTests).TestType);
+                Assert.Equal(0.05, loaded.ClashTests[0].Tolerance);
+                break;
         }
     }
 
