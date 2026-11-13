@@ -858,6 +858,99 @@ public sealed class ClashDetectiveTests
         };
     }
 
+    [Theory]
+    [InlineData(false, true, 0)]
+    [InlineData(false, false, 1)]
+    [InlineData(true, true, 0)]
+    [InlineData(true, false, 1)]
+    public void ClashDetection_FragmentsOfOneElement_DoNotClash(bool federated, bool sharedNode, int expectedCount)
+    {
+        var meshA = CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2));
+        var meshB = CreateBoxMesh(2, new(1, 1, 1), new(3, 3, 3));
+        meshA.Node = new NwcNode { Id = 10, Name = "Wall", Class = "LcOaNode" };
+        meshB.Node = sharedNode ? meshA.Node : new NwcNode { Id = 11, Name = "Wall", Class = "LcOaNode" };
+        var doc = new NwcDocumentBuilder().SetFileInfo("Model.nwc").AddMesh(meshA).AddMesh(meshB).Build();
+        var test = new NwcClashTest("Fragments", NwcClashTestType.Hard);
+
+        if (federated)
+        {
+            NwcClashDetector.Run(NwcAssembly.Create("Federated", doc), test);
+        }
+        else
+        {
+            NwcClashDetector.Run(doc, test);
+        }
+
+        Assert.Equal(expectedCount, test.TotalClashCount);
+    }
+
+    [Theory]
+    [InlineData("Level 2", 1)]
+    [InlineData("Level 1", 0)]
+    public void AssemblyClashDetection_IgnoreSameLayer_ComparesParentLayers(string secondLayer, int expectedCount)
+    {
+        var meshA = CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2));
+        meshA.Node = new NwcNode
+        {
+            Id = 10, Name = "Basic Wall", Class = "LcOaNode",
+            Parent = new NwcNode { Id = 9, Name = "Level 1", Class = "LcOaLayer" },
+        };
+        var meshB = CreateBoxMesh(2, new(1, 1, 1), new(3, 3, 3));
+        meshB.Node = new NwcNode
+        {
+            Id = 20, Name = "Basic Wall", Class = "LcOaNode",
+            Parent = new NwcNode { Id = 19, Name = secondLayer, Class = "LcOaLayer" },
+        };
+        var architecture = new NwcDocumentBuilder().SetFileInfo("Architecture.nwc").AddMesh(meshA).Build();
+        var structure = new NwcDocumentBuilder().SetFileInfo("Structure.nwc").AddMesh(meshB).Build();
+        var test = new NwcClashTest("Layers", NwcClashTestType.Hard);
+        test.Rules.Add(NwcClashRule.SameLayer(enabled: true));
+
+        NwcClashDetector.Run(NwcAssembly.Create("Federated", architecture, structure), test);
+
+        Assert.Equal(expectedCount, test.TotalClashCount);
+        Assert.All(test.Results, clash =>
+        {
+            Assert.Equal("Level 1", clash.Item1.Layer);
+            Assert.Equal(secondLayer, clash.Item2.Layer);
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitNodeIds_MatchNodeIdsAndFallBackToMeshIds(bool federated)
+    {
+        // The fragment's mesh id 5 equals the other element's node id; only node ids select meshes with nodes.
+        var fragment = CreateBoxMesh(5, new(0, 0, 0), new(2, 2, 2));
+        fragment.Node = new NwcNode { Id = 100, Name = "Pipe", Class = "LcOaNode" };
+        var other = CreateBoxMesh(6, new(1, 1, 1), new(3, 3, 3));
+        other.Node = new NwcNode { Id = 5, Name = "Duct", Class = "LcOaNode" };
+        var loose = CreateBoxMesh(7, new(1.5, 1.5, 1.5), new(4, 4, 4));
+        var doc = new NwcDocumentBuilder().SetFileInfo("Model.nwc").AddMesh(fragment).AddMesh(other).AddMesh(loose).Build();
+        var test = new NwcClashTest("Explicit");
+        test.SelectionA.ExplicitNodeIds.Add(100);
+        test.SelectionB.ExplicitNodeIds.Add(7);
+
+        if (federated)
+        {
+            NwcClashDetector.Run(NwcAssembly.Create("Federated", doc), test);
+        }
+        else
+        {
+            NwcClashDetector.Run(doc, test);
+        }
+
+        var clash = Assert.Single(test.Results);
+        Assert.Same(fragment, clash.Item1.Mesh);
+        Assert.Same(loose, clash.Item2.Mesh);
+
+        test.Results.Clear();
+        test.SelectionA.ExplicitNodeIds[0] = 5;
+        NwcClashDetector.Run(doc, test);
+        Assert.Same(other, Assert.Single(test.Results).Item1.Mesh);
+    }
+
     [Fact]
     public void MeshClashDetection_LineMeshCrossingBox_ReportsNoClash()
     {
