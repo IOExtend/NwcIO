@@ -9,6 +9,37 @@ namespace NwcIO.Tests;
 public sealed class ClashDetectiveTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MeshClashDetectionPreservesIntersectionsWhenTriangleSizesDiffer(bool swapMeshes)
+    {
+        var large = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(100000000, 0, 0), new(0, 100000000, 0)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 0), new(100000000, 100000000, 0)),
+        };
+        var small = new NwcMesh
+        {
+            Id = 2,
+            Vertices = [new(99999999, 3, -1), new(99999999, 3, 1), new(99999999, -1, 0)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(99999999, -1, -1), new(99999999, 3, 1)),
+        };
+        var doc = new NwcDocumentBuilder()
+            .AddMesh(swapMeshes ? small : large)
+            .AddMesh(swapMeshes ? large : small)
+            .Build();
+        var test = new NwcClashTest("Different triangle sizes", NwcClashTestType.Hard);
+
+        NwcClashDetector.Run(doc, test);
+
+        // (99999999, 0.5, 0) lies strictly inside both triangles.
+        Assert.Single(test.Results);
+    }
+
+    [Theory]
     [InlineData(0.001, 0.008, false)]
     [InlineData(1, 0.008, false)]
     [InlineData(1000, 0.008, false)]

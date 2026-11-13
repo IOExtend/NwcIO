@@ -39,14 +39,22 @@ internal static class NwcTriangleIntersection
             Math.Max(Vector3d.Dot(f1, f1), Math.Max(Vector3d.Dot(f2, f2), Vector3d.Dot(u2 - u1, u2 - u1)))));
         var distanceTolerance = Epsilon * size;
 
+        // Unit normals make this parallelism test dimensionless.
+        var d = Vector3d.Cross(n1, n2);
+        double maxD = Math.Max(Math.Abs(d.X), Math.Max(Math.Abs(d.Y), Math.Abs(d.Z)));
+
         // Distances of triangle U to plane 1
         var du0 = Vector3d.Dot(n1, u0 - v0);
         var du1 = Vector3d.Dot(n1, u1 - v0);
         var du2 = Vector3d.Dot(n1, u2 - v0);
 
-        if (Math.Abs(du0) < distanceTolerance) du0 = 0.0;
-        if (Math.Abs(du1) < distanceTolerance) du1 = 0.0;
-        if (Math.Abs(du2) < distanceTolerance) du2 = 0.0;
+        // Preserve signed distances for non-parallel planes so their true intervals survive.
+        if (maxD < Epsilon)
+        {
+            if (Math.Abs(du0) < distanceTolerance) du0 = 0.0;
+            if (Math.Abs(du1) < distanceTolerance) du1 = 0.0;
+            if (Math.Abs(du2) < distanceTolerance) du2 = 0.0;
+        }
 
         double du0du1 = du0 * du1;
         double du0du2 = du0 * du2;
@@ -58,18 +66,18 @@ internal static class NwcTriangleIntersection
         var dv1 = Vector3d.Dot(n2, v1 - u0);
         var dv2 = Vector3d.Dot(n2, v2 - u0);
 
-        if (Math.Abs(dv0) < distanceTolerance) dv0 = 0.0;
-        if (Math.Abs(dv1) < distanceTolerance) dv1 = 0.0;
-        if (Math.Abs(dv2) < distanceTolerance) dv2 = 0.0;
+        if (maxD < Epsilon)
+        {
+            if (Math.Abs(dv0) < distanceTolerance) dv0 = 0.0;
+            if (Math.Abs(dv1) < distanceTolerance) dv1 = 0.0;
+            if (Math.Abs(dv2) < distanceTolerance) dv2 = 0.0;
+        }
 
         double dv0dv1 = dv0 * dv1;
         double dv0dv2 = dv0 * dv2;
 
         if (dv0dv1 > 0.0 && dv0dv2 > 0.0) return false; // Same side of plane 2
 
-        // Unit normals make this parallelism test dimensionless.
-        var d = Vector3d.Cross(n1, n2);
-        double maxD = Math.Max(Math.Abs(d.X), Math.Max(Math.Abs(d.Y), Math.Abs(d.Z)));
         if (maxD < Epsilon)
         {
             if (du0 != 0.0 || du1 != 0.0 || du2 != 0.0 ||
@@ -160,7 +168,7 @@ internal static class NwcTriangleIntersection
         out double t0, out double t1,
         out Vector3d p0, out Vector3d p1)
     {
-        // Distances have already been snapped using the relative plane tolerance.
+        // Non-parallel planes use their original signed distances.
         if (dadb > 0.0)
         {
             // c is on the other side
