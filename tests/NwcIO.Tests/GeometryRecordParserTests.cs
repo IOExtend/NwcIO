@@ -56,6 +56,27 @@ public class GeometryRecordParserTests
         return stream.ToArray();
     }
 
+    // R1 with the identity normal form pal = p1 = 4 and no NTOK: R1[0..88) + pal 4 + four 16-bit entries (0, 0, 32767) + R1[96..120) + pad (144 bytes)
+    private static byte[] BuildR1IdentityNormals() =>
+        [.. FormatVectors.R1[..88], .. Words([4, 0, 0x7FFF0000, 0x00007FFF, 0, 0x7FFF0000, 0x00007FFF]), .. FormatVectors.R1[96..], 0, 0, 0, 0];
+
+    // R3 with the identity colour form cpal = p1 = 6 and no CTOK: R3[0..92) + cpal 6 + six zero entries + R3[104..120) (136 bytes)
+    private static byte[] BuildR3IdentityColours() => [.. FormatVectors.R3[..92], .. Words([6]), .. new byte[24], .. FormatVectors.R3[104..]];
+
+    // R1 + a colour slot after its normals: R1[0..96) + i32 103, 58, 5634, -4, cpal 1; one entry; CTOK 00 82 + pad; R1[100..120)
+    private static byte[] BuildR1WithColours() =>
+        [.. FormatVectors.R1[..96], .. Words([103, 58, 5634, 0xFFFFFFFC, 1, 0x33221100, 0x00008200]), .. FormatVectors.R1[100..]];
+
+    // R3 + a raw UV slot: R3[0..68) + i32 102, 61, n 6, fc 12; 12 x f32 0; R3[72..76) (no normals); colour id 103; R3[80..120)
+    private static byte[] BuildR3WithUv() =>
+        [.. FormatVectors.R3[..68], .. Words([102, 61, 6, 12]), .. new byte[48], .. FormatVectors.R3[72..76], .. Words([103]), .. FormatVectors.R3[80..]];
+
+    private static void AssertRule(string rule, byte[] record)
+    {
+        var ex = Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
+        Assert.StartsWith(rule + " at +", ex.Message, StringComparison.Ordinal);
+    }
+
     private static byte[] Words(uint[] words)
     {
         var data = new byte[4 * words.Length];
@@ -136,12 +157,13 @@ public class GeometryRecordParserTests
 
     // R1q header: w at +100, m at +104 (quantised UV, docs/format-notes.md §2.6)
     [Theory]
-    [InlineData(100, "08000000")] // bv = 0
-    [InlineData(100, "08080100")] // w >> 16 != 0
-    [InlineData(104, "00000000")] // m = 0
-    [InlineData(104, "05000000")] // m > p1
-    public void Parse_QuantisedUvHeaderDefect_Throws(int offset, string bytes)
-        => Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(FormatVectors.Patched(BuildR1q(), offset, Convert.FromHexString(bytes)), 16));
+    [InlineData(100, "08000000", "UV bit widths are not two non-zero bytes")] // bv = 0
+    [InlineData(100, "00080000", "UV bit widths are not two non-zero bytes")] // bu = 0
+    [InlineData(100, "08080100", "UV bit widths are not two non-zero bytes")] // w >> 16 != 0
+    [InlineData(104, "00000000", "UV value count is not in 1..p1")]           // m = 0
+    [InlineData(104, "05000000", "UV value count is not in 1..p1")]           // m > p1
+    public void Parse_QuantisedUvHeaderDefect_Throws(int offset, string bytes, string rule)
+        => AssertRule(rule, FormatVectors.Patched(BuildR1q(), offset, Convert.FromHexString(bytes)));
 
     // Triangles with S > p1 (docs/format-notes.md §2.6): R1 with S = 4 at +116, token 03 (-> [0,1,2,3]) and 7 zero pad bytes (128 bytes)
     [Fact]
@@ -163,59 +185,69 @@ public class GeometryRecordParserTests
 
     // Mutation table: (vector, byte offset, new little-endian bytes as hex)
     [Theory]
-    [InlineData("R1", 92, "D6")]
-    [InlineData("R1", 92, "C0")]                // undefined NTOK lead
-    [InlineData("R1", 112, "01000040")]         // unused packed bit
-    [InlineData("R1", 76, "67000000")]          // N id 103: id order
-    [InlineData("R1", 4, "60000000")]           // class 96
-    [InlineData("R1", -1, "0000000000000000")]  // -1 = append: end != TOC length
-    [InlineData("R2", 122, "01")]               // non-zero pad4
-    [InlineData("R2", 84, "D5")]                // axis code outside N
-    [InlineData("R2", 150, "47")]               // back-reference d=7 > n=4
-    [InlineData("R3", 63, "03")]                // F0 literal >= next
-    [InlineData("R3", 84, "03160000")]          // colour flag 5635
-    public void Parse_Mutation_Throws(string vector, int offset, string bytes)
-    {
-        var record = FormatVectors.Patched(Vector(vector), offset, Convert.FromHexString(bytes));
-        Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
-    }
+    [InlineData("R1", 92, "D6", "lead byte is undefined")]                              // axis lead past D5
+    [InlineData("R1", 92, "C0", "lead byte is undefined")]                              // undefined NTOK lead
+    [InlineData("R1", 112, "01000040", "unused packed bit is set")]                     // unused packed bit
+    [InlineData("R1", 76, "67000000", "slot id is out of order")]                       // N id 103: id order
+    [InlineData("R1", 4, "60000000", "class is not 94 or 95")]                          // class 96
+    [InlineData("R1", -1, "0000000000000000", "record does not end at its TOC length")] // -1 = append: end != TOC length
+    [InlineData("R2", 122, "01", "pad byte is not zero")]                               // non-zero pad4
+    [InlineData("R2", 84, "D5", "lead byte is undefined")]                              // axis code outside N
+    [InlineData("R2", 150, "47", "back-reference distance is out of range")]            // back-reference d=7 > n=4
+    [InlineData("R3", 63, "03", "literal is not below the next fresh value")]           // F0 literal >= next
+    [InlineData("R3", 84, "03160000", "colour flag is not 5634")]                       // colour flag 5635
+    public void Parse_Mutation_Throws(string vector, int offset, string bytes, string rule)
+        => AssertRule(rule, FormatVectors.Patched(Vector(vector), offset, Convert.FromHexString(bytes)));
 
     // Further grammar rules of docs/format-notes.md §2.6, as R1/R2/R3/R4 byte edits; the first six are crafted counts
     [Theory]
-    [InlineData("R1", 16, "FFFFFF7F")]  // p1 = int.MaxValue: above the record length
-    [InlineData("R1", 20, "FEFFFF7F")]  // p2 = 2147483646: positions past the end
-    [InlineData("R2", 144, "FFFFFF7F")] // S = int.MaxValue
+    [InlineData("R1", 16, "FFFFFF7F", "render vertex count is above the record length")] // p1 = int.MaxValue
+    [InlineData("R1", 20, "FEFFFF7F", "positions pass the end")]                         // p2 = 2147483646
+    [InlineData("R2", 144, "FFFFFF7F", "triangle index count is above the array limit")] // S = int.MaxValue
     // P L = [716,000,000] (31 bits), S = 716,000,000: 3 * (S - 2) passes Array.MaxLength
     [InlineData("R1", 100, "010000001F0000000100000000965A55004BAD2A", "triangle index count is above the array limit")]
     // Density cap: counts above the record length that the 64 x remaining-bytes token bound still allows
     [InlineData("R1", 16, "C8000000", "render vertex count is above the record length")] // p1 = 200 > 120
     [InlineData("R2", 144, "C8000000", "corner count is above the record length")]       // S = 200 > 152
-    [InlineData("R1", 84, "FDFFFFFF")]  // N count -3 != -p1
-    [InlineData("R3", 88, "FBFFFFFF")]  // C count -5 != -p1
-    [InlineData("R1", 104, "20000000")] // P bits = 32
-    [InlineData("R3", 116, "00000043")] // class 95 L = [4,3]: ΣL != p1
-    [InlineData("R3", 116, "00000041")] // class 95 L = [4,1]: L < 2
-    [InlineData("R4", 84, "03000000")]  // raw UV fc odd
-    [InlineData("R4", 84, "00000000")]  // raw UV fc = 0
-    [InlineData("R1", 20, "0D000000")]  // p2 % 3 != 0
-    [InlineData("R1", 16, "03000000")]  // p1 < npos
-    [InlineData("R1", 16, "FCFFFFFF")]  // negative p1 (quantised positions: never seen)
-    [InlineData("R1", 112, "00000020")] // L = [2] < 3 for class 94
-    [InlineData("R1", 112, "00000050")] // L = [5]: ΣL != corner count
-    [InlineData("R1", 108, "02000000")] // second P count differs
-    [InlineData("R1", 104, "00000000")] // P bits = 0
-    [InlineData("R1", 116, "FFFFFFFF")] // S < 0
-    [InlineData("R1", 4, "5F000000")]   // class 95 with an N slot: slot set
-    [InlineData("R4", 80, "05000000")]  // UV count neither p1 nor -p1
-    [InlineData("R3", 92, "00000000")]  // colour palette size 0
-    public void Parse_GrammarViolation_Throws(string vector, int offset, string bytes, string? rule = null)
+    [InlineData("R1", 84, "FDFFFFFF", "normal count is not -p1")]                              // N count -3 != -p1
+    [InlineData("R3", 88, "FBFFFFFF", "colour count is not -p1")]                              // C count -5 != -p1
+    [InlineData("R1", 104, "20000000", "primitive length width is not in 1..31")]              // P bits = 32
+    [InlineData("R3", 116, "00000043", "primitive lengths do not sum to p1")]                  // class 95 L = [4,3]: ΣL != p1
+    [InlineData("R3", 116, "00000041", "primitive length is too short")]                       // class 95 L = [4,1]: L < 2
+    [InlineData("R4", 84, "03000000", "UV float count is not positive and even")]              // raw UV fc odd
+    [InlineData("R4", 84, "00000000", "UV float count is not positive and even")]              // raw UV fc = 0
+    [InlineData("R1", 20, "0D000000", "position float count is not a positive multiple of 3")] // p2 % 3 != 0
+    [InlineData("R1", 16, "03000000", "render vertex count is below the position count")]      // p1 < npos
+    [InlineData("R1", 16, "FCFFFFFF", "render vertex count is not positive")]                  // negative p1 (quantised positions: never seen)
+    [InlineData("R1", 112, "00000020", "primitive length is too short")]                       // L = [2] < 3 for class 94
+    [InlineData("R1", 112, "00000050", "primitive lengths do not sum to the corner count")]    // L = [5]: ΣL != corner count
+    [InlineData("R1", 108, "02000000", "second primitive count differs")]                      // second P count differs
+    [InlineData("R1", 104, "00000000", "primitive length width is not in 1..31")]              // P bits = 0
+    [InlineData("R1", 116, "FFFFFFFF", "corner count is negative")]                            // S < 0
+    [InlineData("R1", 4, "5F000000", "slot set does not match the class")]                     // class 95 with an N slot: slot set
+    [InlineData("R4", 80, "05000000", "UV count is neither p1 nor -p1")]                       // UV count neither p1 nor -p1
+    [InlineData("R3", 92, "00000000", "colour palette size is not positive")]                  // colour palette size 0
+    public void Parse_GrammarViolation_Throws(string vector, int offset, string bytes, string rule)
+        => AssertRule(rule, FormatVectors.Patched(Vector(vector), offset, Convert.FromHexString(bytes)));
+
+    // Slot sets the class forbids, each slot otherwise well formed (docs/format-notes.md §2.6)
+    [Theory]
+    [InlineData("trianglesWithColour")] // R1 + a colour slot after its normals
+    [InlineData("linesWithUv")]         // R3 + a raw UV slot before its colours
+    public void Parse_SlotSetAgainstClass_Throws(string variant)
+        => AssertRule("slot set does not match the class", variant == "trianglesWithColour" ? BuildR1WithColours() : BuildR3WithUv());
+
+    [Fact]
+    public void Parse_IdentityNormalPalette_DecodesAsR1() => AssertR1(GeometryRecordParser.Parse(BuildR1IdentityNormals(), 16));
+
+    [Fact]
+    public void Parse_IdentityColourPalette_DecodesAsR3()
     {
-        var record = FormatVectors.Patched(Vector(vector), offset, Convert.FromHexString(bytes));
-        var ex = Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
-        if (rule is not null)
-        {
-            Assert.StartsWith(rule, ex.Message, StringComparison.Ordinal);
-        }
+        var r3 = GeometryRecordParser.Parse(FormatVectors.R3, 16);
+        var g = GeometryRecordParser.Parse(BuildR3IdentityColours(), 16);
+        Assert.Equal(r3.Vertices, g.Vertices);
+        Assert.Equal(r3.LineIndices, g.LineIndices);
+        Assert.Null(g.Normals);
     }
 
     [Theory]
@@ -257,26 +289,27 @@ public class GeometryRecordParserTests
     }
 
     [Theory]
-    [InlineData("D0D1D5", 3, 0, false)]
-    [InlineData("0040", 2, 1, false)]
-    [InlineData("80", 1, 0, false)]
-    [InlineData("01", 1, 2, false)]
-    [InlineData("00", 1, 2, false)]
-    [InlineData("00F1", 2, 1, true)]
-    [InlineData("00FF", 2, 1, true)]
-    [InlineData("00C0", 2, 1, true)]
-    [InlineData("00DF", 2, 1, true)]
-    [InlineData("00D6", 2, 1, true)]
-    [InlineData("0081", 2, 1, false)]   // repeat passes count
-    [InlineData("00E000", 2, 1, false)] // E form d = 0
-    public void DecodeTokens_Invalid_Throws(string hex, int count, int fresh, bool axis)
+    [InlineData("D0D1D5", 3, 0, false, "lead byte is undefined at +0")]                  // axis codes where none are allowed
+    [InlineData("0040", 2, 1, false, "back-reference distance is out of range at +1")]   // 40: d = 0
+    [InlineData("80", 1, 0, false, "repeat has no previous value at +0")]
+    [InlineData("01", 1, 2, false, "token passes the count at +0")]
+    [InlineData("00", 1, 2, false, "tokens do not introduce exactly the fresh values at +1")]
+    [InlineData("00F1", 2, 1, true, "lead byte is undefined at +1")]
+    [InlineData("00FF", 2, 1, true, "lead byte is undefined at +1")]
+    [InlineData("00C0", 2, 1, true, "lead byte is undefined at +1")]
+    [InlineData("00DF", 2, 1, true, "lead byte is undefined at +1")]
+    [InlineData("00D6", 2, 1, true, "lead byte is undefined at +1")]
+    [InlineData("0081", 2, 1, false, "token passes the count at +1")]                    // repeat passes count
+    [InlineData("00E000", 2, 1, false, "back-reference distance is out of range at +1")] // E form d = 0
+    public void DecodeTokens_Invalid_Throws(string hex, int count, int fresh, bool axis, string message)
     {
         var data = Convert.FromHexString(hex);
-        Assert.Throws<InvalidDataException>(() =>
+        var ex = Assert.Throws<InvalidDataException>(() =>
         {
             int pos = 0;
             GeometryRecordParser.DecodeTokens(data, ref pos, count, fresh, axis);
         });
+        Assert.Equal(message, ex.Message);
     }
 
     [Theory]

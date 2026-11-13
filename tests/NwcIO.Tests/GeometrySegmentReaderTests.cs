@@ -42,6 +42,41 @@ public class GeometrySegmentReaderTests
         return toc with { Data = FormatVectors.Patched(toc.Data, offset, bytes) };
     }
 
+    // A class-94 record that parses under both widths (312 bytes): R1's head with p1 = 32 over its four positions, VMAP 03 9B,
+    // no UV, then [102][100][-32][pal = 32] (identity form) and the palette at 96. B = 8 reads 96 palette bytes, then at 192
+    // [0][1][7][1][L = 104][S = 104] and 104 corner tokens at 216: 04, 71 x 80 and the bytes at 288..307. B = 16 reads 192
+    // palette bytes, then at 288 [0][1][6][1][L = 32][S = 0]: one strip over the 32 render vertices.
+    private static byte[] BuildBothWidths()
+    {
+        using var stream = new MemoryStream();
+        using (var w = new BinaryWriter(stream))
+        {
+            w.Write(FormatVectors.R1, 0, 16);
+            w.Write(32);
+            w.Write(FormatVectors.R1, 20, 52);
+            w.Write(new byte[] { 0x03, 0x9B, 0, 0 });
+            foreach (int value in new[] { 0, 102, 100, -32, 32 })
+            {
+                w.Write(value);
+            }
+
+            w.Write(new byte[96]);
+            foreach (int value in new[] { 0, 1, 7, 1, 104 << 25, 104 })
+            {
+                w.Write(value);
+            }
+
+            w.Write((byte)0x04);
+            w.Write(Enumerable.Repeat((byte)0x80, 71).ToArray());
+            foreach (int value in new[] { 0, 1, 6, 1, 32 << 26, 0 })
+            {
+                w.Write(value);
+            }
+        }
+
+        return stream.ToArray();
+    }
+
     [Fact]
     public void Read_ThreeRecordsAcrossTwoChunks_DecodesInOrder()
     {
@@ -55,14 +90,17 @@ public class GeometrySegmentReaderTests
 
     // TOC defects (Toc() emits [3][2][82][119][120][152][120] + 4 zero bytes = 32 bytes)
     [Theory]
-    [InlineData("pad")]        // byte 28 = 1
-    [InlineData("ch")]         // ch = 3
-    [InlineData("size")]       // size[0] = 83
-    [InlineData("sum")]        // len[2] = 128
-    [InlineData("align")]      // lens 124, 148, 120 (sum unchanged, start not 8-aligned)
-    [InlineData("unpadded")]   // TOC of 28 bytes
-    [InlineData("hugeN")]      // N = 0x7FFFFFFF
-    public void Read_TocDefect_Throws(string defect)
+    [InlineData("pad", "pad byte is not zero at +28")]                                    // byte 28 = 1
+    [InlineData("ch", "chunk count does not match the chunk streams at +4")]              // ch = 3
+    [InlineData("size", "chunk size does not match the compressed length at +8")]         // size[0] = 83
+    [InlineData("sum", "record lengths do not sum to the inflated chunk length")]         // len[2] = 128
+    [InlineData("align", "record length is not a positive multiple of 8 at +16")]         // lens 124, 148, 120 (sum unchanged, start not 8-aligned)
+    [InlineData("zeroLength", "record length is not a positive multiple of 8 at +16")]    // len[0] = 0
+    [InlineData("unpadded", "length is not 8 + 4ch + 4N rounded up to 8")]                // TOC of 28 bytes
+    [InlineData("hugeN", "length is not 8 + 4ch + 4N rounded up to 8")]                   // N = 0x7FFFFFFF
+    [InlineData("negativeN", "record count is negative at +0")]                           // N = -1
+    [InlineData("short", "header passes the end at +0")]                                  // TOC of 4 bytes
+    public void Read_TocDefect_Throws(string defect, string rule)
     {
         byte[] block = [.. FormatVectors.R1, .. FormatVectors.R2, .. FormatVectors.R3];
         var good = Toc(3, [82, 119], [120, 152, 120], padTo8: true);
@@ -73,13 +111,16 @@ public class GeometrySegmentReaderTests
             "size" => Patched(good, 8, 83),
             "sum" => Patched(good, 24, 128),
             "align" => Toc(3, [82, 119], [124, 148, 120], padTo8: true),
+            "zeroLength" => Patched(good, 16, 0),
             "unpadded" => Toc(3, [82, 119], [120, 152, 120], padTo8: false),
             "hugeN" => Patched(good, 0, 0x7FFFFFFF),
+            "negativeN" => Patched(good, 0, -1),
+            "short" => Chunk(good.Data[..4], 4),
             _ => throw new ArgumentOutOfRangeException(nameof(defect)),
         };
 
         var ex = Assert.Throws<InvalidDataException>(() => GeometrySegmentReader.Read([Chunk(block[..200], 82), Chunk(block[200..], 119)], toc));
-        Assert.StartsWith("LcOpNwdGeometry TOC", ex.Message);
+        Assert.Equal("LcOpNwdGeometry TOC: " + rule, ex.Message);
     }
 
     [Fact]
@@ -94,6 +135,36 @@ public class GeometrySegmentReaderTests
     {
         var ex = Assert.Throws<InvalidDataException>(() => GeometrySegmentReader.Read([Chunk([.. FormatVectors.R2, .. FormatVectors.R5], 1)], Toc(2, [1], [152, 128], padTo8: true)));
         Assert.StartsWith("LcOpNwdGeometry record 1: ", ex.Message);   // 16 fails at 0-based record 1, 8 at record 0
+    }
+
+    [Fact]
+    public void Read_BothWidthsFailingAtOneRecord_ReportsSixteenBits()
+    {
+        // R5 + 8 zero bytes: B = 16 fails in its palette, B = 8 at its end
+        byte[] record = [.. FormatVectors.R5, .. new byte[8]];
+        var ex = Assert.Throws<InvalidDataException>(() => GeometrySegmentReader.Read([Chunk(record, 1)], Toc(1, [1], [136], padTo8: true)));
+        Assert.Equal("LcOpNwdGeometry record 0: unused packed bit is set at +96", ex.Message);
+    }
+
+    [Fact]
+    public void Read_RecordValidUnderBothWidths_DecodesSixteenBits()
+    {
+        var record = BuildBothWidths();
+        Assert.Equal(3 * 102, GeometryRecordParser.Parse(record, 8).Indices.Length);
+        var decoded = GeometrySegmentReader.Read([Chunk(record, 1)], Toc(1, [1], [record.Length], padTo8: true)).Single();
+        Assert.Equal(3 * 30, decoded.Indices.Length);
+        Assert.Equal(GeometryRecordParser.Parse(record, 16).Normals, decoded.Normals);
+    }
+
+    [Fact]
+    public void Read_EmptyChunks_AreSkipped()
+    {
+        var first = GeometrySegmentReader.Read([Chunk([], 1), Chunk(FormatVectors.R1, 2)], Toc(1, [1, 2], [120], padTo8: true));
+        Assert.Equal([0, 1, 2, 2, 1, 3], first.Single().Indices);
+
+        var r2 = FormatVectors.R2;
+        var crossing = GeometrySegmentReader.Read([Chunk(r2[..50], 1), Chunk([], 2), Chunk(r2[50..], 3)], Toc(1, [1, 2, 3], [152], padTo8: true));
+        Assert.Equal([0, 1, 2, 2, 1, 3, 4, 5, 6], crossing.Single().Indices);
     }
 
     [Fact]
