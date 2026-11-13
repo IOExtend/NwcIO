@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using NwcIO.Internal.Container;
 using NwcIO.Internal.Parsing;
 using NwcIO.Model;
@@ -7,6 +8,33 @@ namespace NwcIO.Tests;
 
 public class WriterTests
 {
+    [Fact]
+    public void Document_TocShapedGuidTable_ReopensWithGuids()
+    {
+        var guids = new[]
+        {
+            Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"),
+            Guid.Parse("ffeeddcc-bbaa-9988-7766-554433221100"),
+        };
+        var data = new byte[40];
+        BinaryPrimitives.WriteInt32LittleEndian(data, 6);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 2);
+        guids[0].TryWriteBytes(data.AsSpan(8, 16));
+        guids[1].TryWriteBytes(data.AsSpan(24, 16));
+        var bytes = NwcContainerWriter.Write([data]);
+        var container = NwcContainerReader.Read(bytes);
+        var stream = Assert.Single(container.Streams);
+
+        Assert.True(GuidTableParser.TryParse(stream, out var parsedGuids));
+        Assert.Equal(guids, parsedGuids);
+
+        using var ms = new MemoryStream(bytes);
+        var reopened = NwcDocument.Open(ms);
+
+        Assert.Equal(guids, reopened.Guids);
+        Assert.Equal(NwcStreamKind.Guids, StreamClassifier.Classify(stream));
+    }
+
     [Theory]
     [InlineData(3, 3, false)]
     [InlineData(3, 3, true)]

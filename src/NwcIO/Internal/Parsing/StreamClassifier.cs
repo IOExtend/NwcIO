@@ -83,7 +83,20 @@ public static class StreamClassifier
                 var expected = 8 + 4 * chunkCount + 4 * recCount;
                 if (data.Length == expected || data.Length == expected + 4)
                 {
-                    return NwcStreamKind.Toc;
+                    // GUID bytes can also match the header; catalog sizes and lengths must be positive.
+                    var validEntries = true;
+                    for (var offset = 8; offset < expected; offset += 4)
+                    {
+                        if (ReadInt32(data, offset) <= 0)
+                        {
+                            validEntries = false;
+                            break;
+                        }
+                    }
+                    if (validEntries)
+                    {
+                        return NwcStreamKind.Toc;
+                    }
                 }
             }
         }
