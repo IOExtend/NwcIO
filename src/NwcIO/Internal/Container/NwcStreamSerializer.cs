@@ -208,9 +208,14 @@ internal static class NwcStreamSerializer
         byte[] pathBytes = Encoding.UTF8.GetBytes(path);
         w.Write(pathBytes.Length);
         w.Write(pathBytes);
+        w.Write(new byte[(4 - (pathBytes.Length % 4)) % 4]);
 
-        // [int32 -1]
+        // [int32 -1], then the timestamp aligned to 8 from the stream start
         w.Write(-1);
+        if (ms.Position % 8 == 4)
+        {
+            w.Write(0);
+        }
 
         // [int64 timestamp in unix seconds]
         // A Local value (DateTime.Now, File.GetLastWriteTime) is converted; an Unspecified one is taken as UTC
@@ -229,6 +234,7 @@ internal static class NwcStreamSerializer
         byte[] pluginBytes = Encoding.UTF8.GetBytes(plugin);
         w.Write(pluginBytes.Length);
         w.Write(pluginBytes);
+        w.Write(new byte[(4 - (pluginBytes.Length % 4)) % 4]);
 
         // Options
         if (fileInfo.Options.Count > 0)

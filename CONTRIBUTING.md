@@ -31,6 +31,17 @@ Push a tag matching the package version, such as `v0.1.0`, to trigger the `relea
 The workflow builds and tests the solution, packs release packages and symbols, generates archives with checksums, publishes the GitHub Release, and publishes packages to NuGet.org via Trusted Publishing (GitHub Actions OIDC).
 The NuGet policy on NuGet.org must name this repository (`IOExtend/NwcIO`), workflow `release.yml`, publisher `GitHubActions`, package pattern `NwcIO*`, and owner `mahach`.
 
+## Scene adapter
+
+`src/NwcIO.Scene` converts NwcIO models into `IOScene` documents and uses only the public API of `NwcIO`; the `NwcIO`
+package itself keeps no dependencies. `IOScene` is referenced with the range `[0.1.0, 0.2.0-0.0)`, and restore takes the
+lowest version in it, 0.1.0 from NuGet.org. To build against an `IOScene` version that is not on NuGet.org yet, start
+the range in `Directory.Packages.props` at that version (for a new minor, move the upper bound too, for example
+`[0.2.0-preview.1, 0.3.0-0.0)`) and restore from a local folder of packages:
+`dotnet build NwcIO.slnx -p:RestoreAdditionalProjectSources=<folder>`. Changing the `SceneModel.Key`, `SourceId` or
+`IfcGuid` the adapter writes, its `nwc:` key format, or the value form (`Text`, `Kind`, `Unit`) it writes under a key
+fails the golden identity test and is a breaking release.
+
 ## Licensing Contributions
 
 All contributions are licensed under the [MIT License](LICENSE). By submitting a pull request, you confirm that you have the right to contribute your code under that license.

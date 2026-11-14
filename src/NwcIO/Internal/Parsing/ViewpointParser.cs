@@ -95,6 +95,7 @@ internal static class ViewpointParser
 
                         results.Add(new NwcSavedViewpoint
                         {
+                            Id = null,
                             Name = name,
                             Camera = camera,
                             Comments = comments,

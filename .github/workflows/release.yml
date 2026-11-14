@@ -27,6 +27,17 @@ jobs:
           if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v") -and $env:GITHUB_REF_NAME -cne "v$($version.Trim())") {
             throw "The release tag must match the package version v$($version.Trim())."
           }
+      # Before anything is published: a commit without a changelog section for the version fails here.
+      - name: Extract release notes
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { $env:GITHUB_REF_NAME.Substring(1) } else { (dotnet msbuild src/NwcIO/NwcIO.csproj -getProperty:Version -nologo).Trim() }
+          $changelog = Get-Content -LiteralPath CHANGELOG.md -Encoding utf8
+          $start = [array]::FindIndex($changelog, [Predicate[string]] { param($line) $line.StartsWith("## [$version]") })
+          if ($start -lt 0) { throw "CHANGELOG.md has no entry for $version" }
+          $notes = @()
+          for ($i = $start + 1; $i -lt $changelog.Count -and -not $changelog[$i].StartsWith('## ['); $i++) { $notes += $changelog[$i] }
+          $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
       - run: dotnet restore NwcIO.slnx
       - run: dotnet build NwcIO.slnx -c Release --no-restore
       - run: dotnet test NwcIO.slnx -c Release --no-build
@@ -37,31 +48,8 @@ jobs:
         with:
           name: packages
           path: artifacts/*
-      - name: Create or update release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $version = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { $env:GITHUB_REF_NAME.Substring(1) } else { (dotnet msbuild src/NwcIO/NwcIO.csproj -getProperty:Version -nologo).Trim() }
-          $changelog = Get-Content -LiteralPath CHANGELOG.md -Encoding utf8
-          $start = [array]::FindIndex($changelog, [Predicate[string]] { param($line) $line.StartsWith("## [$version]") })
-          if ($start -lt 0) { throw "CHANGELOG.md has no entry for $version" }
-          $notes = @()
-          for ($i = $start + 1; $i -lt $changelog.Count -and -not $changelog[$i].StartsWith('## ['); $i++) { $notes += $changelog[$i] }
-          $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
-          $files = @(Get-ChildItem artifacts -File | ForEach-Object { $_.FullName })
-          $tagName = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { $env:GITHUB_REF_NAME } else { "v$version" }
-          
-          # Check if release exists
-          $exists = gh release view $tagName 2>&1
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Updating existing release $tagName..."
-            gh release edit $tagName --notes-file release-notes.md
-            gh release upload $tagName @files --clobber
-          } else {
-            Write-Host "Creating release $tagName..."
-            gh release create $tagName --title "NwcIO $tagName" --notes-file release-notes.md @files
-          }
+      # The push comes before the GitHub release: a refused first publication of a package id can be fixed and the
+      # job run again, because --skip-duplicate makes the push repeatable.
       # Trusted publishing: the NuGet policy for this repository and workflow file exchanges the GitHub OIDC token for a short-lived key.
       - uses: NuGet/login@v1
         id: nuget-login
@@ -73,4 +61,25 @@ jobs:
           foreach ($package in Get-ChildItem artifacts -Filter *.nupkg) {
             dotnet nuget push $package.FullName --api-key '${{ steps.nuget-login.outputs.NUGET_API_KEY }}' --source https://api.nuget.org/v3/index.json --skip-duplicate
             if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed for $($package.Name) with exit code $LASTEXITCODE" }
+          }
+      - name: Create or update release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { $env:GITHUB_REF_NAME.Substring(1) } else { (dotnet msbuild src/NwcIO/NwcIO.csproj -getProperty:Version -nologo).Trim() }
+          $files = @(Get-ChildItem artifacts -File | ForEach-Object { $_.FullName })
+          $tagName = if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { $env:GITHUB_REF_NAME } else { "v$version" }
+          # A tag with a hyphen is a prerelease.
+          $flags = @()
+          if ($tagName.Contains('-')) { $flags += '--prerelease' }
+
+          $exists = gh release view $tagName 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Updating existing release $tagName..."
+            gh release edit $tagName --notes-file release-notes.md @flags
+            gh release upload $tagName @files --clobber
+          } else {
+            Write-Host "Creating release $tagName..."
+            gh release create $tagName --title "NwcIO $tagName" --notes-file release-notes.md @flags @files
           }

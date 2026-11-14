@@ -16,7 +16,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization 
 
 ## What it does
 
-- Reads scene hierarchy, geometry meshes, transforms, GUID tables, and property categories. Materials are assigned by heuristics on material names and mesh names and sizes, not decoded from the file, and element GUIDs are not linked to nodes for Navisworks model files read through their DbCache directory.
+- Reads scene hierarchy, geometry meshes, transforms, GUID tables, and property categories. Materials are decoded from the file on the strict path (name, colour, alpha) and assigned by heuristics only for files not read through their DbCache directory. Element nodes of model files carry the element's export GUID and IFC GlobalId.
 - Exports to standard Industry Foundation Classes (IFC2X3 & compact IFC4), binary glTF 2.0 (`.glb`), Wavefront OBJ, and structured JSON.
 - Coordinates multi-model federated assemblies with 3D geometric clash detection, proximity clustering, and clash matrix execution.
 - Manages saved viewpoints, dynamic section planes, redlines, selection sets, and search sets with Navisworks XML and buildingSMART BCF 2.1 exchange.
@@ -140,21 +140,23 @@ NwcClashBcfExporter.Save("Clashes.bcfzip", test);
 
 See the [public API](https://github.com/IOExtend/NwcIO/blob/main/docs/public-api.md) for the supported surface and [getting started guide](https://github.com/IOExtend/NwcIO/blob/main/docs/getting-started.md) for detailed workflows.
 
+`NwcIO.Scene` (a separate package released with `NwcIO`, from `IOScene` 0.1.0 on) converts Navisworks models into `IOScene` scene documents for viewers and coordination tools; see the [scene adapter](https://github.com/IOExtend/NwcIO/blob/main/docs/scene.md) page for usage and limits.
+
 ## Documentation
 
 The documentation site with API references and guides is at <https://ioextend.github.io/NwcIO/>. [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/IOExtend/NwcIO) offers an automatically generated overview of the repository.
 
 ## Supported files
 
-Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisworks Federated (`.nwf`) files. Tested against models saved across Navisworks 2016 through 2026. Scene trees of `.nwd` files with partition nodes are not decoded yet: open them with `BuildSceneTree = false`.
+Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisworks Federated (`.nwf`) files. Tested against models saved across Navisworks 2016 through 2026. Scene trees of `.nwd` files with partition nodes are not decoded yet, and linked Revit models (a tree that places one element under two parents) are not supported: open both with `BuildSceneTree = false`.
 
 ## Limitations
 
-- Version 0.11.0 is a preview. The API can evolve before 1.0.
+- Version 0.12.0 is a preview. The API can evolve before 1.0.
 - Geometry extraction decodes triangle strips, polylines and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported.
-- `.nwd` scene trees with partition nodes are not decoded yet: open with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference `.nwd` files.
+- `.nwd` scene trees with partition nodes are not decoded yet, and linked Revit models (a tree that places one element under two parents) are not supported: open them with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference such files.
 - The `.nwc` writer stores vertex positions and rotation/translation; it rejects scaled transforms, line meshes and meshes whose triangles differ from the single strip the reader rebuilds over the positions.
-- The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property references, and at most one render vertex or corner per geometry-record byte. Files beyond these limits fail with `InvalidDataException`.
+- The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property and property-tab references (properties from `LcOaPartitionProps` count toward the property cap), and at most one render vertex or corner per geometry-record byte. Files beyond these limits fail with `InvalidDataException`.
 - Writing native `.nwd` files is not supported (export targets native `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
 
 ## Scope and frozen features
@@ -166,7 +168,7 @@ NwcIO reads and writes its own format. These extras are frozen: they receive bug
 - Measure, grids, revision diff, and BCF.
 - TimeLiner schedule import and export, selection and search sets, appearance profiler, mesh clipper, and Navisworks XML exchange. These stay in NwcIO.
 
-Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through a planned `NwcIO.Scene` adapter over the shared `IOScene` model, which is also planned. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. None of these packages is published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
+Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through the `NwcIO.Scene` adapter over the shared `IOScene` model. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. `IOCoord` and `IOScene.Formats` are not published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
 
 ## Build from source and tests
 

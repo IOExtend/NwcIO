@@ -4,8 +4,8 @@ namespace NwcIO.Internal.Parsing;
 
 /// <summary>
 /// One class-13 fragment (docs/format-notes.md §2.4): <paramref name="Seq"/> is its leaf's expanded preorder index, <paramref name="Record"/>
-/// the 1-based geometry record (class-93 <c>rec</c>), <paramref name="PrimitiveCount"/> the fragment int <c>a</c>, and
-/// the pose places the record's positions as <c>Scale * R(Rotation) * v + Translation</c>.
+/// the 1-based geometry record (class-93 <c>rec</c>), <paramref name="PrimitiveCount"/> the fragment int <c>a</c>, <paramref name="Look"/>
+/// the colour of its appearance, and the pose places the record's positions as <c>Scale * R(Rotation) * v + Translation</c>.
 /// </summary>
 internal readonly record struct Fragment(
     int Seq,
@@ -14,15 +14,16 @@ internal readonly record struct Fragment(
     Vector3d Translation,
     Quaterniond Rotation,
     double Scale,
-    BoundingBox3d Bounds);
+    BoundingBox3d Bounds,
+    FragmentLook Look);
+
+/// <summary>The class-54 diffuse colour (floats 3, 4, 5) and transparency (float 13) of a fragment's appearance (docs/format-notes.md §2.4).</summary>
+internal readonly record struct FragmentLook(float R, float G, float B, float Transparency);
 
 /// <summary>Strict reader of the <c>LcOpNwdFragments</c> object graph (docs/format-notes.md §2.2, §2.4).</summary>
 internal static class FragmentParser
 {
     private const string Segment = "LcOpNwdFragments";
-
-    // Appearance, material and extra bodies are parsed and dropped.
-    private static readonly object Dropped = new();
 
     // Slot families as observed (docs/format-notes.md §2.4).
     private static ReadOnlySpan<int> FragmentClasses => [13];
@@ -82,7 +83,7 @@ internal static class FragmentParser
             _ => throw new InvalidOperationException($"class {classId} has no body reader"),
         };
 
-        // Class 13: [f64 D][a][b][c][seq][ptr pose][ptr appearance][ptr geometry]; D, b, c and the appearance are dropped.
+        // Class 13: [f64 D][a][b][c][seq][ptr pose][ptr appearance][ptr geometry]; D, b and c are dropped.
         private Fragment ReadFragment()
         {
             _reader.ReadDouble();
@@ -93,9 +94,9 @@ internal static class FragmentParser
 
             // A pose is never shared, so it is always a new object.
             var pose = (Pose)_reader.ReadPointer(PoseClasses, _readBody, allowNull: false, allowBackReference: false)!;
-            _reader.ReadPointer(AppearanceClasses, _readBody, allowNull: false);
+            var look = (FragmentLook)_reader.ReadPointer(AppearanceClasses, _readBody, allowNull: false)!;
             var geometry = (GeometryReference)_reader.ReadPointer(GeometryClasses, _readBody, allowNull: false)!;
-            return new Fragment(seq, geometry.Record, primitiveCount, pose.Translation, pose.Rotation, pose.Scale, geometry.Bounds);
+            return new Fragment(seq, geometry.Record, primitiveCount, pose.Translation, pose.Rotation, pose.Scale, geometry.Bounds, look);
         }
 
         // Class 15: [3 f64 t][4 f64 q xyzw]; class 16 adds [f64 s].
@@ -118,28 +119,33 @@ internal static class FragmentParser
             return double.IsFinite(value) ? value : throw _reader.Fail("pose value is not finite");
         }
 
-        // Class 55: [flags][ptr 54], then [ptr 185 or null] when flags & 32.
-        private object ReadAppearance()
+        // Class 55: [flags][ptr 54], then [ptr 185 or null] when flags & 32; the look is its material's, the extra is dropped.
+        private FragmentLook ReadAppearance()
         {
             int flags = _reader.ReadInt32();
-            _reader.ReadPointer(MaterialClasses, _readBody, allowNull: false);
+            var look = (FragmentLook)_reader.ReadPointer(MaterialClasses, _readBody, allowNull: false)!;
             if ((flags & 32) != 0)
             {
                 _reader.ReadPointer(ExtraClasses, _readBody);
             }
 
-            return Dropped;
+            return look;
         }
 
-        // Class 54: 14 x i32.
-        private object ReadMaterial()
+        // Class 54: 14 x f32: ambient 0-2, diffuse 3-5, specular 6-8, emissive 9-11, shininess 12, transparency 13.
+        private FragmentLook ReadMaterial()
         {
-            for (int i = 0; i < 14; i++)
+            Span<float> v = stackalloc float[14];
+            for (int i = 0; i < v.Length; i++)
             {
-                _reader.ReadInt32();
+                v[i] = _reader.ReadSingle();
+                if (!float.IsFinite(v[i]))
+                {
+                    throw _reader.Fail("class-54 value is not finite");
+                }
             }
 
-            return Dropped;
+            return new FragmentLook(v[3], v[4], v[5], v[13]);
         }
 
         // Class 93: [6 f32 bbox: min xyz, max xyz][3 f64 c][f32 f][key][rec]; c, f and key are dropped.

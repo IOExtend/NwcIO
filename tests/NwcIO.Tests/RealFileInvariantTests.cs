@@ -36,6 +36,10 @@ public class RealFileInvariantTests
         public long LeavesWithoutMesh;
         public int MaxDepth;
         public long DistinctRecords;
+        public long Elements;
+        public long Twins;
+        public long Materials;
+        public long PropsTabs;
     }
 
     [RealFixtureFact]
@@ -81,6 +85,7 @@ public class RealFileInvariantTests
         _output.WriteLine($"files {files.Count}, fragments {totals.Fragments}, distinct records {totals.DistinctRecords}");
         _output.WriteLine($"triangles {totals.Triangles}, segments {totals.Segments}, mirrored poses {totals.Mirrored}");
         _output.WriteLine($"leaves without mesh {totals.LeavesWithoutMesh}, max tree depth {totals.MaxDepth}");
+        _output.WriteLine($"elements {totals.Elements}, twins {totals.Twins}, materials {totals.Materials}, property tabs {totals.PropsTabs}");
     }
 
     private static void Check(bool condition, int file, string rule)
@@ -136,6 +141,7 @@ public class RealFileInvariantTests
         Check(doc.DbCache?.Find("LcOpNwdGeometry") is not null, i, "dbcache-geometry-entry");
         Check(doc.RootNode is not null, i, "root-node");
 
+        long elements = 0, twins = 0;
         var stack = new Stack<(NwcNode Node, int Depth)>();
         stack.Push((doc.RootNode!, 1));
         while (stack.Count > 0)
@@ -147,10 +153,39 @@ public class RealFileInvariantTests
                 totals.LeavesWithoutMesh++;
             }
 
+            totals.PropsTabs += node.PropertyTabs.Count;
+            if (node.IsElement)
+            {
+                elements++;
+                Check(node.ElementGuid is not null && node.IfcGlobalId is { Length: 22 }, i, "element-identity");
+                Check(node.PropertyTabs.Any(t => t.InternalName == "LcRevitId"), i, "element-has-id-tab");
+            }
+            else if (node.Element is not null && node.Element.Parent == node.Parent)
+            {
+                twins++;
+            }
+
             foreach (var child in node.Children)
             {
                 stack.Push((child, depth + 1));
             }
+        }
+
+        Check(elements + twins == doc.Guids.Count, i, "element-count-is-guid-table");
+        Check(doc.LengthUnit == NwcLengthUnit.Feet, i, "unit-feet");
+        Check(doc.FileInfo.SourceTimestampUtc != null, i, "timestamp");
+        totals.Elements += elements;
+        totals.Twins += twins;
+        totals.Materials += doc.Materials.Count;
+
+        foreach (var mesh in doc.Meshes)
+        {
+            Check(mesh.GeometryIndex >= 0, i, "geometry-index");
+            Check(mesh.LineIndices.Count > 0
+                ? mesh.LineColors is not null && mesh.LineColors.Count == mesh.Vertices.Count
+                : mesh.LineColors is null, i, "line-colors");
+            Check(mesh.Material is not null, i, "material");
+            Check(mesh.Node?.Element is not null, i, "leaf-in-element");
         }
     }
 

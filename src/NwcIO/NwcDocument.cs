@@ -41,10 +41,17 @@ public sealed class NwcDocument
 
     public NwcFileInfo FileInfo { get; }
 
+    /// <summary>Feet when the cache was written by the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c>; no file names its unit. Computed from <see cref="FileInfo"/>.</summary>
+    public NwcLengthUnit LengthUnit =>
+        FileInfo.LoaderPlugin == "LcNwcLoaderPlugin:lcldrevit" ? NwcLengthUnit.Feet : NwcLengthUnit.Unknown;
+
+    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet, which the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> writes; no file names its unit); null when the unit is unknown.</summary>
+    public double? MetresPerUnit => LengthUnit == NwcLengthUnit.Feet ? 0.3048 : null;
+
     /// <summary>Flat records parsed from the scene-tree/property streams.</summary>
     public IReadOnlyList<NwcPropertyRecord> PropertyRecords { get; }
 
-    /// <summary>GUIDs from the GUID table streams, in file order.</summary>
+    /// <summary>GUIDs from the GUID table streams, in file order; for model files read through their DbCache directory, the <c>LcOpGuidStore</c> table.</summary>
     public IReadOnlyList<Guid> Guids { get; }
 
     /// <summary>3D spatial transformations and bounding boxes parsed from transform streams.</summary>
@@ -53,7 +60,7 @@ public sealed class NwcDocument
     /// <summary>3D polygon meshes extracted from geometry streams and TOC tables.</summary>
     public IReadOnlyList<NwcMesh> Meshes { get; }
 
-    /// <summary>Surface materials, RGBA colors and PBR properties extracted from properties and categories.</summary>
+    /// <summary>Surface materials, RGBA colors and PBR properties: for model files read through their DbCache directory, the materials decoded from the fragments' appearances (none without the scene tree); for other files, materials assigned by heuristics from properties and categories.</summary>
     public IReadOnlyList<NwcMaterial> Materials { get; }
 
     /// <summary>Root of the hierarchical scene graph tree (matching Navisworks selection tree).</summary>
@@ -102,7 +109,7 @@ public sealed class NwcDocument
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
     /// <exception cref="InvalidDataException">The file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
     {
         if (!File.Exists(path))
@@ -118,7 +125,7 @@ public sealed class NwcDocument
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>
     /// <exception cref="InvalidDataException">The stream is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -148,7 +155,7 @@ public sealed class NwcDocument
         }
 
         var guids = new List<Guid>();
-        if (options.ReadGuids)
+        if (options.ReadGuids && segments is null)
         {
             foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.Guids))
             {
@@ -161,13 +168,19 @@ public sealed class NwcDocument
 
         var transforms = new List<NwcTransform>();
         var meshes = new List<NwcMesh>();
+        var materials = new List<NwcMaterial>();
         NwcNode? rootNode = null;
         if (segments is not null)
         {
             var graph = ModelGraphReader.Read(segments, options, rootName);
             transforms.AddRange(graph.Transforms);
             meshes.AddRange(graph.Meshes);
+            materials.AddRange(graph.Materials);
             rootNode = graph.Root;
+            if (options.ReadGuids)
+            {
+                guids.AddRange(graph.Guids);
+            }
         }
         else
         {
@@ -190,8 +203,8 @@ public sealed class NwcDocument
             }
         }
 
-        var materials = new List<NwcMaterial>();
-        if (options.ReadMaterials)
+        // The name and colour heuristics apply only to files not read through their DbCache directory.
+        if (segments is null && options.ReadMaterials)
         {
             materials.AddRange(MaterialParser.Parse(records, meshes, rootNode));
         }

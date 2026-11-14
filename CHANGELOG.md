@@ -1,8 +1,29 @@
 # Changelog
 
-All notable changes to the `NwcIO` library and CLI are documented in this file.
+All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapter are documented in this file.
 
 ## [Unreleased]
+
+## [0.12.0] - 2026-11-14
+
+### Added
+- `NwcLengthUnit`, `NwcDocument.LengthUnit` and `NwcDocument.MetresPerUnit`: feet for caches written by the Revit loader (`LcNwcLoaderPlugin:lcldrevit`), `Unknown` otherwise.
+- `NwcNode.IsElement` and `NwcNode.Element`.
+- `NwcPropertyTab` and `NwcNode.PropertyTabs`; `NwcPropertyRecord.TabInternalName` and `InternalName`.
+- `NwcNode.IfcGlobalId`: the element's IFC GlobalId, the same as `RvtIO.Scene` gives the element from the `.rvt`.
+- `NwcMesh.GeometryIndex` and `NwcMesh.LineColors` (decoded line colour palettes).
+- **`NwcIO.Scene`**: `NwcSceneReader` converts a Navisworks model file or `NwcDocument` into an `IOScene` `SceneDocument` in metres: the selection tree with element GUIDs and IFC GlobalIds, property tabs as sets with `nwc:` keys, shared geometry, file materials and line colours, Revit levels and grid lines. See `docs/scene.md`.
+- **`NwcIO.Scene` NuGet package**: published on the `NwcIO` release tag and depends on exactly the same `NwcIO` version (`[X.Y.Z]`) and on `IOScene` `[0.1.0, 0.2.0-0.0)`; the release fails while it would depend on an `IOScene` preview.
+
+### Changed
+- **Breaking:** The partition header is read with its zero pads after the source path (to 4 bytes) and before the timestamp (to 8 bytes): `NwcFileInfo.SourceTimestampUtc` and `LoaderPlugin` are now read from every Navisworks model file, where 0.11 read them only when the path length was a multiple of 4 and no pad was needed. `NwcWriter` writes the same layout, so a file written by NwcIO 0.11 whose source path needed either pad opens without timestamp, loader plugin and export options (`NwcFileInfo.Options`), and one whose loader plugin name needed a pad (the default `LcOpRevitExport` does) opens without export options.
+- **Breaking:** `NwcNode.ElementGuid` is the element's export GUID on Revit element nodes of the strict path (read from `LcOpGuidStore` by its element index), where 0.11 left it null; diff and set matching by `ElementGuid` now match these elements. On the strict path `NwcDocument.Guids` is the `LcOpGuidStore` table.
+- **Breaking:** Opening a model whose tree places one element under two different parents (a linked Revit model) throws `NotSupportedException` unless `BuildSceneTree` is false; a malformed `LcOpGuidStore` or an element index outside it throws `InvalidDataException`.
+- Property value type 9 is read as a string instead of failing the file.
+- The expanded-property cap (134,217,728) counts each property tab reference as well as the records.
+- **Breaking:** Strict-path node properties include the tabs and element id stored in `LcOaPartitionProps` (about a third of a Revit export's properties), in stored slot order; the element id is a one-property tab named by its key (`LcRevitId`). A file whose null attribute slots and `LcOaPartitionProps` roots or table of contents disagree throws `InvalidDataException`.
+- **Breaking:** On the strict path each mesh's `Material` is decoded from the file (diffuse colour, alpha `1 - transparency`, the name of the nearest class-31 material or `Default`; `Roughness` and `Metallic` keep their defaults) and `NwcDocument.Materials` lists those materials; the name and colour heuristics and the Concrete/Rebar presets apply only to files read without the DbCache directory, so a model file opened with `BuildSceneTree = false` now has no materials (0.11 applied the heuristics; names need the tree). `NwcNode.Material` is null on the strict path. A non-finite value in any of a class-54 material's 14 floats makes a model file fail with `InvalidDataException` whenever meshes or transforms are read, with or without the scene tree and `ReadMaterials` (0.11 skipped those bytes).
+- **Breaking:** `NwcSavedViewpoint.Id` is `Guid?`: null for viewpoints read from a file, which store no id (0.11 gave them a new random GUID on every read), and for Navisworks XML viewpoints without a valid `guid`; viewpoints made in code still get a generated id. BCF export gives a viewpoint without id a new GUID; JSON writes `null`; Navisworks XML omits `guid`. The field of view of a stored viewpoint is still the 60° default.
 
 ## [0.11.0] - 2026-11-14
 

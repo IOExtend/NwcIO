@@ -222,7 +222,7 @@ public static class JsonExporter
             foreach (var vp in document.SavedViewpoints)
             {
                 writer.WriteStartObject();
-                writer.WriteString("id", vp.Id.ToString("D"));
+                writer.WriteString("id", vp.Id?.ToString("D"));
                 writer.WriteString("name", vp.Name);
 
                 writer.WriteStartObject("camera");

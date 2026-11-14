@@ -31,6 +31,17 @@ public sealed class NwcMesh
     /// </summary>
     public IReadOnlyList<int> LineIndices { get; init; } = [];
 
+    /// <summary>
+    /// One colour per entry of <see cref="Vertices"/> for the line meshes of model files; null otherwise.
+    /// Meshes that share a geometry record share the list.
+    /// </summary>
+    public IReadOnlyList<RgbaColor>? LineColors { get; init; }
+
+    /// <summary>
+    /// 0-based index of the geometry record this mesh was read from; -1 for meshes not read from a model file.
+    /// </summary>
+    public int GeometryIndex { get; init; } = -1;
+
     /// <summary>Axis-aligned bounding box of the mesh in local coordinates.</summary>
     public BoundingBox3d? BoundingBox { get; init; }
 

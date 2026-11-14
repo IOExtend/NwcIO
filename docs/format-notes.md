@@ -40,30 +40,49 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Signature**: `[int64 7]` followed by length-prefixed strings.
 - **Fields**:
   - `int64`: marker `7`
-  - `int32 len` + UTF-8 string: full path of originating source document (e.g., `C:\Projects\Building_Structural.rvt`)
-  - `int32 -1`
+  - `int32 len` + UTF-8 string: full path of originating source document (e.g., `C:\Projects\Building_Structural.rvt`), then zero pad to 4
+  - `int32 -1`, then zero pad to 8 from the stream start
   - `int64`: modification timestamp as Unix epoch seconds
   - `int64`: source file size in bytes
-  - `int32 len` + UTF-8 string: loader plugin ID (e.g., `LcNwcLoaderPlugin:lcldrevit`)
+  - `int32 len` + UTF-8 string: loader plugin ID (e.g., `LcNwcLoaderPlugin:lcldrevit`), then zero pad to 4
   - Subsequent length-prefixed UTF-8 strings: loader export configuration options.
+- The pads are zero; 0.11 skipped them and read the timestamp only when the path length was a multiple of 4 and no 8-byte pad was needed. The parser stops at the first unexpected field (a non-zero pad, an int after the path other than -1).
+- No stream names the length unit. The Revit loader writes coordinates and length values in feet, areas in ft², volumes in ft³.
 
 ### 2.2 Logical Hierarchy (`LcOpNwdLogicalHierarchy`)
 - **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced.
-- **Stream framing**: `[int32 k][k x int32] [int32 100] [int32 n] n x pointer [int32 1]`, zero-padded to a multiple of 8. `k` is the number of `LcOaPartitionProps` streams minus one; the `k` ints are not decoded. Id 100 is the implicit root and has no class or body.
+- **Stream framing**: `[int32 k][k x int32] [int32 100] [int32 n] n x pointer [int32 1]`, zero-padded to a multiple of 8. `k` is the number of `LcOaPartitionProps` root streams; the `k` ints are their root counts (§2.2.1). Id 100 is the implicit root and has no class or body.
 - **Pointer rule**: a pointer is `0` (null), `[1][id]` (back-reference to an object whose body is complete) or `[nextId][classId][body]` (new object). `nextId` starts at 100; an object takes its id before its body is read, so nested new objects take the following ids in depth-first order. Any other first value, an unknown class, or a back-reference to an unfinished object is invalid. Ids are per stream: equal ids in different streams mean nothing.
 - **Primitives**: strings are `[int32 len][UTF-8][zero pad to 4]` with `-1` for null; `f64` and `i64` values are aligned to 8 bytes from the stream start, with one zero `int32` of padding when needed.
 - **Classes**:
   - `53` group: `[str name][ptr 52 username][i32 flags][i32 X][i32 Y][Y x attribute ptr][i32 c][c x child ptr]`. Children are class 22 or 53 and are never null.
   - `22` leaf: the same layout without `c` and children.
+  - `X` (element index): 0 on every node that is not a Revit element; on an element node, `X - 1` indexes the GUID table (§2.3). The exporter writes some elements (for example grids) as two sibling nodes with the same `X`, not always adjacent; NwcIO makes the first the element and points the second to it. Such a pair takes two equal GUID table entries (`X - 1` and `X`), so the table size is the number of stored nodes with `X > 0` and the next element's index is `X + 2`. The same `X` under different parents, including a node and its descendant, is rejected as a placed model (`NotSupportedException`).
   - `32` (`LcOaPartition`, `.nwd` only): `[i32 0]`, a class-53 body, then a trailer that is not decoded. Class 32 nodes are the top-level children of a `.nwd`; class 53 nodes are the top-level children of a `.nwc`.
   - `52` display/internal name pair: `[str name][str internal]`. It is the node username, the property tab username and every property key.
-- **Attributes** (slots may be null): `86` property tab `[str name][ptr 52][i32 flags][i32 n] n x ([ptr 52 key][i32 type][value])` with value by type `0` none, `1,5,6,7,10,11` `f64`, `2,3` `i32`, `4` string, `8` class-52 pointer; `31` material; `40` translation; `41` translation and quaternion (`x -> R(q)x + t`); `39` 3x3 column-major matrix and translation; `79` hyperlinks; `200` and `185` material JSON.
+- **Attributes** (slots may be null): `86` property tab `[str name][ptr 52][i32 flags][i32 n] n x ([ptr 52 key][i32 type][value])` with value by type `0` none, `1,5,6,7,10,11` `f64`, `2,3` `i32`, `4` and `9` string (type 9 was never seen; it is read as a string), `8` class-52 pointer; `31` material; `40` translation; `41` translation and quaternion (`x -> R(q)x + t`); `39` 3x3 column-major matrix and translation; `79` hyperlinks; `200` and `185` material JSON.
 - **Shared subtrees**: a child pointer may back-reference an earlier node, so the hierarchy is a directed acyclic graph. A node reached through several parents appears once per path when the tree is expanded.
 - **Preorder index (`seq`)**: walk from the implicit root in stored order, counting groups, with a shared subtree walked again at every place it occurs. The root has index 0. Every fragment's `seq` indexes this expanded sequence and lands on a leaf; `seq` never decreases along the fragments stream, and a leaf owns one contiguous run of fragments.
 
+### 2.2.1 `LcOaPartitionProps`
+
+```text
+ENTRY     LcOaPartitionProps : flags 1, (a, b) = (4, b)
+SEGMENT := [int32 0]  ZSTREAM{k}  ZTOC          contiguous zlib streams from offset+4 to offset+length; b = compressed length of ZTOC
+ZTOC    := [int32 k] [k x int32 compressed length of ZSTREAM i] zero pad to 8      (length roundup8(4 + 4k))
+HIERARCHY HEADER := [int32 k >= 1] [k x int32 n_i]          n_i = number of roots in ZSTREAM i
+ZSTREAM i := ROOT{n_i} zero pad to 8                          ids from 100 per stream, no implicit root
+ROOT      := a new object (never null, never a back-reference) of class 86, 79 or 66; nested objects are class 52
+66        := [str name = null] [ptr 52 key, internal "LcRevitId"] [i32 flags = 0x01000000] PAD8 [i64 value in 1..2^31-1]
+LINK      := the n-th null attribute slot of a hierarchy node, in byte order, takes the n-th root of ZSTREAM 0 ‖ ZSTREAM 1 ‖ ...
+```
+
+The roots are the tabs a node uses once (element, parameter, type, material and room tabs) and its element id; tabs shared by two or more nodes stay in the hierarchy. A class-66 root becomes a one-property tab named by its key (`LcRevitId`). The per-node order the exporter writes (`86* 79? 66?`, the 66 last) is not enforced.
+
 ### 2.3 GUID Table (`Guids`)
-- **Signature**: `[int32 ?][int32 count]` where `(streamLength - 8) == count * 16`.
-- **Payload**: sequential array of 16-byte raw little-endian GUIDs corresponding to element unique IDs.
+- **Location**: the DbCache entry `LcOpGuidStore`, one zlib stream `[i32 a = 1][i32 n][n x 16-byte GUID]` in Windows layout. The GUID of element `X` is the Revit export GUID of the element (its UniqueId's session GUID with the last 32 bits XORed with the element id).
+- **IFC GlobalId**: the 128 bits of the GUID in big-endian (canonical) byte order, written as 22 characters of `0-9A-Za-z_$`, 2 bits then 6 per character, the first character being `0`-`3`.
+- **Other containers**: files not read through a DbCache directory are scanned for streams `[int32 ?][int32 count]` where `(streamLength - 8) == count * 16`, followed by the 16-byte GUIDs.
 
 ### 2.4 Fragments (`LcOpNwdFragments`)
 - **Location**: the DbCache entry whose final segment is `LcOpNwdFragments` (one zlib stream). Framing: `[int32 n] n x pointer`, zero-padded to a multiple of 8. Pointers follow the rule in §2.2; every root pointer is a new class-13 object.
@@ -74,7 +93,8 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
     - `D`, `b`, `c`: not decoded.
   - `15` pose: `[3 x f64 t][4 x f64 q]`, `q = (x, y, z, w)` a unit quaternion.
   - `16` pose with scale: class 15 plus `[f64 s]`. The scale is a uniform factor and can be negative.
-  - `55` appearance: `[i32 flags][ptr 54]`, plus `[ptr 185]` when `flags & 32`. Class `54` is 14 `int32` values; neither is decoded.
+  - `55` appearance: `[i32 flags][ptr 54]`, plus `[ptr 185]` when `flags & 32`.
+  - `54` material: 14 `f32`: ambient 0–2, diffuse 3–5, specular 6–8 (always 0), emissive 9–11 (always 0), shininess 12 (Revit Shininess / 128), transparency 13 (Revit Transparency / 100, values below 0.1 stored as 0). Channels are quantised to bytes. `31` (hierarchy) repeats the fields as `f64` and names the material (null for rooms).
   - `93` geometry reference: `[6 x f32 bbox][3 x f64 c][f32][i32 key][i32 rec]`. `rec` is the 1-based index of a geometry record (§2.5). The box equals the bounding box of the record's positions, and `c` is the offset of those positions.
 - **Placement**: the fragment pose is the full world transform of the record's positions: `world = s·R(q)·v + t`, with `s = 1` for class 15. `R(q)` is the usual rotation matrix of the normalised quaternion. No unit conversion is applied.
 - **Mirroring**: a pose with `s < 0` mirrors the geometry, so triangle winding must be reversed to keep faces outward in world space. Local vertices and indices are not changed.
@@ -104,6 +124,7 @@ UVBODY := [p1][fc][fc x f32] TOKENS(p1, fc/2)?        (raw; tokens iff fc/2 != p
         | [-p1][4 x f32][w][m][ceil(m*(bu+bv)/32) words] TOKENS(p1, m)?   (quantised; tokens iff m != p1)
 ```
 
+- **Colour palette**: entries are `[A=0xFF][B][G][R]` (a little-endian `uint32` `0xRRGGBBAA`). Evidence: a level's line colour equals its type's colour parameter (a Revit colour int, red in the low byte) in 218 of 218 level lines that are not black; the 95 whose colour tells the orders apart all match this order. A line record can carry several colours, per vertex.
 - **Class**: `94` triangles, `95` lines. Class 94 always has a normal slot and never a colour slot; class 95 has only the colour slot. Object ids run 100, 101, then 102, 103 over the slots present.
 - **`p1` is the render-vertex count**, not the position count. `p2/3` positions are stored; `VMAP` maps each render vertex to a position and is the identity when absent. Quantised positions (negative `p1`) and point records (class 96) are not supported.
 - **PACKED(count, w)**: bit `j` of the stream is bit `31 - j%32` of little-endian word `j/32`; value `k` occupies bits `k*w` to `k*w+w-1`, most significant first.
@@ -140,7 +161,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
 - **`(a, b)` shapes**:
   - `(0, 0)`: one zlib stream starts at `offset` and its compressed length is `length`;
   - `(4, b)`: a 4-byte prefix sits at `offset`, then consecutive zlib streams follow with no gaps; the last stream's compressed length is `b`, and the segment ends at `offset + length`.
-- **Segments the reader uses**: `LcOpNwdLogicalHierarchy` (§2.2) and `LcOpNwdFragments` (§2.4) are `(0, 0)`; `LcOpNwdGeometry` (§2.5) is `(4, b)`. `LcOpNwdGeometryCompress` is 40 raw bytes and is not decoded. Other entries are listed but not parsed.
+- **Segments the reader uses**: `LcOpNwdLogicalHierarchy` (§2.2), `LcOpGuidStore` (§2.3) and `LcOpNwdFragments` (§2.4) are `(0, 0)`; `LcOpNwdGeometry` (§2.5) and `LcOaPartitionProps` (§2.2.1) are `(4, b)`. `LcOpNwdGeometryCompress` is 40 raw bytes and is not decoded. Other entries are listed but not parsed.
 - **Strict path**: a container is read through these segments when section 1 holds exactly one stream, the stream parses as this directory and it names `LcOpNwdLogicalHierarchy`, `LcOpNwdFragments` or `LcOpNwdGeometry`. Any other container keeps the previous reader. NwcIO's writer still emits its own single-section layout, which the reader keeps.
 - **Model API**: `NwcDbCacheEntry.Offset` is the absolute file offset, `Extra` equals `a + b * 2^32`, and `DatabaseName` is the name of the `LcOpDBCache` entry, or `""` when there is none.
 
@@ -167,6 +188,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - `Table`: array of external file references (textures, linked `.nwc`/`.nwd` files) with `OriginalPath` and `RemappedPath`.
 
 ### 2.9 Materials, RGBA Colors & glTF 2.0 (GLB)
+- **Strict path**: one material per distinct (class-31 name, diffuse and alpha bytes); shininess is not mapped; see `NwcMesh.Material`. The heuristics below apply only to files read without the DbCache directory.
 - **Material Records**:
   - `LcRevitElement` with prefix `Material "Name", #ElementId`: defines material instances.
   - `revit_Color` with property `Color`: stores comma-separated `"R, G, B"` integer triples in $0..255$ range (e.g. `"255, 128, 0"`, `"0, 255, 255"`).
@@ -249,3 +271,4 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - Serialized into glTF 2.0 `cameras` array with perspective projection and vertical field of view (`yfov = FieldOfView * π / 180`, i.e. the camera's vertical FOV in degrees converted straight to radians, falling back to 1.04719755 rad ≈ 60° when not positive; no horizontal-to-vertical conversion is applied — `aspectRatio` is written separately).
   - Placed as camera scene nodes with `translation` ($\vec{P}$) and `rotation` ($Q$).
   - Exported to buildingSMART BCF 2.1 archives with `PerspectiveCamera` and `OrthogonalCamera` visualization blocks.
+- **Viewpoint id and unparsed fields**: Records store no viewpoint id: the 24 bytes before every tag are zero. Observed and not yet decoded by NwcIO: the int after tag 517 is the projection (1 orthographic, 0 perspective), and the double 64 bytes after the 8-aligned start of the camera block is the field of view in radians for perspective views and the view height for orthographic ones; NwcIO 0.12 still recognises only some real saved-view streams.

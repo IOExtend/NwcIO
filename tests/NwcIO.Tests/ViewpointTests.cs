@@ -4,8 +4,10 @@ using System.Text.Json;
 using System.Xml.Linq;
 using NwcIO.Internal.Container;
 using NwcIO.Internal.Export;
+using NwcIO.Internal.Json;
 using NwcIO.Internal.Parsing;
 using NwcIO.Model;
+using NwcIO.Model.Sectioning;
 using Xunit;
 
 namespace NwcIO.Tests;
@@ -148,6 +150,7 @@ public class ViewpointTests
 
         Assert.Single(viewpoints);
         var vp = viewpoints[0];
+        Assert.Null(vp.Id);
         Assert.Equal("Overview Viewpoint", vp.Name);
         Assert.Equal(12.5, vp.Camera.Position.X);
         Assert.Equal(34.5, vp.Camera.Position.Y);
@@ -286,4 +289,38 @@ public class ViewpointTests
             Assert.Equal("15.0000", pos.Element("Z")?.Value);
         }
     }
+
+    [Fact]   // guard: 0.11 also generates it
+    public void SavedViewpoint_MadeInCode_KeepsAGeneratedId() =>
+        Assert.NotNull(new NwcSavedViewpoint { Name = "V", Camera = new NwcCamera() }.Id);
+
+    [Fact]
+    public void BcfExport_ViewpointWithoutId_UsesOneGuidPerTopic()
+    {
+        using var ms = new MemoryStream();
+        NwcViewpointBcfExporter.Write(ms, [new NwcSavedViewpoint { Id = null, Name = "V", Camera = new NwcCamera() }]);
+        ms.Position = 0;
+        using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+        string folder = archive.Entries.Single(e => e.FullName.EndsWith("/markup.bcf", StringComparison.Ordinal)).FullName.Split('/')[0];
+        XDocument Load(string name) { using var s = archive.GetEntry($"{folder}/{name}")!.Open(); return XDocument.Load(s); }
+        var markup = Load("markup.bcf");
+        Assert.True(Guid.TryParse(folder, out _));
+        Assert.Equal(folder, markup.Descendants("Topic").Single().Attribute("Guid")!.Value);
+        Assert.Equal(folder, markup.Descendants("Viewpoints").Single().Attribute("Guid")!.Value);
+        Assert.Equal(folder, Load("viewpoint.bcfv").Root!.Attribute("Guid")!.Value);
+    }
+
+    [Fact]
+    public void JsonExport_ViewpointWithoutId_WritesNull()
+    {
+        var doc = NwcDocument.Create(savedViewpoints: [new NwcSavedViewpoint { Id = null, Name = "V", Camera = new NwcCamera() }]);
+        using var ms = new MemoryStream();
+        JsonExporter.Write(doc, ms, new NwcJsonExportOptions());
+        Assert.Contains("\"id\":null", System.Text.Encoding.UTF8.GetString(ms.ToArray()).Replace(" ", ""));
+    }
+
+    [Fact]
+    public void XmlRoundTrip_ViewpointWithoutId_StaysWithoutId() =>
+        Assert.Null(NwcXmlViewpointSerializer.Deserialize(NwcXmlViewpointSerializer.Serialize(
+            [new NwcSavedViewpoint { Id = null, Name = "V", Camera = new NwcCamera() }])).Single().Id);
 }

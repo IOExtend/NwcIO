@@ -8,7 +8,12 @@ public sealed class NwcReaderOptions
     /// <summary>Parse the scene-tree/property streams (default: true).</summary>
     public bool ReadPropertyRecords { get; set; } = true;
 
-    /// <summary>Parse GUID tables (default: true).</summary>
+    /// <summary>
+    /// Parse GUID tables into <see cref="NwcDocument.Guids"/> (default: true); on files read without a DbCache directory the scene
+    /// tree takes its element GUIDs from them too. On a model file read through its DbCache directory, element GUIDs
+    /// (<see cref="Model.NwcNode.ElementGuid"/>) are read from <c>LcOpGuidStore</c> whenever the scene tree is built, whatever this
+    /// option says, so a malformed store throws <see cref="InvalidDataException"/> with it off as well.
+    /// </summary>
     public bool ReadGuids { get; set; } = true;
 
     /// <summary>Parse 3D transformation streams (default: true).</summary>

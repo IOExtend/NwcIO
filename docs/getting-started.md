@@ -31,8 +31,9 @@ dotnet tool install --global NwcIO.Cli
 ```csharp
 using NwcIO;
 
-// Open a .nwc file directly from disk. A .nwd whose scene tree holds partition nodes needs
-// new NwcReaderOptions { BuildSceneTree = false }, because that tree is not decoded yet.
+// Open a .nwc file directly from disk. A .nwd whose scene tree holds partition nodes, and a linked
+// Revit model (a tree that places one element under two parents), need
+// new NwcReaderOptions { BuildSceneTree = false }, because such trees are not decoded yet.
 var doc = NwcDocument.Open("model.nwc");
 
 Console.WriteLine($"Source: {doc.FileInfo?.SourcePath}");

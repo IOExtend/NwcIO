@@ -5,6 +5,8 @@
   items:
     - name: Public API
       href: public-api.md
+    - name: Scene adapter
+      href: scene.md
     - name: Binary Format Notes
       href: format-notes.md
     - name: Test Fixtures

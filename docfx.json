@@ -2,7 +2,8 @@
   "metadata": [
     {
       "src": [
-        { "src": "src/NwcIO", "files": ["NwcIO.csproj"] }
+        { "src": "src/NwcIO", "files": ["NwcIO.csproj"] },
+        { "src": "src/NwcIO.Scene", "files": ["NwcIO.Scene.csproj"] }
       ],
       "dest": "docs/api",
       "properties": { "TargetFramework": "net10.0" },

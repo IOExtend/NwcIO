@@ -208,7 +208,7 @@ public class IfcBridgeTests
         }
 
         // 2. Topic folder
-        string topicFolder = vp.Id.ToString("D");
+        string topicFolder = vp.Id!.Value.ToString("D");
         var markupEntry = archive.GetEntry($"{topicFolder}/markup.bcf");
         Assert.NotNull(markupEntry);
         using (var reader = new StreamReader(markupEntry.Open()))

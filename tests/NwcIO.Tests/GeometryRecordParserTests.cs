@@ -7,6 +7,26 @@ namespace NwcIO.Tests;
 
 public class GeometryRecordParserTests
 {
+    private static readonly RgbaColor Red = new(1, 0, 0, 1), Green = new(0, 1, 0, 1);
+
+    [Fact]
+    public void Parse_LinePalette_IsAbgr()
+    {
+        Assert.Equal(Enumerable.Repeat(new RgbaColor(0x33 / 255f, 0x22 / 255f, 0x11 / 255f, 1), 6), GeometryRecordParser.Parse(FormatVectors.R3, 16).LineColors!);
+        Assert.Equal([Red, Red], GeometryRecordParser.Parse(FormatVectors.R6, 16).LineColors!);
+        Assert.Equal([Red, Red, Green, Green], GeometryRecordParser.Parse(FormatVectors.R7, 16).LineColors!);
+        Assert.Equal([0, 1, 2, 3], GeometryRecordParser.Parse(FormatVectors.R7, 16).LineIndices);
+        Assert.Null(GeometryRecordParser.Parse(FormatVectors.R1, 16).LineColors);
+    }
+
+    [Fact]
+    public void Parse_LinePaletteTokens_MapVerticesToEntries()
+    {
+        var g = GeometryRecordParser.Parse(BuildR7TokenColours(), 16);
+        Assert.Equal([Red, Red, Green, Green], g.LineColors!);
+        Assert.Equal([0, 1, 2, 3], g.LineIndices);
+    }
+
     private static void AssertR1(GeometryRecord g)
     {
         Assert.False(g.IsLines);
@@ -62,6 +82,10 @@ public class GeometryRecordParserTests
 
     // R3 with the identity colour form cpal = p1 = 6 and no CTOK: R3[0..92) + cpal 6 + six zero entries + R3[104..120) (136 bytes)
     private static byte[] BuildR3IdentityColours() => [.. FormatVectors.R3[..92], .. Words([6]), .. new byte[24], .. FormatVectors.R3[104..]];
+
+    // R7 with the token colour form cpal 2 < p1 4: R7[0..96) + cpal 2 + red, green (bytes FF0000FF, FF00FF00) + CTOK 00 80 00 80
+    // (fresh 0, repeat, fresh 1, repeat: entries 0, 0, 1, 1) + R7[116..132), whose 8-byte pad the shorter record no longer needs (128 bytes)
+    private static byte[] BuildR7TokenColours() => [.. FormatVectors.R7[..96], .. Words([2, 0xFF0000FF, 0x00FF00FF, 0x80008000]), .. FormatVectors.R7[116..132]];
 
     // R1 + a colour slot after its normals: R1[0..96) + i32 103, 58, 5634, -4, cpal 1; one entry; CTOK 00 82 + pad; R1[100..120)
     private static byte[] BuildR1WithColours() =>
