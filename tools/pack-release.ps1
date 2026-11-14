@@ -106,7 +106,9 @@ Copy-Item (Join-Path $root 'LICENSE') $cli10Stage
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $cli10Stage
 New-Zip $cli10Stage (Join-Path $Output "NwcIO-Cli-$version-net10.0.zip")
 
-# 4. NuGet packages
+# 4. NuGet packages (pack runs with --no-build, and the publish steps build only NwcIO and NwcIO.Cli)
+Write-Host "Building the solution..."
+Invoke-DotNet build (Join-Path $root 'NwcIO.slnx') -c Release
 Write-Host "Packing NuGet packages..."
 Invoke-DotNet pack (Join-Path $root 'NwcIO.slnx') -c Release --no-build -o $Output
 
