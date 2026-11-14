@@ -159,6 +159,27 @@ public sealed class NwcSceneReaderTests
         Assert.Equal("3000 mm", Sets(Scene(RevitSample.Build()).Document, 5)[1].Properties.Single(p => p.Name == "Elevation").Value.Text);
     }
 
+    [Theory]
+    [InlineData(NwcLengthUnit.Meters)]
+    [InlineData(NwcLengthUnit.Millimeters)]
+    [InlineData(NwcLengthUnit.Inches)]
+    public void Read_ValueText_WithDifferentLengthUnits_ConvertsDimensionsAndAngles(NwcLengthUnit unit)
+    {
+        var doc = Scene(RevitSample.Build(), new NwcSceneOptions { ModelKey = "Tower.nwc", LengthUnit = unit }).Document;
+        var element = Sets(doc, 5)[0];
+        var propMap = element.Properties.ToDictionary(p => p.Name, p => p.Value.Text);
+
+        Assert.NotNull(propMap["Area"]);
+        Assert.EndsWith(" m²", propMap["Area"]);
+        Assert.NotNull(propMap["Volume"]);
+        Assert.EndsWith(" m³", propMap["Volume"]);
+        Assert.Equal("90 °", propMap["Angle"]);
+
+        var elevation = Sets(doc, 5)[1].Properties.Single(p => p.Name == "Elevation").Value.Text;
+        Assert.NotNull(elevation);
+        Assert.EndsWith(" mm", elevation);
+    }
+
     [Fact]
     public void Read_KeysOnlyForStableInternalNames()
     {
