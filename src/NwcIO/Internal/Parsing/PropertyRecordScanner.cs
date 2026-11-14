@@ -120,13 +120,13 @@ public sealed class PropertyRecordScanner
                                     pNext += 8;
                                 }
                                 break;
-                            case 8: // reference element: [refId][refTag][refName][refClass]
+                            case 8: // reference element / NamedConstant: [refId][refTag][refName][refClass]
                                 if (pNext + 8 <= _data.Length)
                                 {
                                     pNext += 8;
-                                    if (TryReadLengthPrefixedString(ref pNext, out var refName) &&
-                                        TryReadLengthPrefixedString(ref pNext, out _))
+                                    if (TryReadLengthPrefixedString(ref pNext, out var refName))
                                     {
+                                        TryReadLengthPrefixedString(ref pNext, out _);
                                         value = refName;
                                     }
                                 }
@@ -186,9 +186,16 @@ public sealed class PropertyRecordScanner
         }
 
         int len = ReadInt32At(pos);
-        if (len is <= 0 or > 65536 || pos + 4 + len > _data.Length)
+        if (len is < 0 or > 65536 || pos + 4 + len > _data.Length)
         {
             return false;
+        }
+
+        if (len == 0)
+        {
+            value = string.Empty;
+            pos += 4;
+            return true;
         }
 
         value = Encoding.UTF8.GetString(_data, pos + 4, len);

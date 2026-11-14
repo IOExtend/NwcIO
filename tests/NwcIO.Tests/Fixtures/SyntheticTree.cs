@@ -191,7 +191,16 @@ internal static class SyntheticTree
                     w.Str((string?)prop.Value);
                     break;
                 case 8:
-                    var (display, internalName) = ((string?, string?))prop.Value!;
+                    string? display = null, internalName = null;
+                    if (prop.Value is (string disp, string intName))
+                    {
+                        display = disp;
+                        internalName = intName;
+                    }
+                    else if (prop.Value is string s)
+                    {
+                        display = s;
+                    }
                     w.New(52);
                     w.Str(display).Str(internalName);
                     break;
