@@ -1626,7 +1626,7 @@ internal static class Program
 
     private static bool TryConsumeValue(string[] args, ref int i, string optionName, out string value)
     {
-        if (i + 1 >= args.Length || (args[i + 1].StartsWith('-') && args[i + 1] != "-"))
+        if (i + 1 >= args.Length || IsOption(args[i + 1]))
         {
             Console.Error.WriteLine($"Error: Missing argument for {optionName}.");
             value = string.Empty;
@@ -1634,5 +1634,28 @@ internal static class Program
         }
         value = args[++i];
         return true;
+    }
+
+    private static bool IsOption(string token)
+    {
+        token = token.TrimStart();
+        if (token == "-")
+        {
+            return false;
+        }
+        if (token.StartsWith("--", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        if (token.StartsWith('-'))
+        {
+            // A signed numeric literal or coordinate tuple (e.g. -1, -0.5, -.5, -1,0.25,1,1,0,-1) is a value, not a switch
+            if (token.Length > 1 && (char.IsAsciiDigit(token[1]) || token[1] == '.'))
+            {
+                return false;
+            }
+            return true;
+        }
+        return false;
     }
 }

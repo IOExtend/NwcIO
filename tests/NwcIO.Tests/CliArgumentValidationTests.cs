@@ -129,6 +129,25 @@ public class CliArgumentValidationTests
     }
 
     [Fact]
+    public void Raycast_WithNegativeFirstCoordinate_ExecutesSuccessfullyAndReportsHit()
+    {
+        string model = TempModel();
+        string json = Path.Combine(Path.GetTempPath(), "cli-val-ray-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var (exit, stdout, stderr) = Run([model, json, "--raycast", "-1,0.25,1,1,0,-1"]);
+            Assert.Equal(0, exit);
+            Assert.Contains("Raycast HIT", stdout);
+            Assert.True(File.Exists(json));
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(json)) File.Delete(json);
+        }
+    }
+
+    [Fact]
     public void TimeLinerSimulate_UnparseableDate_Exits1()
     {
         string model = TempModel();
