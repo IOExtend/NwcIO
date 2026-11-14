@@ -372,6 +372,42 @@ public sealed class NwcSceneReaderTests
     }
 
     // Every converted document must pass Validate() without errors or warnings (design §2, §6.5).
+    [Fact]
+    public void Read_GridWithOneHorizontalSegment_IsAGridLine()
+    {
+        var doc = Scene(RevitSample.Build(doorCategoryId: -2000220)).Document;
+        var grid = Assert.Single(doc.Grids);
+        Assert.Equal((1, "Grids"), (grid.ModelId, grid.Name));
+        var line = Assert.Single(grid.Lines);
+        Assert.Equal("Door", line.Name);
+        AssertNear(new Vector3d(0, 0, 0.9144), line.Start);
+        AssertNear(new Vector3d(3.048, 0, 0.9144), line.End);
+        Assert.Equal(0.9144, line.Elevation, 12);
+        Assert.Equal(14, doc.Elements.Count);
+    }
+
+    [Theory]   // guard: no grid is written before this task
+    [InlineData(-2000023, -2000051)]   // no grid
+    [InlineData(-2000023, -2000220)]   // a grid whose line mesh has two segments
+    public void Read_NoUnambiguousGridLine_WritesNoGrid(int door, int line) =>
+        Assert.Empty(Scene(RevitSample.Build(doorCategoryId: door, lineCategoryId: line)).Document.Grids);
+
+    [Fact]   // guard (Review Focus 1): no grid is written before this task
+    public void Read_GridWithUnknownUnit_WritesNoGrid()
+    {
+        var result = Scene(RevitSample.Build(doorCategoryId: -2000220), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Unknown });
+        Assert.Empty(result.Document.Grids);
+        Assert.Equal("unit-unknown", result.Diagnostics.Single().Code);
+    }
+
+    [Fact]
+    public void Read_FileWithSavedViews_SkipsThemWithAWarning()
+    {
+        var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));
+        Assert.Empty(result.Document.Viewpoints);
+        Assert.Equal((SceneSeverity.Warning, "viewpoints-skipped"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+    }
+
     private static NwcSceneResult Valid(NwcSceneResult r)
     {
         Assert.Empty(r.Document.Validate());

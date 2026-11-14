@@ -120,6 +120,18 @@ public static partial class NwcSceneReader
         int elementsWithGeometry = 0;
         int nodesWithPropertiesOutsideTabs = 0;
         var tabSets = new Dictionary<NwcPropertyTab, int?>(ReferenceEqualityComparer.Instance);
+        var lineMeshes = new Dictionary<NwcNode, List<NwcMesh>>(ReferenceEqualityComparer.Instance);   // by element
+        if (revit && metresPerUnit is not null)
+        {
+            foreach (var mesh in document.Meshes)
+            {
+                if (mesh.LineIndices.Count > 0 && mesh.Node?.Element is { } owner)
+                {
+                    (lineMeshes.TryGetValue(owner, out var list) ? list : lineMeshes[owner] = []).Add(mesh);
+                }
+            }
+        }
+
         var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId)>();
         pending.Push((root, null, 0, null));
         while (pending.TryPop(out var item))
@@ -153,6 +165,16 @@ public static partial class NwcSceneReader
 
             if (node.IsElement)
             {
+                if (metresPerUnit is double m && lineMeshes.TryGetValue(node, out var meshes) && IsGrid(node) && GridLine(node, meshes, m) is { } gridLine)
+                {
+                    if (scene.Grids.Count == 0)
+                    {
+                        scene.Grids.Add(new SceneGridSystem { ModelId = ModelId, Name = "Grids" });
+                    }
+
+                    scene.Grids[0].Lines.Add(gridLine);
+                }
+
                 elementCount++;
                 elementsWithGeometry += placed.Contains(node) ? 1 : 0;
             }
@@ -200,6 +222,12 @@ public static partial class NwcSceneReader
                 $"{nodesWithPropertiesOutsideTabs} nodes carry properties outside property tabs (the file was not read through its DbCache directory); they are not in the scene."));
         }
 
+        if (document.SavedViewpoints.Count > 0 || document.DbCache?.Find("LcOpSavedViewsElement") is not null)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "viewpoints-skipped",
+                "Saved viewpoints are not converted: Navisworks stores no stable viewpoint id."));
+        }
+
         return new NwcSceneResult
         {
             Document = scene,
@@ -211,6 +239,29 @@ public static partial class NwcSceneReader
             LengthUnit = unit,
             MetresPerUnit = metresPerUnit,
         };
+    }
+
+    // OST_Grids (-2000220) in the element's own LcRevitData_Element tab.
+    private static bool IsGrid(NwcNode node) =>
+        node.PropertyTabs.Any(t => t.InternalName == "LcRevitData_Element"
+            && t.Properties.Any(p => p.InternalName == "LcRevitPropertyElementCategoryId" && p.Value == "-2000220"));
+
+    // A grid is a line only when it has one line mesh of one segment that is horizontal within 1e-6 m; otherwise it stays an element.
+    private static SceneGridLine? GridLine(NwcNode node, List<NwcMesh> meshes, double metresPerUnit)
+    {
+        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
+        {
+            return null;
+        }
+
+        var world = meshes[0].GetWorldVertices();
+        var a = world[meshes[0].LineIndices[0]];
+        var b = world[meshes[0].LineIndices[1]];
+        var start = new Vector3d(a.X, a.Y, a.Z) * metresPerUnit;
+        var end = new Vector3d(b.X, b.Y, b.Z) * metresPerUnit;
+        return Math.Abs(start.Z - end.Z) <= 1e-6
+            ? new SceneGridLine { Name = node.Name, Start = start, End = end, Elevation = start.Z }
+            : null;
     }
 
     // The LcRevitPropertyElementId values of every LcRevitData_Parameter tab of category OST_Levels (-2000240): the element ids of the levels.

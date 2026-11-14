@@ -11,7 +11,8 @@ internal static class RevitSample
     public static readonly Guid G3 = Guid.Parse("0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e");
     public static readonly Guid G4 = Guid.Parse("a0b1c2d3-e4f5-4a6b-9c7d-8e9fa0b1c2d3");
 
-    public static byte[] Build(string loader = "LcNwcLoaderPlugin:lcldrevit", int doorCategoryId = -2000023, int lineCategoryId = -2000051)
+    public static byte[] Build(string loader = "LcNwcLoaderPlugin:lcldrevit", int doorCategoryId = -2000023, int lineCategoryId = -2000051,
+        IReadOnlyList<(string Name, byte[] Data)>? extraStreams = null)
     {
         var level = new Tab(null, "Level", "LcRevitData_Parameter",
             new Prop("Name", "LcRevitPropertyElementName", 4, "Level 1"), new Prop("Category Id", "LcRevitPropertyElementCategoryId", 2, -2000240),
@@ -59,7 +60,7 @@ internal static class RevitSample
             new Frag(10, new(0, 0, 3), 1, 1, 4, Rec: 2, MaxX: 10, MaxY: 0, Look: white),
             new Frag(13, Vector3d.Zero, 1, 2, 4, Rec: 3, SharesLookOf: 3));
         return SyntheticNwcFile.Build(hierarchy, fragments, [[.. FormatVectors.R1, .. FormatVectors.R6, .. FormatVectors.R7]], [120, 104, 136],
-            extraStreams: [("LcOpGuidStore", SyntheticNwcFile.GuidStore(G1, G2, G3, G3, G4)), ("LcOpDBCache", SyntheticNwcFile.PartitionHeader("Tower.rvt", 1767225600, loader))],
+            extraStreams: [("LcOpGuidStore", SyntheticNwcFile.GuidStore(G1, G2, G3, G3, G4)), ("LcOpDBCache", SyntheticNwcFile.PartitionHeader("Tower.rvt", 1767225600, loader)), .. extraStreams ?? []],
             partitionProps: props);
     }
 }
