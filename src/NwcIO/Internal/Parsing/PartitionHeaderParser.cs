@@ -53,6 +53,12 @@ public static class PartitionHeaderParser
             info.SourceTimestampUtc = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
         }
 
+        long sourceSize = BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(pos + 8));
+        if (sourceSize >= 0)
+        {
+            info.SourceByteSize = sourceSize;
+        }
+
         pos += 16;
 
         if (!TryReadLengthPrefixedString(data, ref pos, out var plugin, out padded))
