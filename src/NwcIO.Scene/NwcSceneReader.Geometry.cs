@@ -7,9 +7,11 @@ namespace NwcIO.Scene;
 
 public static partial class NwcSceneReader
 {
+    private const int MaxLineColourGroups = 64;   // shortcut: segments of colours past 64 per record are drawn with the material colour; the corpus has 10 palette entries in all (spike-look (a)); raise it if a real file shows more
+
     // Writes the geometries, materials and instances of the document's meshes in their order, each made at first use; returns
     // the element of every placed mesh (its node's Element, or the node itself outside elements).
-    private static HashSet<NwcNode> AddGeometry(NwcDocument document, SceneDocument scene, double metresPerUnit, List<SceneDiagnostic> diagnostics)
+    private static HashSet<NwcNode> AddGeometry(NwcDocument document, SceneDocument scene, double metresPerUnit, Dictionary<NwcNode, long> ids, List<SceneDiagnostic> diagnostics)
     {
         var placed = new HashSet<NwcNode>();
         var geometries = new Dictionary<object, List<(int Id, RgbaColor? Color)>>();   // by GeometryIndex, else by the mesh
@@ -17,7 +19,7 @@ public static partial class NwcSceneReader
         int unplaced = 0;
         foreach (var mesh in document.Meshes)
         {
-            if (mesh.Node is not { } node)
+            if (mesh.Node is not { } node || !ids.TryGetValue(node, out long elementId))
             {
                 unplaced++;
                 continue;
@@ -60,7 +62,7 @@ public static partial class NwcSceneReader
 
             foreach (var (geometryId, colour) in groups)
             {
-                scene.Instances.Add(new SceneInstance { ElementId = node.Id, GeometryId = geometryId, Transform = transform, MaterialId = materialId, Color = colour });
+                scene.Instances.Add(new SceneInstance { ElementId = elementId, GeometryId = geometryId, Transform = transform, MaterialId = materialId, Color = colour });
             }
 
             placed.Add(node.Element ?? node);
@@ -69,7 +71,7 @@ public static partial class NwcSceneReader
         if (unplaced > 0)
         {
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "unplaced-mesh",
-                $"{unplaced} meshes have no tree node (the file was not read through its DbCache directory); they are not in the scene."));
+                $"{unplaced} meshes have no node in the scene tree (for example, the file was not read through its DbCache directory); they are not in the scene."));
         }
 
         return placed;
@@ -90,13 +92,33 @@ public static partial class NwcSceneReader
         // Segments go to the group of their colour when both ends share it; a segment whose ends differ goes to the null group,
         // which is drawn with the material colour and reported once per geometry key as line-colour-mixed. Groups keep first-seen
         // order, and each carries only the vertices its segments use (first-use order), so time and output stay linear in the segments.
+        // At most MaxLineColourGroups colours get a group: every mesh of the key places one instance per group, so the instances
+        // stay linear in the fragments (fragments x groups otherwise); segments of further colours join the null group.
         var groups = new List<(NwcIO.Model.RgbaColor? Color, List<int> Indices, List<Vector3d> Vertices, Dictionary<int, int> Local)>();
         var byColour = new Dictionary<NwcIO.Model.RgbaColor, int>();
         int mixed = -1;
+        int mixedSegments = 0;
+        bool capped = false;
         for (int s = 0; s < mesh.LineIndices.Count; s += 2)
         {
             int a = mesh.LineIndices[s], b = mesh.LineIndices[s + 1];
-            NwcIO.Model.RgbaColor? colour = mesh.LineColors is { } c && c[a] == c[b] ? c[a] : null;
+            NwcIO.Model.RgbaColor? colour = null;
+            if (mesh.LineColors is { } c)
+            {
+                if (c[a] != c[b])
+                {
+                    mixedSegments++;
+                }
+                else if (byColour.Count < MaxLineColourGroups || byColour.ContainsKey(c[a]))
+                {
+                    colour = c[a];
+                }
+                else
+                {
+                    capped = true;
+                }
+            }
+
             int g = colour is { } k ? byColour.GetValueOrDefault(k, -1) : mixed;
             if (g < 0)
             {
@@ -131,11 +153,18 @@ public static partial class NwcSceneReader
             int id = scene.Geometries.Count + 1;
             scene.Geometries.Add(new SceneGeometry { Id = id, Topology = SceneTopology.Lines, Vertices = groupVertices, Indices = indices });
             result.Add((id, colour is { } c ? new RgbaColor(c.RByte, c.GByte, c.BByte, c.AByte) : null));
-            if (colour is null && mesh.LineColors is not null)
-            {
-                diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "line-colour-mixed",
-                    $"Geometry record {key}: {indices.Count / 2} line segments join vertices of different colours; they are drawn with the material colour."));
-            }
+        }
+
+        if (mixedSegments > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "line-colour-mixed",
+                $"Geometry record {key}: {mixedSegments} line segments join vertices of different colours; they are drawn with the material colour."));
+        }
+
+        if (capped)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "line-colours-capped",
+                $"Geometry record {key}: more than {MaxLineColourGroups} line colours; segments of the further colours are drawn with the material colour."));
         }
 
         return result;

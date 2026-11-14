@@ -298,20 +298,96 @@ public sealed class NwcSceneReaderTests
         Assert.Equal((SceneSeverity.Warning, "line-colour-mixed"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
     }
 
+    private const int MaxLineColourGroups = 64;   // NwcSceneReader.MaxLineColourGroups
+
     [Fact]
     public void Read_ManyLineColours_StayLinear()
     {
-        // 2,000 segments, each of its own colour: one line geometry per colour, each with only its two vertices
+        // 2,000 segments, each of its own colour: one line geometry per colour up to the cap, each with only its two vertices,
+        // then one geometry drawn with the material colour for the segments of the further colours
         const int segments = 2000;
         var mesh = new NwcMesh { Id = 0, Indices = [],
             Vertices = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.Vector3d(v / 2, v % 2, 0))],
             LineIndices = [.. Enumerable.Range(0, 2 * segments)],
             LineColors = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.RgbaColor(v / 2 % 256 / 255f, v / 2 / 256 / 255f, 0))] };
-        var doc = SceneOf(mesh).Document;
-        Assert.Equal(segments, doc.Geometries.Count);
-        Assert.All(doc.Geometries, g => Assert.Equal((SceneTopology.Lines, 2, 2), (g.Topology, g.Vertices.Count, g.Indices.Count)));
+        var result = SceneOf(mesh);
+        var doc = result.Document;
+        Assert.Equal(MaxLineColourGroups + 1, doc.Geometries.Count);
+        Assert.All(doc.Geometries.Take(MaxLineColourGroups), g => Assert.Equal((SceneTopology.Lines, 2, 2), (g.Topology, g.Vertices.Count, g.Indices.Count)));
+        Assert.Equal((SceneTopology.Lines, 2 * (segments - MaxLineColourGroups)), (doc.Geometries[^1].Topology, doc.Geometries[^1].Indices.Count));
         Assert.Equal(2 * segments, doc.Geometries.Sum(g => g.Vertices.Count));
-        Assert.Equal(segments, doc.Instances.Select(i => i.Color).Distinct().Count());
+        Assert.Equal(MaxLineColourGroups, doc.Instances.Take(MaxLineColourGroups).Select(i => i.Color).OfType<RgbaColor>().Distinct().Count());
+        Assert.Null(doc.Instances[^1].Color);
+        Assert.Equal(SceneSeverity.Warning, Assert.Single(result.Diagnostics, d => d.Code == "line-colours-capped").Severity);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "line-colour-mixed");
+    }
+
+    [Fact]
+    public void Read_SharedRecordWithManyColours_InstancesStayLinear()
+    {
+        // 50 meshes share one line record of MaxLineColourGroups + 10 colours: each places one instance per geometry of the record
+        const int meshes = 50, colours = MaxLineColourGroups + 10;
+        NwcIO.Model.Vector3d[] vertices = [.. Enumerable.Range(0, 2 * colours).Select(v => new NwcIO.Model.Vector3d(v / 2, v % 2, 0))];
+        int[] lineIndices = [.. Enumerable.Range(0, 2 * colours)];
+        NwcIO.Model.RgbaColor[] lineColors = [.. Enumerable.Range(0, 2 * colours).Select(v => new NwcIO.Model.RgbaColor(v / 2 / 255f, 0, 0))];
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var list = new List<NwcMesh>();
+        for (int i = 0; i < meshes; i++)
+        {
+            var leaf = new NwcNode { Id = i + 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
+            var mesh = new NwcMesh { Id = i, GeometryIndex = 0, Vertices = vertices, Indices = [], LineIndices = lineIndices, LineColors = lineColors, Node = leaf };
+            root.Children.Add(leaf); leaf.Meshes.Add(mesh); list.Add(mesh);
+        }
+
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, meshes: list, rootNode: root), new() { ModelKey = "k" }));
+        Assert.Equal(MaxLineColourGroups + 1, result.Document.Geometries.Count);
+        Assert.Equal(meshes * (MaxLineColourGroups + 1), result.Document.Instances.Count);
+        Assert.Single(result.Diagnostics, d => d.Code == "line-colours-capped");
+    }
+
+    [Fact]   // guard: the output is the same with the quadratic dedup; only the time differs
+    public void Read_ManyTabsOnOneNode_StayLinear()
+    {
+        const int tabs = 300_000;
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
+        for (int i = 0; i < tabs; i++)
+        {
+            leaf.PropertyTabs.Add(new NwcPropertyTab { Name = "T",
+                Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }] });
+        }
+
+        leaf.PropertyTabs.Add(leaf.PropertyTabs[0]);
+        root.Children.Add(leaf);
+        var doc = NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new() { ModelKey = "k" }).Document;
+        Assert.Equal(Enumerable.Range(1, tabs), doc.Elements[1].PropertySetIds);
+        Assert.Equal(tabs, doc.PropertySets.Count);
+    }
+
+    [Fact]
+    public void Read_FileNotReadThroughDbCache_NumbersElementsInPreorder()
+    {
+        // NwcIO writes no DbCache directory; read back, the nodes keep their stored ids, here 1 twice
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var layer = new NwcNode { Id = 1, Name = "L", Class = "LcRevitLayer", Tag = 52, Parent = root };
+        var collection = new NwcNode { Id = 1, Name = "C", Class = "LcRevitCollection", Tag = 52, Parent = layer };
+        root.Children.Add(layer); layer.Children.Add(collection);
+        using var file = TempFile(NwcWriter.WriteToBytes(NwcDocument.Create(rootNode: root)), "Written.nwc");
+        var doc = Valid(NwcSceneReader.Read(file.Path)).Document;
+        Assert.Equal([0L, 1L, 2L], doc.Elements.Select(e => e.Id));
+        Assert.Equal([null, 0L, 1L], doc.Elements.Select(e => e.ParentId));
+    }
+
+    [Fact]
+    public void Read_MeshOutsideTheTree_IsUnplaced()
+    {
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var stray = new NwcNode { Id = 1, Name = "S", Class = "Leaf", Tag = 22 };   // not under the root
+        var mesh = new NwcMesh { Id = 0, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2], Node = stray };
+        stray.Meshes.Add(mesh);
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(meshes: [mesh], rootNode: root), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Feet }));
+        Assert.Empty(result.Document.Instances);
+        Assert.Equal((SceneSeverity.Warning, "unplaced-mesh"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
     }
 
     [Fact]

@@ -98,21 +98,36 @@ public static partial class NwcSceneReader
             CreatedAt = document.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
         });
 
+        var root = document.RootNode!;   // Open with the default BuildSceneTree always builds one; Read(document) rejects a document without one
+
+        // Element ids are preorder indices in the order of the walk below; NwcNode.Id is one only on the strict path (a file read
+        // without its DbCache directory keeps stored ints, which can repeat).
+        var ids = new Dictionary<NwcNode, long>(ReferenceEqualityComparer.Instance);
+        var order = new Stack<NwcNode>();
+        order.Push(root);
+        while (order.TryPop(out var next))
+        {
+            ids[next] = ids.Count;
+            for (int i = next.Children.Count - 1; i >= 0; i--)
+            {
+                order.Push(next.Children[i]);
+            }
+        }
+
         double? metresPerUnit = unit == NwcLengthUnit.Feet ? 0.3048 : null;
         var diagnostics = new List<SceneDiagnostic>();
         HashSet<NwcNode> placed;
         if (metresPerUnit is double metres)
         {
-            placed = AddGeometry(document, scene, metres, diagnostics);
+            placed = AddGeometry(document, scene, metres, ids, diagnostics);
         }
         else
         {
             placed = [];
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "unit-unknown",
-                $"The file does not name its length unit (loader {loader ?? "none"}): geometry, grid lines and length, area, volume and angle values are left out. Set NwcSceneOptions.LengthUnit to convert them."));
+                $"The length unit is unknown (loader {loader ?? "none"}): geometry, grid lines and length, area, volume and angle values are left out. Set NwcSceneOptions.LengthUnit to convert them."));
         }
 
-        var root = document.RootNode!;   // Open with the default BuildSceneTree always builds one; Read(document) rejects a document without one
         bool revit = loader == "LcNwcLoaderPlugin:lcldrevit";
         var levelElementIds = revit ? LevelElementIds(root) : [];
         int elementCount = 0;
@@ -132,11 +147,22 @@ public static partial class NwcSceneReader
             }
         }
 
-        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId)>();
-        pending.Push((root, null, 0, null));
+        // Each item carries the names at depth 2 and 4 on its path and the depth of the node's element, for Category and TypeName.
+        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4)>();
+        pending.Push((root, null, 0, null, 0, "", ""));
         while (pending.TryPop(out var item))
         {
-            var (node, parent, depth, levelId) = item;
+            var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4) = item;
+            atDepth2 = depth == 2 ? node.Name : atDepth2;
+            atDepth4 = depth == 4 ? node.Name : atDepth4;
+
+            // A part keeps the depth of its element (an ancestor); an element, the second node of a pair (a sibling of its element)
+            // and a node outside elements take their own.
+            if (node.Element is null || node.Element == node || node.Element != parent?.Element)
+            {
+                elementDepth = depth;
+            }
+
             SceneNodeKind kind;
             if (parent is null)
             {
@@ -184,14 +210,17 @@ public static partial class NwcSceneReader
                 nodesWithPropertiesOutsideTabs++;
             }
 
-            var (category, typeName) = revit && kind == SceneNodeKind.Element ? CategoryAndType(node.Element ?? node) : ("", "");
+            // Category is the name at depth 2 on the path from the root (depth 0) to the element; TypeName the name at depth 4 when
+            // the element is at depth 5. The element's path shares the node's names except its own, at depth 2 for a pair's second node.
+            var (category, typeName) = !revit || kind != SceneNodeKind.Element ? ("", "")
+                : (elementDepth == 2 ? (node.Element ?? node).Name : elementDepth > 2 ? atDepth2 : "", elementDepth == 5 ? atDepth4 : "");
 
             // The second node of a sibling pair is a part of the first.
             long? parentId = parent is null ? null
-                : node.Element is { } owner && owner != node && owner != parent.Element ? owner.Id : parent.Id;
+                : node.Element is { } owner && owner != node && owner != parent.Element ? ids.TryGetValue(owner, out long o) ? o : ids[parent] : ids[parent];
             scene.Elements.Add(new SceneElement
             {
-                Id = node.Id,
+                Id = ids[node],
                 ModelId = ModelId,
                 ParentId = parentId,
                 Kind = kind,
@@ -206,7 +235,7 @@ public static partial class NwcSceneReader
 
             for (int i = node.Children.Count - 1; i >= 0; i--)
             {
-                pending.Push((node.Children[i], node, depth + 1, levelId));
+                pending.Push((node.Children[i], node, depth + 1, levelId, elementDepth, atDepth2, atDepth4));
             }
         }
 
@@ -299,17 +328,4 @@ public static partial class NwcSceneReader
     // A layer is a level when its LcRevitId tab holds the element id of a level.
     private static bool IsLevel(NwcNode node, HashSet<string> levelElementIds) =>
         node.PropertyTabs.Any(t => t.InternalName == "LcRevitId" && t.Properties.Any(p => p.Value is { } id && levelElementIds.Contains(id)));
-
-    // Category is the name at depth 2 on the path from the root (depth 0) to the element; TypeName the name at depth 4 when the element is at depth 5.
-    private static (string Category, string TypeName) CategoryAndType(NwcNode element)
-    {
-        var names = new List<string>();   // names[i] is at depth (depth - i)
-        for (var n = element; n is not null; n = n.Parent)
-        {
-            names.Add(n.Name);
-        }
-
-        int depth = names.Count - 1;
-        return (depth >= 2 ? names[depth - 2] : "", depth == 5 ? names[1] : "");
-    }
 }

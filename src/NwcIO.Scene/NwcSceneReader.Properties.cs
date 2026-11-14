@@ -23,6 +23,7 @@ public static partial class NwcSceneReader
     private static List<int> PropertySetIds(NwcNode node, SceneDocument scene, Dictionary<NwcPropertyTab, int?> tabSets, bool feet)
     {
         var ids = new List<int>();
+        var seen = new HashSet<int>();   // a crafted file can give one node any number of tabs, so the dedup stays linear
         foreach (var tab in node.PropertyTabs)
         {
             if (!tabSets.TryGetValue(tab, out int? id))
@@ -31,7 +32,7 @@ public static partial class NwcSceneReader
                 tabSets.Add(tab, id);
             }
 
-            if (id is int set && !ids.Contains(set))
+            if (id is int set && seen.Add(set))
             {
                 ids.Add(set);
             }

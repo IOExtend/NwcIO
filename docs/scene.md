@@ -70,10 +70,11 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 | --- | --- | --- |
 | `no-source-id` | Info | Leaf nodes outside any Revit element have no `SourceId` (one aggregated entry with the count). |
 | `empty-mesh` | Info | A mesh has no triangles and no line segments; the entry names the element's GUID. |
-| `unit-unknown` | Warning | The file does not name its length unit and `LengthUnit` is not set: geometry, grid lines and length, area, volume and angle values are left out. |
+| `unit-unknown` | Warning | The length unit is unknown (the file does not name it and `LengthUnit` is not set, or `LengthUnit` is `Unknown`): geometry, grid lines and length, area, volume and angle values are left out. |
 | `line-colour-mixed` | Warning | Per geometry record: line segments join vertices of different colours and are drawn with the material colour. |
+| `line-colours-capped` | Warning | Per geometry record: the record has more than 64 line colours; segments of the further colours are drawn with the material colour. |
 | `viewpoints-skipped` | Warning | The document has saved viewpoints, or a saved-views entry; they are not written. |
-| `unplaced-mesh` | Warning | Meshes without a tree node (the file was not read through its DbCache directory) are left out. |
+| `unplaced-mesh` | Warning | Meshes without a node in the scene tree (for example, the file was not read through its DbCache directory) are left out. |
 | `properties-outside-tabs` | Warning | Nodes carry properties that no property tab holds (same cause); they are left out. |
 
 ## Limits
@@ -83,5 +84,5 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 - Files from a non-Revit loader name no unit: geometry, grid lines and dimensioned values are left out with a `unit-unknown` warning, and there are no categories or levels. Set `NwcSceneOptions.LengthUnit` to bring the geometry back in metres; the option always wins over the unit of the document.
 - A document not read through the file's DbCache directory has no geometry and no properties in the scene; both are reported (`unplaced-mesh`, `properties-outside-tabs`).
 - A document opened with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off lacks those parts, and nothing says so: the document does not record its options.
-- A line geometry carries only the vertices its own segments use, grouped by segment colour, one geometry per colour. Segments joining two colours go to one more group drawn with the material colour, and each geometry record with such segments adds one `line-colour-mixed` warning.
+- A line geometry carries only the vertices its own segments use, grouped by segment colour, one geometry per colour. Segments joining two colours go to one more group drawn with the material colour, and each geometry record with such segments adds one `line-colour-mixed` warning. A geometry record keeps at most 64 colour groups, because every mesh of the record places one instance per group: segments of further colours join the material-colour group, and the record adds one `line-colours-capped` warning.
 - Materials carry IOScene's default `Roughness` and `Metalness`, as `RvtIO.Scene` does: the file's shininess is not mapped, so the same element looks the same from a `.rvt` and a `.nwc`.
