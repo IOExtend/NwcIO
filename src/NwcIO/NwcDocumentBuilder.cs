@@ -32,6 +32,17 @@ public sealed class NwcDocumentBuilder
     }
 
     /// <summary>
+    /// Sets the format version, encoding, and chunk marker in file info.
+    /// </summary>
+    public NwcDocumentBuilder SetContainerFormat(int? formatVersion = 448, string? encoding = "utf8", string? chunkMarker = "lizlib")
+    {
+        _fileInfo.FormatVersion = formatVersion;
+        _fileInfo.Encoding = encoding;
+        _fileInfo.ChunkMarker = chunkMarker;
+        return this;
+    }
+
+    /// <summary>
     /// Adds a 3D polygon mesh to the document.
     /// </summary>
     public NwcDocumentBuilder AddMesh(NwcMesh mesh)

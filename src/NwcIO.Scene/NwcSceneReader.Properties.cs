@@ -20,7 +20,7 @@ public static partial class NwcSceneReader
 
     // The ids of the sets of the node's tabs in slot order, each once; a tab's set is made at its first use, and a tab whose
     // properties are all left out has none (null in tabSets).
-    private static List<int> PropertySetIds(NwcNode node, SceneDocument scene, Dictionary<NwcPropertyTab, int?> tabSets, bool feet)
+    private static List<int> PropertySetIds(NwcNode node, SceneDocument scene, Dictionary<NwcPropertyTab, int?> tabSets, NwcLengthUnit unit)
     {
         var ids = new List<int>();
         var seen = new HashSet<int>();   // a crafted file can give one node any number of tabs, so the dedup stays linear
@@ -28,7 +28,7 @@ public static partial class NwcSceneReader
         {
             if (!tabSets.TryGetValue(tab, out int? id))
             {
-                id = AddPropertySet(scene, tab, feet);
+                id = AddPropertySet(scene, tab, unit);
                 tabSets.Add(tab, id);
             }
 
@@ -41,13 +41,13 @@ public static partial class NwcSceneReader
         return ids;
     }
 
-    private static int? AddPropertySet(SceneDocument scene, NwcPropertyTab tab, bool feet)
+    private static int? AddPropertySet(SceneDocument scene, NwcPropertyTab tab, NwcLengthUnit unit)
     {
         string? setKey = tab.InternalName is { } tabName && KeyedTabs.Contains(tabName) ? "nwc:" + tabName : null;
         var properties = new List<SceneProperty>();
         foreach (var record in tab.Properties)
         {
-            if (ValueText(record, feet) is not { } text)
+            if (ValueText(record, unit) is not { } text)
             {
                 continue;
             }
@@ -70,17 +70,26 @@ public static partial class NwcSceneReader
 
     // RvtIO.Scene's display text: the invariant culture, six significant digits and its exact factors from Revit's internal units
     // (foot, square foot, cubic foot, radian); null for a value that cannot be shown, or a dimensioned one in an unknown unit.
-    private static string? ValueText(NwcPropertyRecord record, bool feet) => record.Value is not { } value ? null : record.ValueType switch
+    private static string? ValueText(NwcPropertyRecord record, NwcLengthUnit unit)
     {
-        2 or 4 or 8 or 9 => value,
-        3 => value == "0" ? "0" : "1",
-        1 => Number(value, 1, ""),
-        6 when feet => Number(value, 304.8, " mm"),
-        10 when feet => Number(value, 0.09290304, " m²"),
-        11 when feet => Number(value, 0.0283168466, " m³"),
-        7 when feet => Number(value, 180.0 / Math.PI, " °"),
-        _ => null,
-    };
+        if (record.Value is not { } value)
+        {
+            return null;
+        }
+
+        double? metres = unit.GetMetresPerUnit();
+        return record.ValueType switch
+        {
+            2 or 4 or 8 or 9 => value,
+            3 => value == "0" ? "0" : "1",
+            1 => Number(value, 1, ""),
+            6 when metres is double m => Number(value, m * 1000.0, " mm"),
+            10 when metres is double m => Number(value, unit == NwcLengthUnit.Feet ? 0.09290304 : m * m, " m²"),
+            11 when metres is double m => Number(value, unit == NwcLengthUnit.Feet ? 0.0283168466 : m * m * m, " m³"),
+            7 when metres is not null => Number(value, 180.0 / Math.PI, " °"),
+            _ => null,
+        };
+    }
 
     // Text that is not an invariant number is left out like a non-finite one (design §6.3: never guessed, never a crash).
     private static string? Number(string stored, double factor, string unit) =>

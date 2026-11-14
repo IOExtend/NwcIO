@@ -103,6 +103,18 @@ internal static class HierarchyParser
     private static bool IsIfcGlobalId(string? text) =>
         text is { Length: 22 } && text[0] is >= '0' and <= '3' && text.All(c => c is (>= '0' and <= '9') or (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or '_' or '$');
 
+    internal static string FormatUnixSeconds(long unixSeconds)
+    {
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds).ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return unixSeconds.ToString(CultureInfo.InvariantCulture);
+        }
+    }
+
     // Preorder with an explicit stack: children in stored order, a back-referenced subtree walked again in full.
     private static List<NwcNode> Expand(Node[] top, string rootName, long total, bool includeProperties, IReadOnlyList<Guid> guids)
     {
@@ -378,14 +390,13 @@ internal static class HierarchyParser
                 string? value = type switch
                 {
                     0 => null,
-
-                    // Type 5 was never seen; it is read as f64 like the other real types (docs/format-notes.md §2.2).
-                    1 or 5 or 6 or 7 or 10 or 11 => _reader.ReadDouble().ToString(CultureInfo.InvariantCulture),
+                    1 or 6 or 7 or 10 or 11 => _reader.ReadDouble().ToString(CultureInfo.InvariantCulture),
                     2 or 3 => _reader.ReadInt32().ToString(CultureInfo.InvariantCulture),
-
-                    // Type 9 was never seen; it is read as a string (docs/format-notes.md §2.2).
                     4 or 9 => _reader.ReadString(),
+                    5 => FormatUnixSeconds(_reader.ReadInt64()),
                     8 => ReadUsername().Display,
+                    12 => string.Create(CultureInfo.InvariantCulture, $"({_reader.ReadDouble()}, {_reader.ReadDouble()}, {_reader.ReadDouble()})"),
+                    13 => string.Create(CultureInfo.InvariantCulture, $"({_reader.ReadDouble()}, {_reader.ReadDouble()})"),
                     _ => throw _reader.Fail($"property value type {type} is unknown"),
                 };
                 records.Add(new NwcPropertyRecord
