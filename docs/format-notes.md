@@ -81,6 +81,7 @@ The roots are the tabs a node uses once (element, parameter, type, material and 
 
 ### 2.3 GUID Table (`Guids`)
 - **Location**: the DbCache entry `LcOpGuidStore`, one zlib stream `[i32 a = 1][i32 n][n x 16-byte GUID]` in Windows layout. The GUID of element `X` is the Revit export GUID of the element (its UniqueId's session GUID with the last 32 bits XORed with the element id).
+- **IFC GlobalId**: the 128 bits of the GUID in big-endian (canonical) byte order, written as 22 characters of `0-9A-Za-z_$`, 2 bits then 6 per character, the first character being `0`-`3`.
 - **Other containers**: files not read through a DbCache directory are scanned for streams `[int32 ?][int32 count]` where `(streamLength - 8) == count * 16`, followed by the 16-byte GUIDs.
 
 ### 2.4 Fragments (`LcOpNwdFragments`)

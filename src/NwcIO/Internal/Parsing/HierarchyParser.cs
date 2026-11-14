@@ -1,4 +1,5 @@
 using System.Globalization;
+using NwcIO.Internal.Export;
 using NwcIO.Model;
 
 namespace NwcIO.Internal.Parsing;
@@ -82,6 +83,26 @@ internal static class HierarchyParser
         return Dropped;
     }
 
+    // IFC_GUID (-1019000) of the element's own tab, when it has the IFC form: 22 characters of the IFC alphabet, the first 0-3 (128 bits).
+    private static string? IfcParameter(List<NwcPropertyTab> tabs)
+    {
+        foreach (var tab in tabs)
+        {
+            foreach (var record in tab.Properties)
+            {
+                if (record.TabInternalName == "LcRevitData_Element" && record.InternalName == "lcldrevit_parameter_-1019000" && record.ValueType == 4)
+                {
+                    return IsIfcGlobalId(record.Value) ? record.Value : null;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsIfcGlobalId(string? text) =>
+        text is { Length: 22 } && text[0] is >= '0' and <= '3' && text.All(c => c is (>= '0' and <= '9') or (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or '_' or '$');
+
     // Preorder with an explicit stack: children in stored order, a back-referenced subtree walked again in full.
     private static List<NwcNode> Expand(Node[] top, string rootName, long total, bool includeProperties, IReadOnlyList<Guid> guids)
     {
@@ -119,6 +140,7 @@ internal static class HierarchyParser
                 occurrence.IsElement = true;
                 occurrence.Element = occurrence;
                 occurrence.ElementGuid = guids[node.X - 1];
+                occurrence.IfcGlobalId = IfcParameter(node.Tabs) ?? IfcGuid.ToIfcGuid(occurrence.ElementGuid.Value);
                 firstByX.Add(node.X, occurrence);
             }
             else if (ReferenceEquals(first.Parent, parent))

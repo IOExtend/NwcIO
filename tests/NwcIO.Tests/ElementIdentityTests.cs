@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Globalization;
 using NwcIO.Model;
 using Xunit;
 
@@ -102,6 +104,50 @@ public class ElementIdentityTests
         Assert.Empty(doc.Guids);
         Assert.Equal(G1, doc.RootNode!.Children[0].Children[0].ElementGuid);
     }
+
+    // RvtSceneReader.IfcGuidOf (RvtIO.Scene): the session GUID of a UniqueId XORed with its element id, in the IFC base-64 form.
+    private static string RvtIfcGuidOf(string uniqueId)
+    {
+        const string Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+        var episode = Guid.ParseExact(uniqueId.AsSpan(0, 36), "D");
+        uint id = uint.Parse(uniqueId.AsSpan(37), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
+        UInt128 bits = BinaryPrimitives.ReadUInt128BigEndian(episode.ToByteArray(bigEndian: true)) ^ id;
+        var text = new char[22];
+        for (int i = 21; i >= 0; i--, bits >>= 6) text[i] = Alphabet[(int)(bits & 63)];
+        return new string(text);
+    }
+
+    [Fact]
+    public void Open_ElementWithoutIfcGuidParameter_UsesTheExportGuid()
+    {
+        var e = Open([new("L", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1)])], [G1]).RootNode!.Children[0].Children[0];
+        Assert.Equal("1x35fEForB6foERLzEFlcn", e.IfcGlobalId);
+        Assert.Equal(RvtIfcGuidOf("7b0c5a4e-3f2d-4b1a-9c8e-6d5f4e3a2b10-0004d2a1"), e.IfcGlobalId);   // the UniqueId whose export GUID is G1
+    }
+
+    [Theory]
+    [InlineData("LcRevitData_Element", "3Ax9$kQwz0Bf8cYp2LmN4r", "3Ax9$kQwz0Bf8cYp2LmN4r")]
+    [InlineData("LcRevitData_Element", "4Ax9$kQwz0Bf8cYp2LmN4r", "1x35fEForB6foERLzEFlcn")]   // first character above 3
+    [InlineData("LcRevitData_Element", "3Ax9$kQwz0Bf8cYp2LmN4", "1x35fEForB6foERLzEFlcn")]    // 21 characters
+    [InlineData("LcRevitData_Parameter", "3Ax9$kQwz0Bf8cYp2LmN4r", "1x35fEForB6foERLzEFlcn")] // a referenced element's tab
+    public void Open_IfcGuidParameter_WinsWhenValid(string tab, string stored, string expected) =>
+        Assert.Equal(expected, IfcGlobalIdWith(tab, stored, null));
+
+    [Fact]
+    public void Open_PropertiesOff_StillReadsTheIfcGuidParameter() =>
+        Assert.Equal("3Ax9$kQwz0Bf8cYp2LmN4r", IfcGlobalIdWith("LcRevitData_Element", "3Ax9$kQwz0Bf8cYp2LmN4r", new NwcReaderOptions { ReadPropertyRecords = false }));
+
+    private static string? IfcGlobalIdWith(string tab, string stored, NwcReaderOptions? options)
+    {
+        var t = new Tab(null, "Tab", tab, new Prop("IfcGUID", "lcldrevit_parameter_-1019000", 4, stored));
+        var (h, p) = SyntheticTree.Write(1, new TreeNode("L", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1, Slots: [new PTab(t)])]));
+        var file = SyntheticNwcFile.Build(h, null, [], [], extraStreams: [("LcOpGuidStore", SyntheticNwcFile.GuidStore(G1))], partitionProps: p);
+        return NwcDocument.Open(new MemoryStream(file), options).RootNode!.Children[0].Children[0].IfcGlobalId;
+    }
+
+    [Fact]
+    public void Open_NonElementNodes_HaveNoIfcGlobalId() =>
+        Assert.Null(Open([new("L", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1)])], [G1]).RootNode!.Children[0].IfcGlobalId);
 
     private static NwcDocument Open(TreeNode[] top, Guid[] guids, NwcReaderOptions? o = null) =>
         NwcDocument.Open(new MemoryStream(SyntheticNwcFile.Build(SyntheticTree.Write(1, top).Hierarchy, null, [], [],
