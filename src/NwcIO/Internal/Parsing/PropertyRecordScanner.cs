@@ -15,10 +15,13 @@ namespace NwcIO.Internal.Parsing;
 /// - Tag 52 (0x34): Property or element record:
 ///   [int32 id][int32 52][len-prefixed name + pad][len-prefixed class + pad]
 ///   followed by [int32 valueType] and type-specific payload:
-///     - 4: string (len-prefixed + pad)
-///     - 0, 1, 2, 3: int32 / bool / counter
-///     - 5, 7: double (8 bytes)
+///     - 4, 9: string (len-prefixed + pad)
+///     - 0, 2, 3: int32 / bool / counter (4 bytes)
+///     - 1, 6, 7, 10, 11: double (8 bytes)
+///     - 5: DateTime stored as int64 Unix epoch seconds (8 bytes)
 ///     - 8: reference element [refId:4][refTag:4][refName][refClass]
+///     - 12: Point3D (24 bytes)
+///     - 13: Point2D (16 bytes)
 /// The scanner searches forward resiliently for tags 52/53 across the decompressed chunk.
 /// </remarks>
 public sealed class PropertyRecordScanner
@@ -81,14 +84,14 @@ public sealed class PropertyRecordScanner
 
                         switch (valueType)
                         {
-                            case 4: // string
+                            case 4: // DisplayString
+                            case 9: // IdentifierString
                                 if (TryReadLengthPrefixedString(ref pNext, out var strVal))
                                 {
                                     value = strVal;
                                 }
                                 break;
                             case 0:
-                            case 1:
                             case 2:
                             case 3: // int32 / bool / counter
                                 if (pNext + 4 <= _data.Length)
@@ -97,8 +100,11 @@ public sealed class PropertyRecordScanner
                                     pNext += 4;
                                 }
                                 break;
-                            case 5:
-                            case 7: // double
+                            case 1:
+                            case 6:
+                            case 7:
+                            case 10:
+                            case 11: // double / double length / angle / area / volume
                                 if (pNext + 8 <= _data.Length)
                                 {
                                     value = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext))
@@ -106,15 +112,42 @@ public sealed class PropertyRecordScanner
                                     pNext += 8;
                                 }
                                 break;
-                            case 8: // reference element: [refId][refTag][refName][refClass]
+                            case 5: // DateTime (int64 unix seconds)
+                                if (pNext + 8 <= _data.Length)
+                                {
+                                    long unixSec = BinaryPrimitives.ReadInt64LittleEndian(_data.AsSpan(pNext));
+                                    value = HierarchyParser.FormatUnixSeconds(unixSec);
+                                    pNext += 8;
+                                }
+                                break;
+                            case 8: // reference element / NamedConstant: [refId][refTag][refName][refClass]
                                 if (pNext + 8 <= _data.Length)
                                 {
                                     pNext += 8;
-                                    if (TryReadLengthPrefixedString(ref pNext, out var refName) &&
-                                        TryReadLengthPrefixedString(ref pNext, out _))
+                                    if (TryReadLengthPrefixedString(ref pNext, out var refName))
                                     {
+                                        TryReadLengthPrefixedString(ref pNext, out _);
                                         value = refName;
                                     }
+                                }
+                                break;
+                            case 12: // Point3D (3 doubles)
+                                if (pNext + 24 <= _data.Length)
+                                {
+                                    double x = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext));
+                                    double y = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext + 8));
+                                    double z = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext + 16));
+                                    value = string.Create(CultureInfo.InvariantCulture, $"({x}, {y}, {z})");
+                                    pNext += 24;
+                                }
+                                break;
+                            case 13: // Point2D (2 doubles)
+                                if (pNext + 16 <= _data.Length)
+                                {
+                                    double x = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext));
+                                    double y = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext + 8));
+                                    value = string.Create(CultureInfo.InvariantCulture, $"({x}, {y})");
+                                    pNext += 16;
                                 }
                                 break;
                         }
@@ -153,9 +186,16 @@ public sealed class PropertyRecordScanner
         }
 
         int len = ReadInt32At(pos);
-        if (len is <= 0 or > 65536 || pos + 4 + len > _data.Length)
+        if (len is < 0 or > 65536 || pos + 4 + len > _data.Length)
         {
             return false;
+        }
+
+        if (len == 0)
+        {
+            value = string.Empty;
+            pos += 4;
+            return true;
         }
 
         value = Encoding.UTF8.GetString(_data, pos + 4, len);

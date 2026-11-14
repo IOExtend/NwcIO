@@ -12,6 +12,9 @@ public sealed class NwcFileInfo
     /// <summary>Timestamp stored in the file (Unix seconds, interpreted as UTC).</summary>
     public DateTime? SourceTimestampUtc { get; set; }
 
+    /// <summary>Size of the source document in bytes, if recorded in the header stream.</summary>
+    public long? SourceByteSize { get; set; }
+
     /// <summary>Loader plugin identifier, e.g. "LcNwcLoaderPlugin:lcldrevit".</summary>
     public string? LoaderPlugin { get; set; }
 

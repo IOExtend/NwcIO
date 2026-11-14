@@ -601,12 +601,12 @@ public sealed class NwcAssembly
         return count;
     }
 
-    /// <summary>Exports a structured summary of the federated assembly to a JSON file.</summary>
-    public void SaveJson(string path, NwcJsonExportOptions? options = null)
+    /// <summary>Exports a structured summary of the federated assembly to a stream in JSON format.</summary>
+    public void SaveJson(Stream stream, NwcJsonExportOptions? options = null)
     {
+        ArgumentNullException.ThrowIfNull(stream);
         options ??= NwcJsonExportOptions.Default;
-        using var fs = File.Create(path);
-        using var writer = new System.Text.Json.Utf8JsonWriter(fs, new System.Text.Json.JsonWriterOptions
+        using var writer = new System.Text.Json.Utf8JsonWriter(stream, new System.Text.Json.JsonWriterOptions
         {
             Indented = options.Indented
         });
@@ -655,5 +655,13 @@ public sealed class NwcAssembly
         }
 
         writer.WriteEndObject();
+    }
+
+    /// <summary>Exports a structured summary of the federated assembly to a JSON file.</summary>
+    public void SaveJson(string path, NwcJsonExportOptions? options = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        using var fs = File.Create(path);
+        SaveJson(fs, options);
     }
 }

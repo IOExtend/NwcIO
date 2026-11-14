@@ -21,7 +21,9 @@ internal static class Program
         Arguments:
           <input>            Path to .nwc, .nwd, .nwf file or a folder of .nwc models.
           [output]           Destination path for exported file (.json, .obj, .glb, .ifc, .bcfzip, .html, or .nwc).
-                             Default: <input-without-ext>.json (or standard output if '-').
+                             Default for file: <input-without-ext>.json (or standard output if '-').
+                             Default for folder: <dir>/<dirname>_assembly.glb (or standard output if '-').
+                             Default for .nwf: <input-without-ext>.glb (or standard output if '-').
 
         Options:
           --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
@@ -84,11 +86,20 @@ internal static class Program
     // The reader throws NotSupportedException only for a scene tree it cannot convert (class-32 partition nodes, linked Revit models); --no-tree reads around both.
     private const string NoTreeHint = " Use --no-tree to read geometry and placement without the scene tree.";
 
-    public static int Main(string[] args)
+    public static int Main(string[] args) => Run(args, null, null, null);
+
+    internal static int Run(
+        string[] args,
+        Stream? stdoutStream = null,
+        TextWriter? outWriter = null,
+        TextWriter? errorWriter = null)
     {
+        var @out = outWriter ?? Console.Out;
+        var @err = errorWriter ?? Console.Error;
+
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
         {
-            Console.WriteLine(UsageText);
+            @out.WriteLine(UsageText);
             return args.Length == 0 ? 1 : 0;
         }
 
@@ -98,7 +109,7 @@ internal static class Program
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
                 ?? typeof(Program).Assembly.GetName().Version?.ToString()
                 ?? "0.1.0";
-            Console.WriteLine($"nwcio {version}");
+            @out.WriteLine($"nwcio {version}");
             return 0;
         }
 
@@ -549,7 +560,8 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    stdoutStream, @out, @err);
             }
 
             if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
@@ -560,7 +572,8 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    stdoutStream, @out, @err);
             }
         }
         catch (Exception ex)
@@ -571,6 +584,7 @@ internal static class Program
 
         // Single NWC/NWD document
         outputPath ??= Path.ChangeExtension(inputPath, ".json");
+        TextWriter infoOut = (outputPath == "-") ? @err : @out;
 
         NwcDocument doc;
         try
@@ -708,7 +722,7 @@ internal static class Program
                 {
                     linked = Model.TimeLiner.NwcTimeLinerLinker.LinkByNodeName(doc.TimeLiner, doc.RootNode);
                 }
-                Console.WriteLine($"Linked {linked} TimeLiner tasks to model elements.");
+                infoOut.WriteLine($"Linked {linked} TimeLiner tasks to model elements.");
             }
 
             if (outputIsBcf)
@@ -765,8 +779,17 @@ internal static class Program
 
                 if (outputPath == "-")
                 {
-                    using var stdout = Console.OpenStandardOutput();
-                    JsonExporter.Write(doc, stdout, exportOptions);
+                    if (stdoutStream != null)
+                    {
+                        JsonExporter.Write(doc, stdoutStream, exportOptions);
+                        stdoutStream.Flush();
+                    }
+                    else
+                    {
+                        using var stdout = Console.OpenStandardOutput();
+                        JsonExporter.Write(doc, stdout, exportOptions);
+                        stdout.Flush();
+                    }
                 }
                 else
                 {
@@ -932,12 +955,12 @@ internal static class Program
                     }
                 }
 
-                Console.WriteLine($"Model Revision Comparison ({diffReport.BaselineName} vs {diffReport.RevisionName}):");
-                Console.WriteLine($"  Added:     {diffReport.Added.Count}");
-                Console.WriteLine($"  Deleted:   {diffReport.Deleted.Count}");
-                Console.WriteLine($"  Modified:  {diffReport.Modified.Count}");
-                Console.WriteLine($"  Unchanged: {diffReport.Unchanged.Count}");
-                Console.WriteLine($"  Total:     {diffReport.TotalChangesCount} changes");
+                infoOut.WriteLine($"Model Revision Comparison ({diffReport.BaselineName} vs {diffReport.RevisionName}):");
+                infoOut.WriteLine($"  Added:     {diffReport.Added.Count}");
+                infoOut.WriteLine($"  Deleted:   {diffReport.Deleted.Count}");
+                infoOut.WriteLine($"  Modified:  {diffReport.Modified.Count}");
+                infoOut.WriteLine($"  Unchanged: {diffReport.Unchanged.Count}");
+                infoOut.WriteLine($"  Total:     {diffReport.TotalChangesCount} changes");
             }
 
             if (!string.IsNullOrEmpty(explicitTimeLinerCsvPath))
@@ -971,47 +994,47 @@ internal static class Program
                     singleAss.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
                 }
 
-                Console.WriteLine(singleAss.ClashMatrix.ToMarkdownTable());
+                infoOut.WriteLine(singleAss.ClashMatrix.ToMarkdownTable());
             }
 
             if (!string.IsNullOrEmpty(simulateDateStr))
             {
                 if (doc.TimeLiner is null || doc.TimeLiner.Tasks.Count == 0)
                 {
-                    Console.Error.WriteLine("Notice: Document has no TimeLiner schedule tasks to simulate.");
+                    @err.WriteLine("Notice: Document has no TimeLiner schedule tasks to simulate.");
                 }
                 else if (DateTimeOffset.TryParse(simulateDateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var simDate))
                 {
-                    Console.WriteLine($"4D TimeLiner Simulation at {simDate:yyyy-MM-dd HH:mm:ss}:");
-                    Console.WriteLine($"  Overall Progress: {doc.TimeLiner.GetSimulationProgressAt(simDate):P1}");
+                    infoOut.WriteLine($"4D TimeLiner Simulation at {simDate:yyyy-MM-dd HH:mm:ss}:");
+                    infoOut.WriteLine($"  Overall Progress: {doc.TimeLiner.GetSimulationProgressAt(simDate):P1}");
                     var active = doc.TimeLiner.GetActiveTasksAt(simDate);
-                    Console.WriteLine($"  Active Tasks ({active.Count}):");
+                    infoOut.WriteLine($"  Active Tasks ({active.Count}):");
                     foreach (var t in active)
                     {
-                        Console.WriteLine($"    - [{t.Id}] {t.Name} ({t.TaskType}) from {t.PlannedStart:yyyy-MM-dd} to {t.PlannedEnd:yyyy-MM-dd}");
+                        infoOut.WriteLine($"    - [{t.Id}] {t.Name} ({t.TaskType}) from {t.PlannedStart:yyyy-MM-dd} to {t.PlannedEnd:yyyy-MM-dd}");
                     }
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
+                    @err.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error exporting to '{outputPath}': {ex.Message}");
+            @err.WriteLine($"Error exporting to '{outputPath}': {ex.Message}");
             return 3;
         }
 
         // Raycast test if requested
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(doc.SpatialIndex, raycastArg);
+            ExecuteRaycastTest(doc.SpatialIndex, raycastArg, infoOut, @err);
         }
 
         if (listViewpoints)
         {
-            PrintViewpoints(doc.SavedViewpoints);
+            PrintViewpoints(doc.SavedViewpoints, infoOut);
         }
 
         sw.Stop();
@@ -1022,52 +1045,52 @@ internal static class Program
             int totalVertices = doc.Meshes.Sum(m => m.Vertices.Count);
             int totalTriangles = doc.Meshes.Sum(m => m.TriangleCount);
 
-            Console.Error.WriteLine("=== NwcIO Execution Report ===");
-            Console.Error.WriteLine($"Input:            {inputPath}");
-            Console.Error.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
-            Console.Error.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
+            @err.WriteLine("=== NwcIO Execution Report ===");
+            @err.WriteLine($"Input:            {inputPath}");
+            @err.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
+            @err.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
             if (doc.FileInfo.FormatVersion is not null)
             {
-                Console.Error.WriteLine($"Format version:   {doc.FileInfo.FormatVersion}");
+                @err.WriteLine($"Format version:   {doc.FileInfo.FormatVersion}");
             }
-            Console.Error.WriteLine($"Timestamp:        {doc.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "<unknown>"}");
-            Console.Error.WriteLine($"Scene tree nodes: {treeNodeCount}");
-            Console.Error.WriteLine($"Property records: {doc.PropertyRecords.Count}");
-            Console.Error.WriteLine($"GUIDs:            {doc.Guids.Count}");
-            Console.Error.WriteLine($"3D Transforms:    {doc.Transforms.Count}");
-            Console.Error.WriteLine($"3D Meshes:        {doc.Meshes.Count}");
-            Console.Error.WriteLine($"Vertices:         {totalVertices:N0}");
-            Console.Error.WriteLine($"Triangles:        {totalTriangles:N0}");
-            Console.Error.WriteLine($"Materials:        {doc.Materials.Count}");
-            Console.Error.WriteLine($"Saved viewpoints: {doc.SavedViewpoints.Count}");
+            @err.WriteLine($"Timestamp:        {doc.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "<unknown>"}");
+            @err.WriteLine($"Scene tree nodes: {treeNodeCount}");
+            @err.WriteLine($"Property records: {doc.PropertyRecords.Count}");
+            @err.WriteLine($"GUIDs:            {doc.Guids.Count}");
+            @err.WriteLine($"3D Transforms:    {doc.Transforms.Count}");
+            @err.WriteLine($"3D Meshes:        {doc.Meshes.Count}");
+            @err.WriteLine($"Vertices:         {totalVertices:N0}");
+            @err.WriteLine($"Triangles:        {totalTriangles:N0}");
+            @err.WriteLine($"Materials:        {doc.Materials.Count}");
+            @err.WriteLine($"Saved viewpoints: {doc.SavedViewpoints.Count}");
             if (doc.SelectionSets.Count > 0)
             {
-                Console.Error.WriteLine($"Selection Sets:   {doc.SelectionSets.Count}");
+                @err.WriteLine($"Selection Sets:   {doc.SelectionSets.Count}");
             }
             if (doc.TimeLiner is not null)
             {
-                Console.Error.WriteLine($"TimeLiner Tasks:  {doc.TimeLiner.Tasks.Count} (Planned Budget: {doc.TimeLiner.TotalPlannedCost:C0})");
+                @err.WriteLine($"TimeLiner Tasks:  {doc.TimeLiner.Tasks.Count} (Planned Budget: {doc.TimeLiner.TotalPlannedCost:C0})");
             }
             if (doc.XRefs is not null)
             {
-                Console.Error.WriteLine($"XRefs:            {doc.XRefs.References.Count}");
+                @err.WriteLine($"XRefs:            {doc.XRefs.References.Count}");
             }
             if (doc.DbCache is not null)
             {
-                Console.Error.WriteLine($"DbCache Entries:  {doc.DbCache.Entries.Count}");
+                @err.WriteLine($"DbCache Entries:  {doc.DbCache.Entries.Count}");
             }
             if (bvhStats && doc.Meshes.Count > 0)
             {
                 var idx = doc.SpatialIndex;
-                Console.Error.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
-                Console.Error.WriteLine($"Bounding box:     {idx.Bounds}");
+                @err.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
+                @err.WriteLine($"Bounding box:     {idx.Bounds}");
             }
-            Console.Error.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
-            Console.Error.WriteLine($"Output:           {outputPath}");
+            @err.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
+            @err.WriteLine($"Output:           {outputPath}");
         }
         else
         {
-            Console.WriteLine(FormattableString.Invariant(
+            infoOut.WriteLine(FormattableString.Invariant(
                 $"Exported {doc.PropertyRecords.Count} records, {doc.Guids.Count} GUIDs, {doc.Transforms.Count} transforms, {doc.Meshes.Count} meshes, {doc.Materials.Count} materials to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
@@ -1109,9 +1132,19 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
-        bool includeTree = true)
+        bool includeTree = true,
+        Stream? stdoutStream = null,
+        TextWriter? outWriter = null,
+        TextWriter? errorWriter = null)
     {
-        outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
+        var @out = outWriter ?? Console.Out;
+        var @err = errorWriter ?? Console.Error;
+        TextWriter infoOut = (outputPath == "-") ? @err : @out;
+
+        if (outputPath != "-")
+        {
+            outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
+        }
 
         var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: new NwcReaderOptions { BuildSceneTree = includeTree });
 
@@ -1163,7 +1196,7 @@ internal static class Program
         if (linkTimeLiner && assembly.TimeLiner is not null)
         {
             int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
-            Console.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+            infoOut.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
         }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
@@ -1227,6 +1260,20 @@ internal static class Program
                 fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
                 meshes: assembly.AllMeshes);
             merged.Save(outputPath);
+        }
+        else if (outputPath == "-")
+        {
+            if (stdoutStream != null)
+            {
+                assembly.SaveJson(stdoutStream, new NwcJsonExportOptions { Indented = indent });
+                stdoutStream.Flush();
+            }
+            else
+            {
+                using var stdout = Console.OpenStandardOutput();
+                assembly.SaveJson(stdout, new NwcJsonExportOptions { Indented = indent });
+                stdout.Flush();
+            }
         }
         else
         {
@@ -1296,54 +1343,54 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitClashMatrixMdPath);
                 assembly.ExportClashMatrixMarkdown(explicitClashMatrixMdPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
             }
             if (!string.IsNullOrEmpty(explicitClashMatrixBcfPath))
             {
                 EnsureParentDirectory(explicitClashMatrixBcfPath);
                 assembly.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
             }
 
-            Console.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
+            infoOut.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
         }
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg);
+            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err);
         }
 
         if (listViewpoints)
         {
-            PrintViewpoints(assembly.SavedViewpoints);
+            PrintViewpoints(assembly.SavedViewpoints, infoOut);
         }
 
         sw.Stop();
 
         if (printReport)
         {
-            Console.Error.WriteLine("=== NwcIO Assembly Report ===");
-            Console.Error.WriteLine($"Assembly:         {assembly.Name}");
-            Console.Error.WriteLine($"Models:           {assembly.Models.Count}");
-            Console.Error.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
-            Console.Error.WriteLine($"Total Materials:  {assembly.AllMaterials.Count}");
-            Console.Error.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
-            Console.Error.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
+            @err.WriteLine("=== NwcIO Assembly Report ===");
+            @err.WriteLine($"Assembly:         {assembly.Name}");
+            @err.WriteLine($"Models:           {assembly.Models.Count}");
+            @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
+            @err.WriteLine($"Total Materials:  {assembly.AllMaterials.Count}");
+            @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
+            @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
             if (bvhStats)
             {
                 var idx = assembly.SpatialIndex;
-                Console.Error.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
+                @err.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
             }
             if (clashes is not null)
             {
-                Console.Error.WriteLine($"Clashes Detected: {clashes.Count}");
+                @err.WriteLine($"Clashes Detected: {clashes.Count}");
             }
-            Console.Error.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
-            Console.Error.WriteLine($"Output:           {outputPath}");
+            @err.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
+            @err.WriteLine($"Output:           {outputPath}");
         }
         else
         {
-            Console.WriteLine(FormattableString.Invariant(
+            infoOut.WriteLine(FormattableString.Invariant(
                 $"Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes, {assembly.AllMaterials.Count} materials exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
@@ -1385,9 +1432,19 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
-        bool includeTree = true)
+        bool includeTree = true,
+        Stream? stdoutStream = null,
+        TextWriter? outWriter = null,
+        TextWriter? errorWriter = null)
     {
-        outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
+        var @out = outWriter ?? Console.Out;
+        var @err = errorWriter ?? Console.Error;
+        TextWriter infoOut = (outputPath == "-") ? @err : @out;
+
+        if (outputPath != "-")
+        {
+            outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
+        }
         var assembly = NwcAssembly.OpenNwf(nwfPath, new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
@@ -1438,7 +1495,7 @@ internal static class Program
         if (linkTimeLiner && assembly.TimeLiner is not null)
         {
             int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
-            Console.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+            infoOut.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
         }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
@@ -1502,6 +1559,20 @@ internal static class Program
                 fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
                 meshes: assembly.AllMeshes);
             merged.Save(outputPath);
+        }
+        else if (outputPath == "-")
+        {
+            if (stdoutStream != null)
+            {
+                assembly.SaveJson(stdoutStream, new NwcJsonExportOptions { Indented = indent });
+                stdoutStream.Flush();
+            }
+            else
+            {
+                using var stdout = Console.OpenStandardOutput();
+                assembly.SaveJson(stdout, new NwcJsonExportOptions { Indented = indent });
+                stdout.Flush();
+            }
         }
         else
         {
@@ -1571,69 +1642,70 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitClashMatrixMdPath);
                 assembly.ExportClashMatrixMarkdown(explicitClashMatrixMdPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
             }
             if (!string.IsNullOrEmpty(explicitClashMatrixBcfPath))
             {
                 EnsureParentDirectory(explicitClashMatrixBcfPath);
                 assembly.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
             }
 
-            Console.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
+            infoOut.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
         }
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg);
+            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err);
         }
 
         if (listViewpoints)
         {
-            PrintViewpoints(assembly.SavedViewpoints);
+            PrintViewpoints(assembly.SavedViewpoints, infoOut);
         }
 
         sw.Stop();
 
         if (printReport)
         {
-            Console.Error.WriteLine("=== NwcIO NWF Assembly Report ===");
-            Console.Error.WriteLine($"NWF File:         {nwfPath}");
+            @err.WriteLine("=== NwcIO NWF Assembly Report ===");
+            @err.WriteLine($"NWF File:         {nwfPath}");
             // Models[0] is the .nwf document itself; report the component files separately.
-            Console.Error.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
-            Console.Error.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
-            Console.Error.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
-            Console.Error.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
+            @err.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
+            @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
+            @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
+            @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
             foreach (var xref in assembly.UnresolvedXRefs)
             {
-                Console.Error.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
+                @err.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
             }
             foreach (var xref in assembly.SkippedXRefs)
             {
-                Console.Error.WriteLine($"Warning: skipped unsupported reference (not .nwc/.nwd): '{xref.EffectivePath}'");
+                @err.WriteLine($"Warning: skipped unsupported reference (not .nwc/.nwd): '{xref.EffectivePath}'");
             }
             if (clashes is not null)
             {
-                Console.Error.WriteLine($"Clashes Detected: {clashes.Count}");
+                @err.WriteLine($"Clashes Detected: {clashes.Count}");
             }
-            Console.Error.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
-            Console.Error.WriteLine($"Output:           {outputPath}");
+            @err.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
+            @err.WriteLine($"Output:           {outputPath}");
         }
         else
         {
-            Console.WriteLine(FormattableString.Invariant(
+            infoOut.WriteLine(FormattableString.Invariant(
                 $"NWF Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
         return 0;
     }
 
-    private static void PrintViewpoints(IReadOnlyList<NwcSavedViewpoint> viewpoints)
+    private static void PrintViewpoints(IReadOnlyList<NwcSavedViewpoint> viewpoints, TextWriter? writer = null)
     {
-        Console.WriteLine($"=== Saved Viewpoints ({viewpoints.Count}) ===");
+        var @out = writer ?? Console.Out;
+        @out.WriteLine($"=== Saved Viewpoints ({viewpoints.Count}) ===");
         if (viewpoints.Count == 0)
         {
-            Console.WriteLine("No saved viewpoints found.");
+            @out.WriteLine("No saved viewpoints found.");
             return;
         }
 
@@ -1641,17 +1713,19 @@ internal static class Program
         {
             var vp = viewpoints[i];
             var cam = vp.Camera;
-            Console.WriteLine(FormattableString.Invariant(
+            @out.WriteLine(FormattableString.Invariant(
                 $"[{i + 1}] \"{vp.Name}\" ({cam.Projection}) Pos: {cam.Position} Dir: {cam.Direction} Up: {cam.Up} Target: {cam.Target} FOV: {cam.FieldOfView:F1}° FocalDist: {cam.FocalDistance:F2}"));
             if (vp.Comments.Count > 0)
             {
-                Console.WriteLine($"     Comments: {string.Join("; ", vp.Comments)}");
+                @out.WriteLine($"     Comments: {string.Join("; ", vp.Comments)}");
             }
         }
     }
 
-    private static void ExecuteRaycastTest(NwcSpatialIndex index, string coords)
+    private static void ExecuteRaycastTest(NwcSpatialIndex index, string coords, TextWriter? writer = null, TextWriter? errWriter = null)
     {
+        var @out = writer ?? Console.Out;
+        var @err = errWriter ?? Console.Error;
         var parts = coords.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 6 ||
             !double.TryParse(parts[0], CultureInfo.InvariantCulture, out double ox) ||
@@ -1661,7 +1735,7 @@ internal static class Program
             !double.TryParse(parts[4], CultureInfo.InvariantCulture, out double dy) ||
             !double.TryParse(parts[5], CultureInfo.InvariantCulture, out double dz))
         {
-            Console.Error.WriteLine($"Warning: Invalid raycast format '{coords}'. Expected: ox,oy,oz,dx,dy,dz");
+            @err.WriteLine($"Warning: Invalid raycast format '{coords}'. Expected: ox,oy,oz,dx,dy,dz");
             return;
         }
 
@@ -1670,12 +1744,12 @@ internal static class Program
 
         if (index.Raycast(origin, dir, out var hit))
         {
-            Console.WriteLine(FormattableString.Invariant(
+            @out.WriteLine(FormattableString.Invariant(
                 $"Raycast HIT at distance {hit.Distance:F3}: Point={hit.Point}, Normal={hit.Normal}, MeshId={hit.Mesh.Id}, Triangle={hit.TriangleIndex}"));
         }
         else
         {
-            Console.WriteLine("Raycast MISS: no intersecting surface found along the ray.");
+            @out.WriteLine("Raycast MISS: no intersecting surface found along the ray.");
         }
     }
 
