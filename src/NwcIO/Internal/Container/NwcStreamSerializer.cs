@@ -227,7 +227,7 @@ internal static class NwcStreamSerializer
         w.Write(timestamp);
 
         // [int64 source file size]
-        w.Write(0L);
+        w.Write(fileInfo.SourceByteSize ?? 0L);
 
         // Length-prefixed loader plugin
         string plugin = !string.IsNullOrWhiteSpace(fileInfo.LoaderPlugin) ? fileInfo.LoaderPlugin : "LcOpRevitExport";

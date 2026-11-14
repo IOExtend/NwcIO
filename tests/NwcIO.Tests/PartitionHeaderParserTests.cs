@@ -13,10 +13,11 @@ public class PartitionHeaderParserTests
     public void Open_AlignedHeader_ReadsPathTimestampAndPlugin(string path)
     {
         var doc = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write(
-            [SyntheticNwcFile.PartitionHeader(path, 1767225600, "LcNwcLoaderPlugin:lcldrevit")])));
+            [SyntheticNwcFile.PartitionHeader(path, 1767225600, "LcNwcLoaderPlugin:lcldrevit", 123456789)])));
 
         Assert.Equal(path, doc.FileInfo.SourcePath);
         Assert.Equal(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), doc.FileInfo.SourceTimestampUtc);
+        Assert.Equal(123456789L, doc.FileInfo.SourceByteSize);
         Assert.Equal("LcNwcLoaderPlugin:lcldrevit", doc.FileInfo.LoaderPlugin);
     }
 
@@ -30,6 +31,25 @@ public class PartitionHeaderParserTests
 
         Assert.Equal("ab.rvt", doc.FileInfo.SourcePath);
         Assert.Null(doc.FileInfo.SourceTimestampUtc);
+        Assert.Null(doc.FileInfo.SourceByteSize);
         Assert.Null(doc.FileInfo.LoaderPlugin);
+    }
+
+    [Fact]
+    public void Save_SourceByteSize_RoundtripsSuccessfully()
+    {
+        var original = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write(
+            [SyntheticNwcFile.PartitionHeader("model.rvt", 1767225600, "LcNwcLoaderPlugin:lcldrevit", 123456789)])));
+
+        Assert.Equal(123456789L, original.FileInfo.SourceByteSize);
+
+        using var ms = new MemoryStream();
+        original.Save(ms);
+        ms.Position = 0;
+
+        var roundtripped = NwcDocument.Open(ms);
+        Assert.Equal(123456789L, roundtripped.FileInfo.SourceByteSize);
+        Assert.Equal("model.rvt", roundtripped.FileInfo.SourcePath);
+        Assert.Equal("LcNwcLoaderPlugin:lcldrevit", roundtripped.FileInfo.LoaderPlugin);
     }
 }
