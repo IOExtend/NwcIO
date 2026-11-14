@@ -45,6 +45,18 @@ public class ElementIdentityTests
     }
 
     [Fact]
+    public void Open_ChildOfAPairsSecondNode_PointsToTheFirst()
+    {
+        var doc = Open([new("Type", "LcRevitCollection", Children: [
+            new("Door", "LcRevitComposite", X: 1),
+            new("Door", "LcRevitComposite", X: 1, Children: [new("Panel", "LcRevitSolid")])])], [G1]);
+        var type = doc.RootNode!.Children[0];
+        var (first, panel) = (type.Children[0], type.Children[1].Children[0]);
+        Assert.Same(first, panel.Element);
+        Assert.False(panel.IsElement); Assert.Null(panel.ElementGuid);
+    }
+
+    [Fact]
     public void Open_OneIndexUnderDifferentParents_ThrowsRevitLinks()
     {
         var ex = Assert.Throws<NotSupportedException>(() => Open([
@@ -133,13 +145,21 @@ public class ElementIdentityTests
     public void Open_IfcGuidParameter_WinsWhenValid(string tab, string stored, string expected) =>
         Assert.Equal(expected, IfcGlobalIdWith(tab, stored, null));
 
+    [Theory]
+    [InlineData("lcldrevit_parameter_-1019001", 4, "3Ax9$kQwz0Bf8cYp2LmN4r")]   // another parameter
+    [InlineData("lcldrevit_parameter_-1019000", 1, 1.0)]                         // a number, not text
+    [InlineData("lcldrevit_parameter_-1019000", 9, "3Ax9$kQwz0Bf8cYp2LmN4r")]   // valid text of value type 9, not 4
+    [InlineData("lcldrevit_parameter_-1019000", 4, "3Ax9$kQwz0Bf8cYp2LmN4!")]   // 22 characters, the last outside the IFC alphabet
+    public void Open_NoValidIfcGuidParameter_UsesTheExportGuid(string internalName, int type, object stored) =>
+        Assert.Equal("1x35fEForB6foERLzEFlcn", IfcGlobalIdWith("LcRevitData_Element", stored, null, internalName, type));
+
     [Fact]
     public void Open_PropertiesOff_StillReadsTheIfcGuidParameter() =>
         Assert.Equal("3Ax9$kQwz0Bf8cYp2LmN4r", IfcGlobalIdWith("LcRevitData_Element", "3Ax9$kQwz0Bf8cYp2LmN4r", new NwcReaderOptions { ReadPropertyRecords = false }));
 
-    private static string? IfcGlobalIdWith(string tab, string stored, NwcReaderOptions? options)
+    private static string? IfcGlobalIdWith(string tab, object stored, NwcReaderOptions? options, string internalName = "lcldrevit_parameter_-1019000", int type = 4)
     {
-        var t = new Tab(null, "Tab", tab, new Prop("IfcGUID", "lcldrevit_parameter_-1019000", 4, stored));
+        var t = new Tab(null, "Tab", tab, new Prop("IfcGUID", internalName, type, stored));
         var (h, p) = SyntheticTree.Write(1, new TreeNode("L", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1, Slots: [new PTab(t)])]));
         var file = SyntheticNwcFile.Build(h, null, [], [], extraStreams: [("LcOpGuidStore", SyntheticNwcFile.GuidStore(G1))], partitionProps: p);
         return NwcDocument.Open(new MemoryStream(file), options).RootNode!.Children[0].Children[0].IfcGlobalId;

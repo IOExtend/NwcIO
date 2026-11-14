@@ -6,10 +6,10 @@ namespace NwcIO.Model;
 /// </summary>
 public sealed class NwcPropertyTab
 {
-    /// <summary>The stored tab name, else the display name of its username, else "".</summary>
+    /// <summary>The stored tab name, else the display name of its username, else ""; for the element id (class 66), a one-property tab named by its key, the display name of the key.</summary>
     public required string Name { get; init; }
 
-    /// <summary>The internal name of the tab's class-52 username, for example <c>LcRevitData_Element</c>.</summary>
+    /// <summary>The internal name of the tab's class-52 username, for example <c>LcRevitData_Element</c>; for the element id (class 66), the internal name of its key, <c>LcRevitId</c>.</summary>
     public string? InternalName { get; init; }
 
     /// <summary>The tab's records in stored order.</summary>

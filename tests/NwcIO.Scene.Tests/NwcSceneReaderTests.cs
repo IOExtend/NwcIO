@@ -201,6 +201,20 @@ public sealed class NwcSceneReaderTests
         Assert.Contains((SceneSeverity.Warning, "properties-outside-tabs"), result.Diagnostics.Select(d => (d.Severity, d.Code)));
     }
 
+    [Theory]
+    [InlineData("0", "0")]
+    [InlineData("-1", "1")]
+    public void Read_BooleanValue_IsZeroOrOne(string stored, string text)
+    {
+        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Element",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 3, Value = stored }] };
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
+        leaf.PropertyTabs.Add(tab); root.Children.Add(leaf);
+        var doc = Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new() { ModelKey = "k" })).Document;
+        Assert.Equal(text, Assert.Single(Assert.Single(doc.PropertySets).Properties).Value.Text);
+    }
+
     [Theory]   // guard: before this task no set is written at all
     [InlineData(6, "NaN")]
     [InlineData(6, "x")]

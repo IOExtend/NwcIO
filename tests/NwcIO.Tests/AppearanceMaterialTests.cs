@@ -59,10 +59,16 @@ public class AppearanceMaterialTests
         Assert.Single(Open([new("G", "LcRevitLayer", Children: [new("A", "LcRevitSolid", Slots: [new HTab(tab)])])], [Quad(2, Grey)]).Materials);
     }
 
-    [Fact]
-    public void Open_NonFiniteClass54Value_Throws()
+    [Theory]   // with or without the tree and ReadMaterials, also in a float the reader drops
+    [InlineData(true, true, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]   // NaN in the shininess
+    public void Open_NonFiniteClass54Value_Throws(bool tree, bool materials, bool unusedFloat)
     {
-        var ex = Assert.Throws<InvalidDataException>(() => Open([new("G", "LcRevitLayer", Children: [new("A", "LcRevitSolid")])], [Quad(2, new Look(float.NaN, 0, 0, 0, 0))]));
+        var look = unusedFloat ? new Look(0, 0, 0, float.NaN, 0) : new Look(float.NaN, 0, 0, 0, 0);
+        var ex = Assert.Throws<InvalidDataException>(() => Open([new("G", "LcRevitLayer", Children: [new("A", "LcRevitSolid")])], [Quad(2, look)],
+            new NwcReaderOptions { BuildSceneTree = tree, ReadMaterials = materials }));
         Assert.EndsWith(": class-54 value is not finite", ex.Message);
     }
 
