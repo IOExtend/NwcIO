@@ -81,7 +81,7 @@ internal static class Program
           3  Data format error or parsing failure
         """;
 
-    // The reader throws NotSupportedException only for a scene tree it cannot decode (class-32 partition nodes).
+    // The reader throws NotSupportedException only for a scene tree it cannot convert (class-32 partition nodes, linked Revit models); --no-tree reads around both.
     private const string NoTreeHint = " Use --no-tree to read geometry and placement without the scene tree.";
 
     public static int Main(string[] args)

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using NwcIO.Internal.Container;
 using NwcIO.Model;
 
@@ -9,10 +10,11 @@ internal sealed record ModelSegments(
     LcRawStream? Hierarchy,
     LcRawStream? Fragments,
     IReadOnlyList<LcRawStream> GeometryChunks,
-    LcRawStream? Toc);
+    LcRawStream? Toc,
+    LcRawStream? GuidStore);
 
-/// <summary>The strictly read model: the tree root (null without a scene tree) and one mesh and transform per fragment.</summary>
-internal sealed record ModelGraph(NwcNode? Root, IReadOnlyList<NwcMesh> Meshes, IReadOnlyList<NwcTransform> Transforms);
+/// <summary>The strictly read model: the tree root (null without a scene tree), one mesh and transform per fragment, and the GUID table (empty when not read).</summary>
+internal sealed record ModelGraph(NwcNode? Root, IReadOnlyList<NwcMesh> Meshes, IReadOnlyList<NwcTransform> Transforms, IReadOnlyList<Guid> Guids);
 
 /// <summary>
 /// Reads a Navisworks model file through its DbCache directory (docs/format-notes.md §2.7): the hierarchy, geometry and fragments
@@ -23,6 +25,7 @@ internal static class ModelGraphReader
     private const string HierarchySegment = "LcOpNwdLogicalHierarchy";
     private const string FragmentsSegment = "LcOpNwdFragments";
     private const string GeometrySegment = "LcOpNwdGeometry";
+    private const string GuidStoreSegment = "LcOpGuidStore";
 
     /// <returns>The segments, or null when the container is not a model file (it then keeps the lenient path).</returns>
     /// <exception cref="InvalidDataException">The directory names a model segment more than once or in a wrong shape.</exception>
@@ -36,7 +39,7 @@ internal static class ModelGraphReader
             return null;
         }
 
-        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null;
+        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null, guidStore = null;
         foreach (var entry in directory.Entries)
         {
             switch (entry.Name[(entry.Name.LastIndexOf('\\') + 1)..])
@@ -50,6 +53,9 @@ internal static class ModelGraphReader
                 case GeometrySegment:
                     geometry = Once(geometry, entry, GeometrySegment);
                     break;
+                case GuidStoreSegment:
+                    guidStore = Once(guidStore, entry, GuidStoreSegment);
+                    break;
             }
         }
 
@@ -61,6 +67,7 @@ internal static class ModelGraphReader
         var streams = container.Streams;
         var hierarchyStream = hierarchy is null ? null : SingleStream(streams, hierarchy, HierarchySegment);
         var fragmentsStream = fragments is null ? null : SingleStream(streams, fragments, FragmentsSegment);
+        var guidStoreStream = guidStore is null ? null : SingleStream(streams, guidStore, GuidStoreSegment);
         LcRawStream[] chunks = [];
         LcRawStream? toc = null;
         if (geometry is not null)
@@ -85,20 +92,24 @@ internal static class ModelGraphReader
             toc.Kind = NwcStreamKind.Toc;
         }
 
-        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc);
+        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc, guidStoreStream);
     }
 
     /// <summary>The tree first, so a tree that cannot be read fails before any geometry work; then geometry, fragments and links.</summary>
     /// <exception cref="InvalidDataException">A segment breaks its grammar or a fragment breaks a link rule.</exception>
-    /// <exception cref="NotSupportedException">The tree holds class-32 nodes and <see cref="NwcReaderOptions.BuildSceneTree"/> is on.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static ModelGraph Read(ModelSegments segments, NwcReaderOptions options, string rootName)
     {
+        // The tree needs the table for element GUIDs whatever ReadGuids says.
+        Guid[] guids = segments.GuidStore is not null && (options.ReadGuids || (options.BuildSceneTree && segments.Hierarchy is not null))
+            ? ReadGuidStore(segments.GuidStore.Data)
+            : [];
         IReadOnlyList<NwcNode>? preorder = null;
         if (options.BuildSceneTree)
         {
             preorder = segments.Hierarchy is null
                 ? [new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 }]
-                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords);
+                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords, guids);
         }
 
         var meshes = new List<NwcMesh>();
@@ -161,7 +172,36 @@ internal static class ModelGraphReader
             }
         }
 
-        return new ModelGraph(preorder?[0], meshes, transforms);
+        return new ModelGraph(preorder?[0], meshes, transforms, guids);
+    }
+
+    // [i32 a = 1][i32 n][n x 16-byte GUID] in Windows layout (docs/format-notes.md §2.3).
+    private static Guid[] ReadGuidStore(byte[] data)
+    {
+        if (data.Length < 8)
+        {
+            throw new InvalidDataException($"{GuidStoreSegment}: shorter than its 8-byte head");
+        }
+
+        int a = BinaryPrimitives.ReadInt32LittleEndian(data);
+        if (a != 1)
+        {
+            throw new InvalidDataException($"{GuidStoreSegment}: head a is {a}, not 1");
+        }
+
+        int n = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(4));
+        if (n < 0 || data.Length != 8 + (16L * n))
+        {
+            throw new InvalidDataException($"{GuidStoreSegment}: {n} GUIDs do not fill {data.Length} bytes");
+        }
+
+        var guids = new Guid[n];
+        for (int i = 0; i < n; i++)
+        {
+            guids[i] = new Guid(data.AsSpan(8 + (16 * i), 16));
+        }
+
+        return guids;
     }
 
     private static NwcDbCacheEntry Once(NwcDbCacheEntry? found, NwcDbCacheEntry entry, string segment) =>

@@ -51,7 +51,7 @@ public sealed class NwcDocument
     /// <summary>Flat records parsed from the scene-tree/property streams.</summary>
     public IReadOnlyList<NwcPropertyRecord> PropertyRecords { get; }
 
-    /// <summary>GUIDs from the GUID table streams, in file order.</summary>
+    /// <summary>GUIDs from the GUID table streams, in file order; for model files read through their DbCache directory, the <c>LcOpGuidStore</c> table.</summary>
     public IReadOnlyList<Guid> Guids { get; }
 
     /// <summary>3D spatial transformations and bounding boxes parsed from transform streams.</summary>
@@ -109,7 +109,7 @@ public sealed class NwcDocument
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
     /// <exception cref="InvalidDataException">The file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
     {
         if (!File.Exists(path))
@@ -125,7 +125,7 @@ public sealed class NwcDocument
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>
     /// <exception cref="InvalidDataException">The stream is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -155,7 +155,7 @@ public sealed class NwcDocument
         }
 
         var guids = new List<Guid>();
-        if (options.ReadGuids)
+        if (options.ReadGuids && segments is null)
         {
             foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.Guids))
             {
@@ -175,6 +175,10 @@ public sealed class NwcDocument
             transforms.AddRange(graph.Transforms);
             meshes.AddRange(graph.Meshes);
             rootNode = graph.Root;
+            if (options.ReadGuids)
+            {
+                guids.AddRange(graph.Guids);
+            }
         }
         else
         {

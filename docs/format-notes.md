@@ -57,6 +57,7 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Classes**:
   - `53` group: `[str name][ptr 52 username][i32 flags][i32 X][i32 Y][Y x attribute ptr][i32 c][c x child ptr]`. Children are class 22 or 53 and are never null.
   - `22` leaf: the same layout without `c` and children.
+  - `X` (element index): 0 on every node that is not a Revit element; on an element node, `X - 1` indexes the GUID table (§2.3). The exporter writes some elements (for example grids) as two sibling nodes with the same `X`, not always adjacent; NwcIO makes the first the element and points the second to it. Such a pair takes two equal GUID table entries (`X - 1` and `X`), so the table size is the number of stored nodes with `X > 0` and the next element's index is `X + 2`. The same `X` under different parents, including a node and its descendant, is rejected as a placed model (`NotSupportedException`).
   - `32` (`LcOaPartition`, `.nwd` only): `[i32 0]`, a class-53 body, then a trailer that is not decoded. Class 32 nodes are the top-level children of a `.nwd`; class 53 nodes are the top-level children of a `.nwc`.
   - `52` display/internal name pair: `[str name][str internal]`. It is the node username, the property tab username and every property key.
 - **Attributes** (slots may be null): `86` property tab `[str name][ptr 52][i32 flags][i32 n] n x ([ptr 52 key][i32 type][value])` with value by type `0` none, `1,5,6,7,10,11` `f64`, `2,3` `i32`, `4` string, `8` class-52 pointer; `31` material; `40` translation; `41` translation and quaternion (`x -> R(q)x + t`); `39` 3x3 column-major matrix and translation; `79` hyperlinks; `200` and `185` material JSON.
@@ -64,8 +65,8 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Preorder index (`seq`)**: walk from the implicit root in stored order, counting groups, with a shared subtree walked again at every place it occurs. The root has index 0. Every fragment's `seq` indexes this expanded sequence and lands on a leaf; `seq` never decreases along the fragments stream, and a leaf owns one contiguous run of fragments.
 
 ### 2.3 GUID Table (`Guids`)
-- **Signature**: `[int32 ?][int32 count]` where `(streamLength - 8) == count * 16`.
-- **Payload**: sequential array of 16-byte raw little-endian GUIDs corresponding to element unique IDs.
+- **Location**: the DbCache entry `LcOpGuidStore`, one zlib stream `[i32 a = 1][i32 n][n x 16-byte GUID]` in Windows layout. The GUID of element `X` is the Revit export GUID of the element (its UniqueId's session GUID with the last 32 bits XORed with the element id).
+- **Other containers**: files not read through a DbCache directory are scanned for streams `[int32 ?][int32 count]` where `(streamLength - 8) == count * 16`, followed by the 16-byte GUIDs.
 
 ### 2.4 Fragments (`LcOpNwdFragments`)
 - **Location**: the DbCache entry whose final segment is `LcOpNwdFragments` (one zlib stream). Framing: `[int32 n] n x pointer`, zero-padded to a multiple of 8. Pointers follow the rule in §2.2; every root pointer is a new class-13 object.
@@ -142,7 +143,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
 - **`(a, b)` shapes**:
   - `(0, 0)`: one zlib stream starts at `offset` and its compressed length is `length`;
   - `(4, b)`: a 4-byte prefix sits at `offset`, then consecutive zlib streams follow with no gaps; the last stream's compressed length is `b`, and the segment ends at `offset + length`.
-- **Segments the reader uses**: `LcOpNwdLogicalHierarchy` (§2.2) and `LcOpNwdFragments` (§2.4) are `(0, 0)`; `LcOpNwdGeometry` (§2.5) is `(4, b)`. `LcOpNwdGeometryCompress` is 40 raw bytes and is not decoded. Other entries are listed but not parsed.
+- **Segments the reader uses**: `LcOpNwdLogicalHierarchy` (§2.2), `LcOpGuidStore` (§2.3) and `LcOpNwdFragments` (§2.4) are `(0, 0)`; `LcOpNwdGeometry` (§2.5) is `(4, b)`. `LcOpNwdGeometryCompress` is 40 raw bytes and is not decoded. Other entries are listed but not parsed.
 - **Strict path**: a container is read through these segments when section 1 holds exactly one stream, the stream parses as this directory and it names `LcOpNwdLogicalHierarchy`, `LcOpNwdFragments` or `LcOpNwdGeometry`. Any other container keeps the previous reader. NwcIO's writer still emits its own single-section layout, which the reader keeps.
 - **Model API**: `NwcDbCacheEntry.Offset` is the absolute file offset, `Extra` equals `a + b * 2^32`, and `DatabaseName` is the name of the `LcOpDBCache` entry, or `""` when there is none.
 

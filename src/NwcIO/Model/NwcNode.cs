@@ -28,6 +28,12 @@ public sealed class NwcNode
     /// <summary>Element unique identifier (GUID) if assigned.</summary>
     public Guid? ElementGuid { get; set; }
 
+    /// <summary>True on a Revit element node: the first node of a model file read through its DbCache directory that carries an element index; its <see cref="ElementGuid"/> is the element's export GUID.</summary>
+    public bool IsElement { get; set; }
+
+    /// <summary>The element occurrence this node belongs to: itself when <see cref="IsElement"/>, else its parent's <see cref="Element"/>, or for the second node of a sibling pair that repeats one element the first node of the pair; null outside elements.</summary>
+    public NwcNode? Element { get; set; }
+
     /// <summary>3D spatial transformation (pose and bounding box) if present.</summary>
     public NwcTransform? Transform { get; set; }
 

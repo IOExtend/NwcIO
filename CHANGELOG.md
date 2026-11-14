@@ -6,9 +6,12 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 
 ### Added
 - `NwcLengthUnit`, `NwcDocument.LengthUnit` and `NwcDocument.MetresPerUnit`: feet for caches written by the Revit loader (`LcNwcLoaderPlugin:lcldrevit`), `Unknown` otherwise.
+- `NwcNode.IsElement` and `NwcNode.Element`.
 
 ### Changed
 - **Breaking:** The partition header is read with its zero pads after the source path (to 4 bytes) and before the timestamp (to 8 bytes): `NwcFileInfo.SourceTimestampUtc` and `LoaderPlugin` are now read from every Navisworks model file, where 0.11 read them only when the path length was a multiple of 4 and no pad was needed. `NwcWriter` writes the same layout, so a file written by NwcIO 0.11 whose source path needed a pad opens without timestamp and loader plugin.
+- **Breaking:** `NwcNode.ElementGuid` is the element's export GUID on Revit element nodes of the strict path (read from `LcOpGuidStore` by its element index), where 0.11 left it null; diff and set matching by `ElementGuid` now match these elements. On the strict path `NwcDocument.Guids` is the `LcOpGuidStore` table.
+- **Breaking:** Opening a model whose tree places one element under two different parents (a linked Revit model) throws `NotSupportedException` unless `BuildSceneTree` is false; a malformed `LcOpGuidStore` or an element index outside it throws `InvalidDataException`.
 
 ## [0.11.0] - 2026-11-14
 

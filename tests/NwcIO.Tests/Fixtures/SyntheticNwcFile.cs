@@ -123,4 +123,8 @@ internal static class SyntheticNwcFile
     /// <summary>The partition-0 header stream with its zero pads (docs/format-notes.md §2.1).</summary>
     public static byte[] PartitionHeader(string sourcePath, long unixSeconds, string loaderPlugin) =>
         new LcGraphWriter().Long(7).Str(sourcePath).Int(-1).Long(unixSeconds).Long(0).Str(loaderPlugin).ToArray();
+
+    /// <summary>The <c>LcOpGuidStore</c> stream [i32 1][i32 n][n x 16-byte GUID] in Windows layout (docs/format-notes.md §2.3).</summary>
+    public static byte[] GuidStore(params Guid[] guids) =>
+        [.. BitConverter.GetBytes(1), .. BitConverter.GetBytes(guids.Length), .. guids.SelectMany(g => g.ToByteArray())];
 }

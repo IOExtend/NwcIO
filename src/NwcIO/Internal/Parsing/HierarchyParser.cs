@@ -34,11 +34,14 @@ internal static class HierarchyParser
     private static ReadOnlySpan<int> KnownClasses => [53, 22, 32, 52, 86, 31, 40, 41, 39, 79, 200, 185];
 
     /// <param name="includeProperties">False leaves every node's properties empty; the class-86 bodies are still read and checked.</param>
+    /// <param name="guids">The <c>LcOpGuidStore</c> table that element indices point into; null is an empty table.</param>
     /// <returns>The nodes in preorder; [0] is the synthetic root (Id 0, Name <paramref name="rootName"/>, Class "Model", Tag 0).</returns>
-    public static IReadOnlyList<NwcNode> Read(byte[] data, string rootName, bool includeProperties = true)
+    /// <exception cref="NotSupportedException">One element index sits on nodes under different parents (a linked Revit model).</exception>
+    public static IReadOnlyList<NwcNode> Read(byte[] data, string rootName, bool includeProperties = true, IReadOnlyList<Guid>? guids = null)
     {
-        var (top, total) = new Parser(new LcObjectReader(data, Segment)).ReadStream();
-        return Expand(top, rootName, total, includeProperties);
+        guids ??= [];
+        var (top, total) = new Parser(new LcObjectReader(data, Segment), guids.Count).ReadStream();
+        return Expand(top, rootName, total, includeProperties, guids);
     }
 
     /// <summary>Reads a class-185 body (material JSON with embedded files, docs/format-notes.md §2.2), which the fragments stream holds too.</summary>
@@ -68,10 +71,11 @@ internal static class HierarchyParser
     }
 
     // Preorder with an explicit stack: children in stored order, a back-referenced subtree walked again in full.
-    private static List<NwcNode> Expand(Node[] top, string rootName, long total, bool includeProperties)
+    private static List<NwcNode> Expand(Node[] top, string rootName, long total, bool includeProperties, IReadOnlyList<Guid> guids)
     {
         var root = new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 };
         var nodes = new List<NwcNode>((int)total) { root };
+        var firstByX = new Dictionary<int, NwcNode>();
         var pending = new Stack<(Node Node, NwcNode Parent)>();
         for (int i = top.Length - 1; i >= 0; i--)
         {
@@ -91,6 +95,28 @@ internal static class HierarchyParser
                 }
             }
 
+            // X > 0 marks an element node (docs/format-notes.md §2.2). The exporter writes some elements as two sibling nodes with one X;
+            // the first is the element and the second points to it. One X under different parents is a placed (linked) model.
+            if (node.X == 0)
+            {
+                occurrence.Element = parent.Element;
+            }
+            else if (!firstByX.TryGetValue(node.X, out var first))
+            {
+                occurrence.IsElement = true;
+                occurrence.Element = occurrence;
+                occurrence.ElementGuid = guids[node.X - 1];
+                firstByX.Add(node.X, occurrence);
+            }
+            else if (ReferenceEquals(first.Parent, parent))
+            {
+                occurrence.Element = first;
+            }
+            else
+            {
+                throw new NotSupportedException("Revit links are not supported yet: one element index sits on nodes under different parents in LcOpNwdLogicalHierarchy.");
+            }
+
             parent.Children.Add(occurrence);
             nodes.Add(occurrence);
             for (int i = node.Children.Length - 1; i >= 0; i--)
@@ -108,6 +134,7 @@ internal static class HierarchyParser
         int Tag,
         string Name,
         string Class,
+        int X,
         List<List<NwcPropertyRecord>> Tabs,
         long OwnProperties,
         Node[] Children,
@@ -121,11 +148,13 @@ internal static class HierarchyParser
     private sealed class Parser
     {
         private readonly LcObjectReader _reader;
+        private readonly int _guidCount;
         private readonly Func<int, object> _readBody;
 
-        public Parser(LcObjectReader reader)
+        public Parser(LcObjectReader reader, int guidCount)
         {
             _reader = reader;
+            _guidCount = guidCount;
             _readBody = ReadBody;
         }
 
@@ -192,7 +221,12 @@ internal static class HierarchyParser
             string? name = _reader.ReadString();
             var username = ReadUsername();
             _reader.ReadInt32();
-            _reader.ReadInt32();
+            int x = _reader.ReadInt32();
+            if (x < 0 || x > _guidCount)
+            {
+                throw _reader.Fail($"element index {x} is outside the GUID table of {_guidCount}");
+            }
+
             int attributeCount = _reader.ReadCount(4);
             var tabs = new List<List<NwcPropertyRecord>>();
             long ownProperties = 0;
@@ -207,7 +241,7 @@ internal static class HierarchyParser
 
             Node[] children = classId == 53 ? ReadNodes(ChildClasses) : [];
             var (size, propertyReferences, height) = Measure(children, ownProperties);
-            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", tabs, ownProperties, children, size, propertyReferences, height);
+            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, tabs, ownProperties, children, size, propertyReferences, height);
         }
 
         // Expanded size, property references and height of a node with these children; children finish before their parent, so theirs are known.
