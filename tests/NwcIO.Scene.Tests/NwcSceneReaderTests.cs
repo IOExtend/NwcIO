@@ -139,6 +139,85 @@ public sealed class NwcSceneReaderTests
         Assert.Equal([null, null, RevitSample.G1.ToString("D"), RevitSample.G2.ToString("D"), null], doc.Elements.Select(e => e.SourceId));
     }
 
+    [Fact]
+    public void Read_RevitSample_WritesSetsInSlotOrder()
+    {
+        var sets = Sets(Scene(RevitSample.Build()).Document, 5);
+        Assert.Equal([("Element", "nwc:LcRevitData_Element"), ("Level", null), ("Type", "nwc:LcRevitData_Type"), ("Element ID", "nwc:LcRevitId")],
+                     sets.Select(s => (s.Name, s.Key)));
+    }
+
+    [Fact]
+    public void Read_ValueText_FollowsTheValueType()
+    {
+        var element = Sets(Scene(RevitSample.Build()).Document, 5)[0];
+        Assert.Equal(
+            [("Category", "Walls"), ("Category Id", "-2000011"), ("Id", "1001"), ("Area", "10 m²"), ("Volume", "2 m³"), ("Angle", "90 °"), ("Comment", "note"),
+             ("Factor", "0.25"), ("Structural", "1"), ("Function", "Exterior"), ("Ident", "ID-9")],
+            element.Properties.Select(p => (p.Name, p.Value.Text)));
+        Assert.All(element.Properties, p => Assert.Equal((SceneValueKind.Text, (string?)null, (double?)null), (p.Value.Kind, p.Value.Unit, p.Value.Number)));
+        Assert.Equal("3000 mm", Sets(Scene(RevitSample.Build()).Document, 5)[1].Properties.Single(p => p.Name == "Elevation").Value.Text);
+    }
+
+    [Fact]
+    public void Read_KeysOnlyForStableInternalNames()
+    {
+        var doc = Scene(RevitSample.Build()).Document;
+        var element = Sets(doc, 5)[0];
+        Assert.Equal("nwc:LcRevitData_Element.lcldrevit_parameter_-1000001", element.Properties.Single(p => p.Name == "Area").Key);
+        Assert.Equal("nwc:LcRevitData_Element.LcRevitPropertyElementId", element.Properties.Single(p => p.Name == "Id").Key);
+        Assert.Null(element.Properties.Single(p => p.Name == "Comment").Key);
+        Assert.All(Sets(doc, 5)[1].Properties, p => Assert.Null(p.Key));
+        var material = Assert.Single(Sets(doc, 6));
+        Assert.Equal(("Concrete", "nwc:LcRevitMaterialProperties"), (material.Name, material.Key));
+        Assert.Equal(["nwc:LcRevitMaterialProperties.revit_Color", null], material.Properties.Select(p => p.Key));
+        Assert.Equal("nwc:LcRevitId.LcRevitId", Sets(doc, 5)[3].Properties[0].Key);
+    }
+
+    [Fact]
+    public void Read_SharedAndRepeatedTab_IsOneSetListedOnce()
+    {
+        var doc = Scene(RevitSample.Build()).Document;
+        Assert.Equal(doc.Elements[5].PropertySetIds[1..3], doc.Elements[7].PropertySetIds[1..3]);    // level and type tabs shared by the walls
+        Assert.Equal(doc.Elements[8].PropertySetIds[0], doc.Elements[10].PropertySetIds[0]);         // the pair's element tab
+
+        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Type",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }] };
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
+        leaf.PropertyTabs.AddRange([tab, tab]); root.Children.Add(leaf);
+        Assert.Single(Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new() { ModelKey = "k" })).Document.Elements[1].PropertySetIds);
+    }
+
+    [Fact]
+    public void Read_PropertiesOutsideTabs_AreReported()
+    {
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
+        leaf.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" });
+        root.Children.Add(leaf);
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root), new() { ModelKey = "k" }));
+        Assert.Empty(result.Document.PropertySets);
+        Assert.Contains((SceneSeverity.Warning, "properties-outside-tabs"), result.Diagnostics.Select(d => (d.Severity, d.Code)));
+    }
+
+    [Theory]   // guard: before this task no set is written at all
+    [InlineData(6, "NaN")]
+    [InlineData(4, null)]
+    [InlineData(13, "x")]
+    public void Read_ValueThatCannotBeShown_IsLeftOut(int type, string? value)
+    {
+        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Element",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = type, Value = value }] };
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
+        leaf.PropertyTabs.Add(tab); root.Children.Add(leaf);
+        var doc = Valid(NwcSceneReader.Read(NwcDocument.Create(new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root), new() { ModelKey = "k" })).Document;
+        Assert.Empty(doc.PropertySets);
+    }
+
+    private static ScenePropertySet[] Sets(SceneDocument doc, long element) => [.. doc.Elements[(int)element].PropertySetIds.Select(id => doc.PropertySets[id - 1])];
+
     // Every converted document must pass Validate() without errors or warnings (design §2, §6.5).
     private static NwcSceneResult Valid(NwcSceneResult r)
     {

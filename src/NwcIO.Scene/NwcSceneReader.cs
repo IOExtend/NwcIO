@@ -14,7 +14,7 @@ namespace NwcIO.Scene;
 /// name; <c>SourceFormat</c> is <c>nwc</c>; <c>Application</c> is the loader plugin after its last <c>:</c> (for example
 /// <c>lcldrevit</c>); <c>CreatedAt</c> is the source timestamp in UTC; <c>SourceLengthUnit</c> is <c>ft</c> when the unit used is feet.
 /// </remarks>
-public static class NwcSceneReader
+public static partial class NwcSceneReader
 {
     private const int ModelId = 1;
 
@@ -103,6 +103,8 @@ public static class NwcSceneReader
         var levelElementIds = revit ? LevelElementIds(root) : [];
         int elementCount = 0;
         int leavesOutsideElements = 0;
+        int nodesWithPropertiesOutsideTabs = 0;
+        var tabSets = new Dictionary<NwcPropertyTab, int?>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId)>();
         pending.Push((root, null, 0, null));
         while (pending.TryPop(out var item))
@@ -138,6 +140,11 @@ public static class NwcSceneReader
                 elementCount++;
             }
 
+            if (node.PropertyTabs.Count == 0 && node.Properties.Count > 0)
+            {
+                nodesWithPropertiesOutsideTabs++;
+            }
+
             var (category, typeName) = revit && kind == SceneNodeKind.Element ? CategoryAndType(node.Element ?? node) : ("", "");
 
             // The second node of a sibling pair is a part of the first.
@@ -155,6 +162,7 @@ public static class NwcSceneReader
                 Category = category,
                 TypeName = typeName,
                 LevelId = levelId,
+                PropertySetIds = PropertySetIds(node, scene, tabSets, unit == NwcLengthUnit.Feet),
             });
 
             for (int i = node.Children.Count - 1; i >= 0; i--)
@@ -168,6 +176,12 @@ public static class NwcSceneReader
         {
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "no-source-id",
                 $"{leavesOutsideElements} leaf nodes outside any Revit element have no SourceId: they cannot be identified outside this scene."));
+        }
+
+        if (nodesWithPropertiesOutsideTabs > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "properties-outside-tabs",
+                $"{nodesWithPropertiesOutsideTabs} nodes carry properties outside property tabs (the file was not read through its DbCache directory); they are not in the scene."));
         }
 
         return new NwcSceneResult
