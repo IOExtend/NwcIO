@@ -20,4 +20,10 @@ public sealed class NwcPropertyRecord
 
     /// <summary>String value when <see cref="ValueType"/> is a known text type; otherwise null.</summary>
     public string? Value { get; init; }
+
+    /// <summary>The internal name of the property tab on node properties of the strict path; null on scanned records.</summary>
+    public string? TabInternalName { get; init; }
+
+    /// <summary>The internal name of the property key on node properties of the strict path; null on scanned records.</summary>
+    public string? InternalName { get; init; }
 }

@@ -66,6 +66,28 @@ public class HierarchyParserTests
              (keyType, 52, "Type", "Element", 8, "Basic Wall"), (keyFlag, 52, "Flag", "Element", 0, (string?)null), (keyBare, 52, "", "Element", 4, "x"),
              (keyMark2, 52, "Mark", "Identity Data", 4, "M2")],
             leaf.Properties.Select(p => (p.FirstInt, p.Tag, p.Name, p.Class, p.ValueType, p.Value)));
+        Assert.Equal(
+            [("LcRevitData_Element", "lcArea"), ("LcRevitData_Element", "lcMark"), ("LcRevitData_Element", "lcCount"), ("LcRevitData_Element", "lcType"),
+             ("LcRevitData_Element", "lcFlag"), ("LcRevitData_Element", "lcBare"), ("LcRevitData_Identity", "lcMark2")],
+            leaf.Properties.Select(p => (p.TabInternalName, p.InternalName)));
+        Assert.Equal([("Element", "LcRevitData_Element", 6), ("Identity Data", "LcRevitData_Identity", 1)],
+            leaf.PropertyTabs.Select(t => (t.Name, t.InternalName, t.Properties.Count)));
+        Assert.Same(leaf.PropertyTabs[0].Properties[0], leaf.Properties[0]);
+    }
+
+    [Fact]
+    public void Read_ValueType9_IsAString()
+    {
+        var leaf = HierarchyParser.Read(GroupWithLeaf(1, w =>
+        {
+            w.New(86);
+            w.Str("T");
+            Username(w, "T", "lcT");
+            w.Int(0).Int(1);
+            Username(w, "K", "lcK");
+            w.Int(9).Str("ID-9");
+        }), "Model")[2];
+        Assert.Equal((9, "ID-9"), (leaf.Properties[0].ValueType, leaf.Properties[0].Value));
     }
 
     [Fact]
@@ -102,7 +124,7 @@ public class HierarchyParserTests
     [InlineData("itemFlag185", "class-185 item flag 2 is neither 0 nor 1")]      // the 185 item with e = 2
     [InlineData("lengthNegative185", "byte length -1 is negative")]               // the 185 item with length -1
     [InlineData("payloadPastEnd185", "1000 bytes pass the end of the data")]      // the 185 item with length 1000
-    [InlineData("valueType9", "property value type 9 is unknown")]                // unknown class-86 value type
+    [InlineData("valueType12", "property value type 12 is unknown")]              // unknown class-86 value type
     public void Read_AttributeDefect_Throws(string defect, string rule) => AssertRule(rule, Defective(defect));
 
     [Theory]
@@ -194,6 +216,7 @@ public class HierarchyParserTests
 
         Assert.Equal(2, nodes[2].Properties.Count);
         Assert.All(Enumerable.Range(0, 2), i => Assert.Same(nodes[2].Properties[i], nodes[3].Properties[i]));
+        Assert.Same(nodes[2].PropertyTabs[0], nodes[3].PropertyTabs[0]);
     }
 
     [Fact]
@@ -260,6 +283,39 @@ public class HierarchyParserTests
                 l.Ref(tab);
             }
         });
+
+        var (message, allocated) = ReadFailing(End(w));
+
+        Assert.Contains("134217728 property references", message);
+        Assert.InRange(allocated, 0, 16 << 20);
+    }
+
+    [Fact]
+    public void Read_EmptyTabReferencesCountTowardPropertyCap()
+    {
+        // G0 is a leaf whose 129 slots point to one empty tab; G1..G20 double it: 129 * 2^20 tab references, each copied into PropertyTabs
+        var w = Begin();
+        var ids = new int[21];
+        for (int i = 20; i >= 1; i--)
+        {
+            ids[i] = w.Next;
+            Group(w, 2);
+        }
+
+        ids[0] = w.Next;
+        Leaf(w, 129, l =>
+        {
+            int tab = l.Next;
+            PropertyTab(l, 0);
+            for (int i = 1; i < 129; i++)
+            {
+                l.Ref(tab);
+            }
+        });
+        for (int i = 1; i <= 20; i++)
+        {
+            w.Ref(ids[i - 1]);
+        }
 
         var (message, allocated) = ReadFailing(End(w));
 
@@ -419,14 +475,14 @@ public class HierarchyParserTests
         "itemFlag185" => GroupWithLeaf(1, w => Extra(w, itemFlag: 2)),
         "lengthNegative185" => GroupWithLeaf(1, w => Extra(w, length: -1)),
         "payloadPastEnd185" => GroupWithLeaf(1, w => Extra(w, length: 1000)),
-        "valueType9" => GroupWithLeaf(1, w =>
+        "valueType12" => GroupWithLeaf(1, w =>
         {
             w.New(86);
             w.Str("T");
             Username(w, "T", "lcT");
             w.Int(0).Int(1);
             Username(w, "K", "lcK");
-            w.Int(9).Int(0);
+            w.Int(12).Int(0);
         }),
         "topLevelLeaf" => End(LeafAtTopLevel()),
         "kZero" => GroupWithLeaf(0, _ => { }, k: 0),

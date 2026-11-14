@@ -25,6 +25,9 @@ public sealed class NwcNode
     /// <summary>Properties attached directly to this node.</summary>
     public List<NwcPropertyRecord> Properties { get; } = [];
 
+    /// <summary>The property tabs of this node in stored slot order, for Navisworks model files read through their DbCache directory; <see cref="Properties"/> is their records in that order (the same objects). Other files and <c>ReadPropertyRecords = false</c> leave it empty.</summary>
+    public List<NwcPropertyTab> PropertyTabs { get; } = [];
+
     /// <summary>Element unique identifier (GUID) if assigned.</summary>
     public Guid? ElementGuid { get; set; }
 

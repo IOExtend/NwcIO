@@ -187,6 +187,7 @@ public class ModelGraphReaderTests
         var doc = NwcDocument.Open(new MemoryStream(file), new NwcReaderOptions { ReadPropertyRecords = readProperties });
         var leaf = doc.RootNode!.Children[0].Children[0];
         Assert.Equal(expected, leaf.Properties.Count);
+        Assert.Equal(expected == 0 ? 0 : 1, leaf.PropertyTabs.Count);
     }
 
     [Fact]

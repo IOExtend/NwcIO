@@ -12,7 +12,7 @@ internal static class HierarchyParser
     // shortcut: fixed cap on expanded node occurrences against crafted DAGs (real files stay near 1M); raise it if a real model needs more
     public const int MaxExpandedNodes = 1 << 23;
 
-    // shortcut: fixed cap on property references copied into expanded nodes (every occurrence copies its node's list, about 1 GiB at the cap), against crafted DAGs; raise it if a real model needs more
+    // shortcut: fixed cap on property and property-tab references copied into expanded nodes (every occurrence copies its node's lists, about 1 GiB at the cap), against crafted DAGs; raise it if a real model needs more
     public const int MaxExpandedProperties = 1 << 27;
 
     private const string Segment = "LcOpNwdLogicalHierarchy";
@@ -88,10 +88,11 @@ internal static class HierarchyParser
             var occurrence = new NwcNode { Id = nodes.Count, Name = node.Name, Class = node.Class, Tag = node.Tag, Parent = parent };
             if (includeProperties)
             {
-                occurrence.Properties.EnsureCapacity((int)node.OwnProperties);
+                occurrence.Properties.EnsureCapacity((int)node.OwnProperties - node.Tabs.Count);
+                occurrence.PropertyTabs.AddRange(node.Tabs);
                 foreach (var tab in node.Tabs)
                 {
-                    occurrence.Properties.AddRange(tab);
+                    occurrence.Properties.AddRange(tab.Properties);
                 }
             }
 
@@ -129,13 +130,14 @@ internal static class HierarchyParser
     }
 
     // A stored node object; a back-referenced one is shared, so it can expand to several NwcNodes. Tabs holds one reference per
-    // property tab, a back-referenced tab being the same list, so records are copied only by Expand, after the caps passed.
+    // property tab slot, a back-referenced tab being the same object, so tabs and records are copied only by Expand, after the caps passed.
+    // OwnProperties counts the records plus one per tab slot, the references each occurrence copies.
     private sealed record Node(
         int Tag,
         string Name,
         string Class,
         int X,
-        List<List<NwcPropertyRecord>> Tabs,
+        List<NwcPropertyTab> Tabs,
         long OwnProperties,
         Node[] Children,
         long Size,
@@ -228,14 +230,16 @@ internal static class HierarchyParser
             }
 
             int attributeCount = _reader.ReadCount(4);
-            var tabs = new List<List<NwcPropertyRecord>>();
+            var tabs = new List<NwcPropertyTab>();
             long ownProperties = 0;
             for (int i = 0; i < attributeCount; i++)
             {
-                if (_reader.ReadPointer(AttributeClasses, _readBody) is List<NwcPropertyRecord> tab)
+                if (_reader.ReadPointer(AttributeClasses, _readBody) is NwcPropertyTab tab)
                 {
                     tabs.Add(tab);
-                    ownProperties = checked(ownProperties + tab.Count);
+
+                    // An empty tab still costs a PropertyTabs entry in every occurrence.
+                    ownProperties = checked(ownProperties + tab.Properties.Count + 1);
                 }
             }
 
@@ -263,7 +267,7 @@ internal static class HierarchyParser
                 throw _reader.Fail($"expanded tree exceeds {MaxExpandedNodes} nodes");
             }
 
-            // Each occurrence copies its node's records, so a small DAG over a property-heavy leaf multiplies them.
+            // Each occurrence copies its node's tab references and records, so a small DAG over a property-heavy leaf multiplies them.
             if (propertyReferences > MaxExpandedProperties)
             {
                 throw _reader.Fail($"expanded tree exceeds {MaxExpandedProperties} property references");
@@ -287,7 +291,7 @@ internal static class HierarchyParser
         }
 
         // Class 86 (docs/format-notes.md §2.2): [str name][ptr username][i32 flags][i32 n] n x ([ptr key][i32 type][value]); one record per item.
-        private List<NwcPropertyRecord> ReadPropertyTab()
+        private NwcPropertyTab ReadPropertyTab()
         {
             string? name = _reader.ReadString();
             var username = ReadUsername();
@@ -308,7 +312,9 @@ internal static class HierarchyParser
                     // Type 5 was never seen; it is read as f64 like the other real types (docs/format-notes.md §2.2).
                     1 or 5 or 6 or 7 or 10 or 11 => _reader.ReadDouble().ToString(CultureInfo.InvariantCulture),
                     2 or 3 => _reader.ReadInt32().ToString(CultureInfo.InvariantCulture),
-                    4 => _reader.ReadString(),
+
+                    // Type 9 was never seen; it is read as a string (docs/format-notes.md §2.2).
+                    4 or 9 => _reader.ReadString(),
                     8 => ReadUsername().Display,
                     _ => throw _reader.Fail($"property value type {type} is unknown"),
                 };
@@ -320,10 +326,12 @@ internal static class HierarchyParser
                     Class = tab,
                     ValueType = type,
                     Value = value,
+                    TabInternalName = username.Internal,
+                    InternalName = key.Internal,
                 });
             }
 
-            return records;
+            return new NwcPropertyTab { Name = tab, InternalName = username.Internal, Properties = records };
         }
 
         // Class 31: [str name][15 x f64].
