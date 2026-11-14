@@ -60,7 +60,7 @@ public sealed class NwcDocument
     /// <summary>3D polygon meshes extracted from geometry streams and TOC tables.</summary>
     public IReadOnlyList<NwcMesh> Meshes { get; }
 
-    /// <summary>Surface materials, RGBA colors and PBR properties extracted from properties and categories.</summary>
+    /// <summary>Surface materials, RGBA colors and PBR properties: for model files read through their DbCache directory, the materials decoded from the fragments' appearances (none without the scene tree); for other files, materials assigned by heuristics from properties and categories.</summary>
     public IReadOnlyList<NwcMaterial> Materials { get; }
 
     /// <summary>Root of the hierarchical scene graph tree (matching Navisworks selection tree).</summary>
@@ -168,12 +168,14 @@ public sealed class NwcDocument
 
         var transforms = new List<NwcTransform>();
         var meshes = new List<NwcMesh>();
+        var materials = new List<NwcMaterial>();
         NwcNode? rootNode = null;
         if (segments is not null)
         {
             var graph = ModelGraphReader.Read(segments, options, rootName);
             transforms.AddRange(graph.Transforms);
             meshes.AddRange(graph.Meshes);
+            materials.AddRange(graph.Materials);
             rootNode = graph.Root;
             if (options.ReadGuids)
             {
@@ -201,8 +203,8 @@ public sealed class NwcDocument
             }
         }
 
-        var materials = new List<NwcMaterial>();
-        if (options.ReadMaterials)
+        // The name and colour heuristics apply only to files not read through their DbCache directory.
+        if (segments is null && options.ReadMaterials)
         {
             materials.AddRange(MaterialParser.Parse(records, meshes, rootNode));
         }

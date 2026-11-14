@@ -19,7 +19,7 @@ internal static class HierarchyParser
     private const string Segment = "LcOpNwdLogicalHierarchy";
     private const string PropsSegment = "LcOaPartitionProps";
 
-    // Attribute bodies other than class 86 are parsed and dropped.
+    // Attribute bodies other than classes 86 and 31 are parsed and dropped.
     private static readonly object Dropped = new();
 
     // Slot families as observed (docs/format-notes.md §2.2).
@@ -118,7 +118,15 @@ internal static class HierarchyParser
         while (pending.TryPop(out var item))
         {
             var (node, parent) = item;
-            var occurrence = new NwcNode { Id = nodes.Count, Name = node.Name, Class = node.Class, Tag = node.Tag, Parent = parent };
+            var occurrence = new NwcNode
+            {
+                Id = nodes.Count,
+                Name = node.Name,
+                Class = node.Class,
+                Tag = node.Tag,
+                Parent = parent,
+                MaterialName = node.MaterialName ?? parent.MaterialName,
+            };
             if (includeProperties)
             {
                 occurrence.Properties.EnsureCapacity((int)node.OwnProperties - node.Tabs.Count);
@@ -165,12 +173,14 @@ internal static class HierarchyParser
 
     // A stored node object; a back-referenced one is shared, so it can expand to several NwcNodes. Tabs holds one reference per
     // property tab slot, a back-referenced tab being the same object, so tabs and records are copied only by Expand, after the caps passed.
-    // OwnProperties counts the records plus one per tab slot, the references each occurrence copies.
+    // OwnProperties counts the records plus one per tab slot, the references each occurrence copies. MaterialName is the name of the
+    // node's first class-31 slot ("" for a null name), null without one.
     private sealed record Node(
         int Tag,
         string Name,
         string Class,
         int X,
+        string? MaterialName,
         List<NwcPropertyTab> Tabs,
         long OwnProperties,
         Node[] Children,
@@ -180,6 +190,9 @@ internal static class HierarchyParser
 
     // A class-52 object: display name and internal name.
     private sealed record Username(int Id, string? Display, string? Internal);
+
+    // A class-31 object: its material name.
+    private sealed record Material(string? Name);
 
     private sealed class Parser
     {
@@ -282,21 +295,27 @@ internal static class HierarchyParser
             int attributeCount = _reader.ReadCount(4);
             var tabs = new List<NwcPropertyTab>();
             long ownProperties = 0;
+            string? materialName = null;
             for (int i = 0; i < attributeCount; i++)
             {
                 // A null slot takes the next LcOaPartitionProps root (docs/format-notes.md §2.2.1); a stored node is read once, so a shared one takes its roots once.
-                if ((_reader.ReadPointer(AttributeClasses, _readBody) ?? _roots!.Take()) is NwcPropertyTab tab)
+                switch (_reader.ReadPointer(AttributeClasses, _readBody) ?? _roots!.Take())
                 {
-                    tabs.Add(tab);
+                    case NwcPropertyTab tab:
+                        tabs.Add(tab);
 
-                    // An empty tab still costs a PropertyTabs entry in every occurrence.
-                    ownProperties = checked(ownProperties + tab.Properties.Count + 1);
+                        // An empty tab still costs a PropertyTabs entry in every occurrence.
+                        ownProperties = checked(ownProperties + tab.Properties.Count + 1);
+                        break;
+                    case Material material:
+                        materialName ??= material.Name ?? "";
+                        break;
                 }
             }
 
             Node[] children = classId == 53 ? ReadNodes(ChildClasses) : [];
             var (size, propertyReferences, height) = Measure(children, ownProperties);
-            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, tabs, ownProperties, children, size, propertyReferences, height);
+            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, materialName, tabs, ownProperties, children, size, propertyReferences, height);
         }
 
         // Expanded size, property references and height of a node with these children; children finish before their parent, so theirs are known.
@@ -422,16 +441,16 @@ internal static class HierarchyParser
             return new NwcPropertyTab { Name = name, InternalName = key.Internal, Properties = [record] };
         }
 
-        // Class 31: [str name][15 x f64].
-        private object ReadMaterial()
+        // Class 31: [str name][15 x f64]; the doubles are dropped.
+        private Material ReadMaterial()
         {
-            _reader.ReadString();
+            var material = new Material(_reader.ReadString());
             for (int i = 0; i < 15; i++)
             {
                 _reader.ReadDouble();
             }
 
-            return Dropped;
+            return material;
         }
 
         // Classes 40 and 41: [str name][i32 X][i32 flags] then the translation (and rotation) doubles.

@@ -93,7 +93,8 @@ The roots are the tabs a node uses once (element, parameter, type, material and 
     - `D`, `b`, `c`: not decoded.
   - `15` pose: `[3 x f64 t][4 x f64 q]`, `q = (x, y, z, w)` a unit quaternion.
   - `16` pose with scale: class 15 plus `[f64 s]`. The scale is a uniform factor and can be negative.
-  - `55` appearance: `[i32 flags][ptr 54]`, plus `[ptr 185]` when `flags & 32`. Class `54` is 14 `int32` values; neither is decoded.
+  - `55` appearance: `[i32 flags][ptr 54]`, plus `[ptr 185]` when `flags & 32`.
+  - `54` material: 14 `f32`: ambient 0–2, diffuse 3–5, specular 6–8 (always 0), emissive 9–11 (always 0), shininess 12 (Revit Shininess / 128), transparency 13 (Revit Transparency / 100, values below 0.1 stored as 0). Channels are quantised to bytes. `31` (hierarchy) repeats the fields as `f64` and names the material (null for rooms).
   - `93` geometry reference: `[6 x f32 bbox][3 x f64 c][f32][i32 key][i32 rec]`. `rec` is the 1-based index of a geometry record (§2.5). The box equals the bounding box of the record's positions, and `c` is the offset of those positions.
 - **Placement**: the fragment pose is the full world transform of the record's positions: `world = s·R(q)·v + t`, with `s = 1` for class 15. `R(q)` is the usual rotation matrix of the normalised quaternion. No unit conversion is applied.
 - **Mirroring**: a pose with `s < 0` mirrors the geometry, so triangle winding must be reversed to keep faces outward in world space. Local vertices and indices are not changed.
@@ -186,6 +187,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - `Table`: array of external file references (textures, linked `.nwc`/`.nwd` files) with `OriginalPath` and `RemappedPath`.
 
 ### 2.9 Materials, RGBA Colors & glTF 2.0 (GLB)
+- **Strict path**: one material per distinct (class-31 name, diffuse and alpha bytes); shininess is not mapped; see `NwcMesh.Material`. The heuristics below apply only to files read without the DbCache directory.
 - **Material Records**:
   - `LcRevitElement` with prefix `Material "Name", #ElementId`: defines material instances.
   - `revit_Color` with property `Color`: stores comma-separated `"R, G, B"` integer triples in $0..255$ range (e.g. `"255, 128, 0"`, `"0, 255, 255"`).

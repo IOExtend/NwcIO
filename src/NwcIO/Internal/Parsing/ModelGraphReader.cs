@@ -17,8 +17,16 @@ internal sealed record ModelSegments(
     LcRawStream? GuidStore,
     Func<IReadOnlyList<byte[]>?> PartitionProps);
 
-/// <summary>The strictly read model: the tree root (null without a scene tree), one mesh and transform per fragment, and the GUID table (empty when not read).</summary>
-internal sealed record ModelGraph(NwcNode? Root, IReadOnlyList<NwcMesh> Meshes, IReadOnlyList<NwcTransform> Transforms, IReadOnlyList<Guid> Guids);
+/// <summary>
+/// The strictly read model: the tree root (null without a scene tree), one mesh and transform per fragment, the GUID table (empty when
+/// not read), and the materials of the meshes in order of first use (empty without meshes, the tree or <c>ReadMaterials</c>).
+/// </summary>
+internal sealed record ModelGraph(
+    NwcNode? Root,
+    IReadOnlyList<NwcMesh> Meshes,
+    IReadOnlyList<NwcTransform> Transforms,
+    IReadOnlyList<Guid> Guids,
+    IReadOnlyList<NwcMaterial> Materials);
 
 /// <summary>
 /// Reads a Navisworks model file through its DbCache directory (docs/format-notes.md §2.7): the hierarchy, geometry and fragments
@@ -124,6 +132,8 @@ internal static class ModelGraphReader
 
         var meshes = new List<NwcMesh>();
         var transforms = new List<NwcTransform>();
+        var materials = new List<NwcMaterial>();
+        var materialsByKey = new Dictionary<(string, byte, byte, byte, byte), NwcMaterial>();
         if ((options.ReadMeshes || options.ReadTransforms) && (segments.Toc is not null || segments.Fragments is not null))
         {
             if (segments.Toc is null)
@@ -171,6 +181,9 @@ internal static class ModelGraphReader
                         Transform = transform,
                         Node = leaf,
                         ElementKey = elementKey,
+
+                        // Names come from the tree, so there are no materials without it.
+                        Material = leaf is not null && options.ReadMaterials ? MaterialOf(leaf.MaterialName, fragment.Look, materialsByKey, materials) : null,
                     };
                     meshes.Add(mesh);
                     if (leaf is not null)
@@ -182,8 +195,28 @@ internal static class ModelGraphReader
             }
         }
 
-        return new ModelGraph(preorder?[0], meshes, transforms, guids);
+        return new ModelGraph(preorder?[0], meshes, transforms, guids, materials);
     }
+
+    // One material per distinct (name, RGBA bytes), its id the order of first use (docs/format-notes.md §2.9). Shininess has no defined
+    // PBR equivalent, so Roughness and Metallic keep their defaults.
+    private static NwcMaterial MaterialOf(
+        string? name, FragmentLook look, Dictionary<(string, byte, byte, byte, byte), NwcMaterial> byKey, List<NwcMaterial> materials)
+    {
+        (string Name, byte R, byte G, byte B, byte A) key =
+            (string.IsNullOrEmpty(name) ? "Default" : name, Byte(look.R), Byte(look.G), Byte(look.B), Byte(1.0 - look.Transparency));
+        if (!byKey.TryGetValue(key, out var material))
+        {
+            material = new NwcMaterial { Id = materials.Count, Name = key.Name, Color = new RgbaColor(key.R / 255f, key.G / 255f, key.B / 255f, key.A / 255f) };
+            byKey.Add(key, material);
+            materials.Add(material);
+        }
+
+        return material;
+    }
+
+    // The float is widened before scaling, and a half rounds away from zero.
+    private static byte Byte(double value) => (byte)Math.Clamp(Math.Round(value * 255, MidpointRounding.AwayFromZero), 0, 255);
 
     // [i32 a = 1][i32 n][n x 16-byte GUID] in Windows layout (docs/format-notes.md §2.3).
     private static Guid[] ReadGuidStore(byte[] data)

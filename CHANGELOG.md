@@ -17,6 +17,7 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 - Property value type 9 is read as a string instead of failing the file.
 - The expanded-property cap (134,217,728) counts each property tab reference as well as the records.
 - **Breaking:** Strict-path node properties include the tabs and element id stored in `LcOaPartitionProps` (about a third of a Revit export's properties), in stored slot order; the element id is a one-property tab named by its key (`LcRevitId`). A file whose null attribute slots and `LcOaPartitionProps` roots or table of contents disagree throws `InvalidDataException`.
+- **Breaking:** On the strict path each mesh's `Material` is decoded from the file (diffuse colour, alpha `1 - transparency`, the name of the nearest class-31 material or `Default`; `Roughness` and `Metallic` keep their defaults) and `NwcDocument.Materials` lists those materials; the name and colour heuristics and the Concrete/Rebar presets apply only to files read without the DbCache directory, so a model file opened with `BuildSceneTree = false` now has no materials (0.11 applied the heuristics; names need the tree). `NwcNode.Material` is null on the strict path.
 
 ## [0.11.0] - 2026-11-14
 

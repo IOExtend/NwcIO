@@ -46,6 +46,9 @@ public sealed class NwcNode
     /// <summary>Material assigned to this node.</summary>
     public NwcMaterial? Material { get; set; }
 
+    /// <summary>On the strict path, the name of the nearest class-31 material on this node or an ancestor, <c>""</c> for one whose name is null; null without one.</summary>
+    internal string? MaterialName { get; init; }
+
     /// <summary>The first of <see cref="Meshes"/> for Navisworks model files read through their DbCache directory (files written by <c>NwcWriter</c> and other containers leave <see cref="Meshes"/> empty); null when the node has no geometry.</summary>
     public NwcMesh? Mesh { get; set; }
 

@@ -12,8 +12,8 @@ public class FragmentParserTests
         var f = FragmentParser.Read(FormatVectors.F1);
         var box = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0));
         Assert.Equal(2, f.Length);
-        Assert.Equal(new Fragment(2, 1, 2, new(10, 0, 0), Quaterniond.Identity, 1.0, box), f[0]);
-        Assert.Equal(new Fragment(7, 1, 2, Vector3d.Zero, Quaterniond.Identity, -1.0, box), f[1]);
+        Assert.Equal(new Fragment(2, 1, 2, new(10, 0, 0), Quaterniond.Identity, 1.0, box, new FragmentLook(0, 0, 0, 0)), f[0]);
+        Assert.Equal(new Fragment(7, 1, 2, Vector3d.Zero, Quaterniond.Identity, -1.0, box, new FragmentLook(0, 0, 0, 0)), f[1]);
     }
 
     // F1 byte edits (offsets from the F1 layout in FormatVectors), applied with FormatVectors.Patched

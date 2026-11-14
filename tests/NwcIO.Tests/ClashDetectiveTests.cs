@@ -1027,7 +1027,7 @@ public sealed class ClashDetectiveTests
     /// <summary>H1 + [R1] with one identity-posed class-15 fragment per seq, so every two of its quads overlap exactly.</summary>
     internal static byte[] QuadFile(params int[] seqs) => SyntheticNwcFile.Build(
         FormatVectors.H1,
-        ModelGraphReaderTests.Fragments(seqs.Select(seq => new ModelGraphReaderTests.Frag(seq, Vector3d.Zero, 1, 2, 4, Rec: 1)).ToArray()),
+        SyntheticFragments.Build(seqs.Select(seq => new Frag(seq, Vector3d.Zero, 1, 2, 4, Rec: 1)).ToArray()),
         [FormatVectors.R1],
         [120]);
 }

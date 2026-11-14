@@ -167,7 +167,7 @@ public class ModelGraphReaderTests
 
     [Fact]
     public void Fragments_RebuildsF1ByteForByte() =>
-        Assert.Equal(FormatVectors.F1, Fragments(new(2, new(10, 0, 0), 1, 2, 4, Rec: 1), new(7, Vector3d.Zero, -1, 2, 4, SharesGeometryOf: 0)));
+        Assert.Equal(FormatVectors.F1, SyntheticFragments.Build(new(2, new(10, 0, 0), 1, 2, 4, Rec: 1), new(7, Vector3d.Zero, -1, 2, 4, SharesGeometryOf: 0)));
 
     [Fact]
     public void Open_PartitionHierarchy_NeedsBuildSceneTreeOff()
@@ -194,7 +194,7 @@ public class ModelGraphReaderTests
     public void Save_StrictlyReadMeshesAndTransforms_ReopenWithSamePlacement()
     {
         // F1 with fragment 1's pose turned into class 15: two class-15 fragments on leaves 2 and 3 sharing record 1
-        byte[] fragments = Fragments(new(2, new(10, 0, 0), 1, 2, 4, Rec: 1), new(3, new(0, 5, 0), 1, 2, 4, SharesGeometryOf: 0));
+        byte[] fragments = SyntheticFragments.Build(new(2, new(10, 0, 0), 1, 2, 4, Rec: 1), new(3, new(0, 5, 0), 1, 2, 4, SharesGeometryOf: 0));
         var doc = NwcDocument.Open(new MemoryStream(SyntheticNwcFile.Build(FormatVectors.H1, fragments, [FormatVectors.R1], [120])));
         var reopened = NwcDocument.Open(new MemoryStream(NwcDocument.Create(meshes: doc.Meshes, transforms: doc.Transforms).ToByteArray()));
         Assert.Equal(2, reopened.Meshes.Count);
@@ -206,7 +206,7 @@ public class ModelGraphReaderTests
     [Fact]   // R2 holds three strips; the reader of a saved file would rebuild one strip over its seven vertices
     public void Save_StrictlyReadMultiStripMesh_Rejects()
     {
-        byte[] file = SyntheticNwcFile.Build(FormatVectors.H1, Fragments(new Frag(2, Vector3d.Zero, 1, 3, 4, Rec: 1, MaxZ: 1)), [FormatVectors.R2], [152]);
+        byte[] file = SyntheticNwcFile.Build(FormatVectors.H1, SyntheticFragments.Build(new Frag(2, Vector3d.Zero, 1, 3, 4, Rec: 1, MaxZ: 1)), [FormatVectors.R2], [152]);
         var doc = NwcDocument.Open(new MemoryStream(file), new NwcReaderOptions { BuildSceneTree = false, ReadPropertyRecords = false });
         Assert.Contains("Mesh 0 has triangles the .nwc writer cannot store", Assert.Throws<ArgumentException>(() => doc.ToByteArray()).Message);
     }
@@ -253,67 +253,12 @@ public class ModelGraphReaderTests
     }
 
     // k3 shares k0's class-93 object; k4 has its own class 93 with the same rec, the second sharing form.
-    private static byte[] Fmix() => Fragments(
+    private static byte[] Fmix() => SyntheticFragments.Build(
         new(2, new(10, 0, 0), 1, 2, 4, Rec: 1),
         new(3, new(0, 5, 0), 1, 3, 4, Rec: 2, MaxZ: 1),
         new(6, Vector3d.Zero, 1, 4, 8, Rec: 3),
         new(7, Vector3d.Zero, -1, 2, 4, SharesGeometryOf: 0),
         new(7, new(0, 0, 5), 1, 2, 4, Rec: 1));
-
-    /// <summary>One fragment: <paramref name="S"/> 1 writes a class-15 pose, else class 16; a new class 93 with bbox (0,0,0)-(1,1,MaxZ), or a back-reference to fragment <paramref name="SharesGeometryOf"/>'s.</summary>
-    internal sealed record Frag(int Seq, Vector3d T, double S, int A, int B, int Rec = 0, float MaxZ = 0, int SharesGeometryOf = -1);
-
-    // The F1 layout generalised: fragment 0 holds the class-55 appearance, the others back-reference it.
-    internal static byte[] Fragments(params Frag[] fragments)
-    {
-        var w = new LcGraphWriter();
-        w.Int(fragments.Length);
-        int appearance = 0;
-        var geometry = new int[fragments.Length];
-        for (int k = 0; k < fragments.Length; k++)
-        {
-            var f = fragments[k];
-            w.New(13);
-            w.Double(1.0).Int(f.A).Int(f.B).Int(0).Int(f.Seq);
-            w.New(f.S == 1 ? 15 : 16);
-            w.Double(f.T.X).Double(f.T.Y).Double(f.T.Z);
-            w.Double(0).Double(0).Double(0).Double(1);
-            if (f.S != 1)
-            {
-                w.Double(f.S);
-            }
-
-            if (k == 0)
-            {
-                appearance = w.New(55);
-                w.Int(1);
-                w.New(54);
-                for (int i = 0; i < 14; i++)
-                {
-                    w.Int(0);
-                }
-            }
-            else
-            {
-                w.Ref(appearance);
-            }
-
-            if (f.SharesGeometryOf >= 0)
-            {
-                geometry[k] = geometry[f.SharesGeometryOf];
-                w.Ref(geometry[k]);
-            }
-            else
-            {
-                geometry[k] = w.New(93);
-                w.Float(0).Float(0).Float(0).Float(1).Float(1).Float(f.MaxZ);
-                w.Double(0.5).Double(0.5).Double(0);
-                w.Float(0).Int(7).Int(f.Rec);
-            }
-        }
-
-        return w.ToArray();
-    }
 
     private static NwcDocument Open(string defect) => NwcDocument.Open(new MemoryStream(defect switch
     {
