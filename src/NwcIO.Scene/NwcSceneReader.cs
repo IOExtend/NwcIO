@@ -93,7 +93,7 @@ public static partial class NwcSceneReader
             Path = path,
             SourceFormat = "nwc",
             Producer = Producer,
-            SourceLengthUnit = unit == NwcLengthUnit.Feet ? "ft" : null,
+            SourceLengthUnit = unit.GetSymbol(),
             Application = loader?[(loader.LastIndexOf(':') + 1)..],
             CreatedAt = document.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
         });
@@ -114,7 +114,7 @@ public static partial class NwcSceneReader
             }
         }
 
-        double? metresPerUnit = unit == NwcLengthUnit.Feet ? 0.3048 : null;
+        double? metresPerUnit = unit.GetMetresPerUnit();
         var diagnostics = new List<SceneDiagnostic>();
         HashSet<NwcNode> placed;
         if (metresPerUnit is double metres)
