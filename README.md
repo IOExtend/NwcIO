@@ -16,7 +16,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization 
 
 ## What it does
 
-- Reads scene hierarchy, geometry meshes, transforms, GUID tables, and property categories. Materials are assigned by heuristics on material names and mesh names and sizes, not decoded from the file, and element GUIDs are not linked to nodes for Navisworks model files read through their DbCache directory.
+- Reads scene hierarchy, geometry meshes, transforms, GUID tables, and property categories. Materials are decoded from the file on the strict path (name, colour, alpha) and assigned by heuristics only for files not read through their DbCache directory. Element nodes of model files carry the element's export GUID and IFC GlobalId.
 - Exports to standard Industry Foundation Classes (IFC2X3 & compact IFC4), binary glTF 2.0 (`.glb`), Wavefront OBJ, and structured JSON.
 - Coordinates multi-model federated assemblies with 3D geometric clash detection, proximity clustering, and clash matrix execution.
 - Manages saved viewpoints, dynamic section planes, redlines, selection sets, and search sets with Navisworks XML and buildingSMART BCF 2.1 exchange.
@@ -140,6 +140,8 @@ NwcClashBcfExporter.Save("Clashes.bcfzip", test);
 
 See the [public API](https://github.com/IOExtend/NwcIO/blob/main/docs/public-api.md) for the supported surface and [getting started guide](https://github.com/IOExtend/NwcIO/blob/main/docs/getting-started.md) for detailed workflows.
 
+`NwcIO.Scene` (a separate package released with `NwcIO`, from `IOScene` 0.1.0 on) converts Navisworks models into `IOScene` scene documents for viewers and coordination tools; see the [scene adapter](docs/scene.md) page for usage and limits.
+
 ## Documentation
 
 The documentation site with API references and guides is at <https://ioextend.github.io/NwcIO/>. [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/IOExtend/NwcIO) offers an automatically generated overview of the repository.
@@ -166,7 +168,7 @@ NwcIO reads and writes its own format. These extras are frozen: they receive bug
 - Measure, grids, revision diff, and BCF.
 - TimeLiner schedule import and export, selection and search sets, appearance profiler, mesh clipper, and Navisworks XML exchange. These stay in NwcIO.
 
-Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through a planned `NwcIO.Scene` adapter over the shared `IOScene` model, which is also planned. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. None of these packages is published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
+Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through the `NwcIO.Scene` adapter over the shared `IOScene` model. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. `IOCoord` and `IOScene.Formats` are not published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
 
 ## Build from source and tests
 

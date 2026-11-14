@@ -10,6 +10,8 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 - `NwcPropertyTab` and `NwcNode.PropertyTabs`; `NwcPropertyRecord.TabInternalName` and `InternalName`.
 - `NwcNode.IfcGlobalId`: the element's IFC GlobalId, the same as `RvtIO.Scene` gives the element from the `.rvt`.
 - `NwcMesh.GeometryIndex` and `NwcMesh.LineColors` (decoded line colour palettes).
+- **`NwcIO.Scene`**: `NwcSceneReader` converts a Navisworks model file or `NwcDocument` into an `IOScene` `SceneDocument` in metres: the selection tree with element GUIDs and IFC GlobalIds, property tabs as sets with `nwc:` keys, shared geometry, file materials and line colours, Revit levels and grid lines. See `docs/scene.md`.
+- **`NwcIO.Scene` NuGet package**: published on the `NwcIO` release tag and depends on exactly the same `NwcIO` version (`[X.Y.Z]`) and on `IOScene` `[0.1.0, 0.2.0-0.0)`; the release fails while it would depend on an `IOScene` preview.
 
 ### Changed
 - **Breaking:** The partition header is read with its zero pads after the source path (to 4 bytes) and before the timestamp (to 8 bytes): `NwcFileInfo.SourceTimestampUtc` and `LoaderPlugin` are now read from every Navisworks model file, where 0.11 read them only when the path length was a multiple of 4 and no pad was needed. `NwcWriter` writes the same layout, so a file written by NwcIO 0.11 whose source path needed a pad opens without timestamp and loader plugin.
