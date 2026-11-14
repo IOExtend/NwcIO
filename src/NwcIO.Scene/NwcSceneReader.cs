@@ -230,7 +230,7 @@ public static partial class NwcSceneReader
                 Category = category,
                 TypeName = typeName,
                 LevelId = levelId,
-                PropertySetIds = PropertySetIds(node, scene, tabSets, unit == NwcLengthUnit.Feet),
+                PropertySetIds = PropertySetIds(node, scene, tabSets, unit),
             });
 
             for (int i = node.Children.Count - 1; i >= 0; i--)
