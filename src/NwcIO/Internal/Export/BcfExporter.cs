@@ -80,7 +80,7 @@ internal static class BcfExporter
         for (int i = 0; i < viewpoints.Count; i++)
         {
             var vp = viewpoints[i];
-            string topicGuid = vp.Id.ToString("D");
+            string topicGuid = (vp.Id ?? Guid.NewGuid()).ToString("D");
             string viewpointGuid = Guid.NewGuid().ToString("D");
 
             var markupEntry = archive.CreateEntry($"{topicGuid}/markup.bcf", CompressionLevel.Optimal);

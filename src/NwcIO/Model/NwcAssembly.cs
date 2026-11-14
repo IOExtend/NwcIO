@@ -641,7 +641,7 @@ public sealed class NwcAssembly
             foreach (var vp in SavedViewpoints)
             {
                 writer.WriteStartObject();
-                writer.WriteString("id", vp.Id.ToString("D"));
+                writer.WriteString("id", vp.Id?.ToString("D"));
                 writer.WriteString("name", vp.Name);
                 writer.WriteString("projection", vp.Camera.Projection.ToString());
                 writer.WriteNumber("fieldOfView", vp.Camera.FieldOfView);

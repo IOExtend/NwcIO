@@ -61,14 +61,14 @@ public static class NwcViewpointBcfExporter
         // 2. Per-viewpoint topic folders
         foreach (var vp in viewpoints)
         {
-            string topicFolder = vp.Id.ToString("D");
+            string topicFolder = (vp.Id ?? Guid.NewGuid()).ToString("D");
 
             // Write markup.bcf
             var markupEntry = archive.CreateEntry($"{topicFolder}/markup.bcf", CompressionLevel.Optimal);
             using (var s = markupEntry.Open())
             using (var xml = XmlWriter.Create(s, Settings))
             {
-                WriteMarkupXml(xml, vp);
+                WriteMarkupXml(xml, vp, topicFolder);
             }
 
             // Write viewpoint.bcfv
@@ -76,12 +76,12 @@ public static class NwcViewpointBcfExporter
             using (var s = vpEntry.Open())
             using (var xml = XmlWriter.Create(s, Settings))
             {
-                WriteViewpointXml(xml, vp);
+                WriteViewpointXml(xml, vp, topicFolder);
             }
         }
     }
 
-    private static void WriteMarkupXml(XmlWriter xml, NwcSavedViewpoint vp)
+    private static void WriteMarkupXml(XmlWriter xml, NwcSavedViewpoint vp, string topicGuid)
     {
         xml.WriteStartDocument();
         xml.WriteStartElement("Markup");
@@ -95,7 +95,7 @@ public static class NwcViewpointBcfExporter
 
         // Topic
         xml.WriteStartElement("Topic");
-        xml.WriteAttributeString("Guid", vp.Id.ToString("D"));
+        xml.WriteAttributeString("Guid", topicGuid);
         xml.WriteAttributeString("TopicType", "Review");
         xml.WriteAttributeString("TopicStatus", "Active");
 
@@ -131,7 +131,7 @@ public static class NwcViewpointBcfExporter
 
         // Viewpoint reference
         xml.WriteStartElement("Viewpoints");
-        xml.WriteAttributeString("Guid", vp.Id.ToString("D"));
+        xml.WriteAttributeString("Guid", topicGuid);
         xml.WriteElementString("Viewpoint", "viewpoint.bcfv");
         xml.WriteEndElement();
 
@@ -139,11 +139,11 @@ public static class NwcViewpointBcfExporter
         xml.WriteEndDocument();
     }
 
-    private static void WriteViewpointXml(XmlWriter xml, NwcSavedViewpoint vp)
+    private static void WriteViewpointXml(XmlWriter xml, NwcSavedViewpoint vp, string topicGuid)
     {
         xml.WriteStartDocument();
         xml.WriteStartElement("VisualizationInfo");
-        xml.WriteAttributeString("Guid", vp.Id.ToString("D"));
+        xml.WriteAttributeString("Guid", topicGuid);
 
         var cam = vp.Camera;
         var forward = cam.Direction;

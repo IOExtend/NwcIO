@@ -8,8 +8,8 @@ namespace NwcIO.Model;
 /// </summary>
 public sealed record NwcSavedViewpoint
 {
-    /// <summary>Unique identifier of this saved viewpoint.</summary>
-    public Guid Id { get; init; } = Guid.NewGuid();
+    /// <summary>Identifier of this saved viewpoint: generated for viewpoints made in code, null for viewpoints read from a file (none is stored).</summary>
+    public Guid? Id { get; init; } = Guid.NewGuid();
 
     /// <summary>Display name of the saved viewpoint.</summary>
     public required string Name { get; init; }

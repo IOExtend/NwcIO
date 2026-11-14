@@ -96,7 +96,7 @@ public static class NwcXmlViewpointSerializer
 
         var vpElem = new XElement("viewpoint",
             new XAttribute("name", vp.Name),
-            new XAttribute("guid", vp.Id.ToString()),
+            vp.Id is { } vpId ? new XAttribute("guid", vpId.ToString()) : null,
             camElem);
 
         // Section planes: only the viewpoint's own. The section box is written once, as <section_box> below; its
@@ -259,7 +259,7 @@ public static class NwcXmlViewpointSerializer
     {
         string name = (string?)vpElem.Attribute("name") ?? "Viewpoint";
         string? guidStr = (string?)vpElem.Attribute("guid");
-        var guid = Guid.TryParse(guidStr, out var g) ? g : Guid.NewGuid();
+        Guid? guid = Guid.TryParse(guidStr, out var g) ? g : null;
 
         var camElem = vpElem.Elements().FirstOrDefault(e => e.Name.LocalName.Equals("camera", StringComparison.OrdinalIgnoreCase));
         var camera = DeserializeCamera(camElem);

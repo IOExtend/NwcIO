@@ -24,7 +24,7 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here.
 | `NwcFileInfo` | Source path, loader plugin, and export timestamp from the partition header. |
 | `NwcDbCacheDirectory` & `NwcDbCacheEntry` | The `LcOpDBCache` directory (`NwcDocument.DbCache`, null when the file has none or it cannot be parsed). `DatabaseName` is the name of the `LcOpDBCache` entry or `""`; `Entries` lists every entry in file order and `Find` looks one up by segment name (exact or suffix, case-insensitive). Each entry has `Name`, `Flags`, `Offset` (an absolute file offset), `Length` and `Extra` (`a + b*2^32` of its two trailing 32-bit fields). |
 | `NwcXRef` & `NwcXRefTable` | External references with suffix-based resolution (`TryResolve`, `Exists`) and the parsed XRef table. |
-| `NwcCamera`, `NwcSavedViewpoint`, `NwcCameraProjection` | Camera model (position, unit rotation quaternion, computed direction/up/target) and saved viewpoints. |
+| `NwcCamera`, `NwcSavedViewpoint`, `NwcCameraProjection` | Camera model (position, unit rotation quaternion, computed direction/up/target) and saved viewpoints. `Id` is null for viewpoints read from a file (none is stored). The camera's field of view of a viewpoint read from a `.nwc`/`.nwd` is the 60° default, not the stored value, and only some real saved-view streams are recognised. |
 | `Vector3d`, `Quaterniond`, `BoundingBox3d`, `RgbaColor` | Double-precision geometry primitives and RGBA colour. |
 | `NwcClash` | Simple pairwise clash check between two meshes. |
 
