@@ -227,8 +227,10 @@ public sealed class NwcSceneReaderTests
         Assert.Equal([(6L, 1), (7L, 1), (9L, 1), (10L, 2), (13L, 3), (13L, 4)], doc.Instances.Select(i => (i.ElementId, i.GeometryId)));
         Assert.Equal((4, 6, 4), (result.GeometryCount, result.InstanceCount, result.ElementsWithGeometry));
         Assert.Equal(new Vector3d(0.3048, 0.3048, 0), doc.Geometries[0].Vertices[3]);
+        Assert.Equal([new Vector3d(0, 0, 0), new Vector3d(0.3048, 0, 0)], doc.Geometries[2].Vertices);   // R7 red group: its own vertices only
         Assert.Equal([0, 1], doc.Geometries[2].Indices);
-        Assert.Equal([2, 3], doc.Geometries[3].Indices);
+        Assert.Equal([new Vector3d(0, 0.3048, 0), new Vector3d(0.3048, 0.3048, 0)], doc.Geometries[3].Vertices);   // R7 green group
+        Assert.Equal([0, 1], doc.Geometries[3].Indices);
         Assert.All(doc.Geometries.Skip(1), g => Assert.Null(g.Normals));   // lines never carry normals
     }
 
@@ -294,6 +296,22 @@ public sealed class NwcSceneReaderTests
         var result = Scene(file);
         Assert.Equal([null, new RgbaColor(0, 255, 0, 255)], result.Document.Instances.Select(i => i.Color));
         Assert.Equal((SceneSeverity.Warning, "line-colour-mixed"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+    }
+
+    [Fact]
+    public void Read_ManyLineColours_StayLinear()
+    {
+        // 2,000 segments, each of its own colour: one line geometry per colour, each with only its two vertices
+        const int segments = 2000;
+        var mesh = new NwcMesh { Id = 0, Indices = [],
+            Vertices = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.Vector3d(v / 2, v % 2, 0))],
+            LineIndices = [.. Enumerable.Range(0, 2 * segments)],
+            LineColors = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.RgbaColor(v / 2 % 256 / 255f, v / 2 / 256 / 255f, 0))] };
+        var doc = SceneOf(mesh).Document;
+        Assert.Equal(segments, doc.Geometries.Count);
+        Assert.All(doc.Geometries, g => Assert.Equal((SceneTopology.Lines, 2, 2), (g.Topology, g.Vertices.Count, g.Indices.Count)));
+        Assert.Equal(2 * segments, doc.Geometries.Sum(g => g.Vertices.Count));
+        Assert.Equal(segments, doc.Instances.Select(i => i.Color).Distinct().Count());
     }
 
     [Fact]

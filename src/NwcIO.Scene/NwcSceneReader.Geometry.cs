@@ -88,21 +88,48 @@ public static partial class NwcSceneReader
         }
 
         // Segments go to the group of their colour when both ends share it; a segment whose ends differ goes to the null group,
-        // which is drawn with the material colour and reported once per geometry key as line-colour-mixed.
-        var groups = new List<(NwcIO.Model.RgbaColor? Color, List<int> Indices)>();
+        // which is drawn with the material colour and reported once per geometry key as line-colour-mixed. Groups keep first-seen
+        // order, and each carries only the vertices its segments use (first-use order), so time and output stay linear in the segments.
+        var groups = new List<(NwcIO.Model.RgbaColor? Color, List<int> Indices, List<Vector3d> Vertices, Dictionary<int, int> Local)>();
+        var byColour = new Dictionary<NwcIO.Model.RgbaColor, int>();
+        int mixed = -1;
         for (int s = 0; s < mesh.LineIndices.Count; s += 2)
         {
             int a = mesh.LineIndices[s], b = mesh.LineIndices[s + 1];
             NwcIO.Model.RgbaColor? colour = mesh.LineColors is { } c && c[a] == c[b] ? c[a] : null;
-            int g = groups.FindIndex(x => x.Color == colour);
-            if (g < 0) { groups.Add((colour, [])); g = groups.Count - 1; }
-            groups[g].Indices.Add(a); groups[g].Indices.Add(b);
+            int g = colour is { } k ? byColour.GetValueOrDefault(k, -1) : mixed;
+            if (g < 0)
+            {
+                g = groups.Count;
+                groups.Add((colour, [], [], []));
+                if (colour is { } added)
+                {
+                    byColour.Add(added, g);
+                }
+                else
+                {
+                    mixed = g;
+                }
+            }
+
+            var group = groups[g];
+            foreach (int v in (ReadOnlySpan<int>)[a, b])
+            {
+                if (!group.Local.TryGetValue(v, out int local))
+                {
+                    local = group.Vertices.Count;
+                    group.Local.Add(v, local);
+                    group.Vertices.Add(vertices[v]);
+                }
+
+                group.Indices.Add(local);
+            }
         }
 
-        foreach (var (colour, indices) in groups)
+        foreach (var (colour, indices, groupVertices, _) in groups)
         {
             int id = scene.Geometries.Count + 1;
-            scene.Geometries.Add(new SceneGeometry { Id = id, Topology = SceneTopology.Lines, Vertices = vertices, Indices = indices });
+            scene.Geometries.Add(new SceneGeometry { Id = id, Topology = SceneTopology.Lines, Vertices = groupVertices, Indices = indices });
             result.Add((id, colour is { } c ? new RgbaColor(c.RByte, c.GByte, c.BByte, c.AByte) : null));
             if (colour is null && mesh.LineColors is not null)
             {
