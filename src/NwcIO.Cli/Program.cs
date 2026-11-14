@@ -21,7 +21,9 @@ internal static class Program
         Arguments:
           <input>            Path to .nwc, .nwd, .nwf file or a folder of .nwc models.
           [output]           Destination path for exported file (.json, .obj, .glb, .ifc, .bcfzip, .html, or .nwc).
-                             Default: <input-without-ext>.json (or standard output if '-').
+                             Default for file: <input-without-ext>.json (or standard output if '-').
+                             Default for folder: <dir>/<dirname>_assembly.glb (or standard output if '-').
+                             Default for .nwf: <input-without-ext>.glb (or standard output if '-').
 
         Options:
           --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
@@ -558,7 +560,8 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    stdoutStream, @out, @err);
             }
 
             if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
@@ -569,7 +572,8 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    stdoutStream, @out, @err);
             }
         }
         catch (Exception ex)
@@ -1124,9 +1128,19 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
-        bool includeTree = true)
+        bool includeTree = true,
+        Stream? stdoutStream = null,
+        TextWriter? outWriter = null,
+        TextWriter? errorWriter = null)
     {
-        outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
+        var @out = outWriter ?? Console.Out;
+        var @err = errorWriter ?? Console.Error;
+        TextWriter infoOut = (outputPath == "-") ? @err : @out;
+
+        if (outputPath != "-")
+        {
+            outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
+        }
 
         var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: new NwcReaderOptions { BuildSceneTree = includeTree });
 
@@ -1178,7 +1192,7 @@ internal static class Program
         if (linkTimeLiner && assembly.TimeLiner is not null)
         {
             int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
-            Console.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+            infoOut.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
         }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
@@ -1242,6 +1256,20 @@ internal static class Program
                 fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
                 meshes: assembly.AllMeshes);
             merged.Save(outputPath);
+        }
+        else if (outputPath == "-")
+        {
+            if (stdoutStream != null)
+            {
+                assembly.SaveJson(stdoutStream, new NwcJsonExportOptions { Indented = indent });
+                stdoutStream.Flush();
+            }
+            else
+            {
+                using var stdout = Console.OpenStandardOutput();
+                assembly.SaveJson(stdout, new NwcJsonExportOptions { Indented = indent });
+                stdout.Flush();
+            }
         }
         else
         {
@@ -1311,54 +1339,54 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitClashMatrixMdPath);
                 assembly.ExportClashMatrixMarkdown(explicitClashMatrixMdPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
             }
             if (!string.IsNullOrEmpty(explicitClashMatrixBcfPath))
             {
                 EnsureParentDirectory(explicitClashMatrixBcfPath);
                 assembly.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
             }
 
-            Console.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
+            infoOut.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
         }
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg);
+            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err);
         }
 
         if (listViewpoints)
         {
-            PrintViewpoints(assembly.SavedViewpoints);
+            PrintViewpoints(assembly.SavedViewpoints, infoOut);
         }
 
         sw.Stop();
 
         if (printReport)
         {
-            Console.Error.WriteLine("=== NwcIO Assembly Report ===");
-            Console.Error.WriteLine($"Assembly:         {assembly.Name}");
-            Console.Error.WriteLine($"Models:           {assembly.Models.Count}");
-            Console.Error.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
-            Console.Error.WriteLine($"Total Materials:  {assembly.AllMaterials.Count}");
-            Console.Error.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
-            Console.Error.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
+            @err.WriteLine("=== NwcIO Assembly Report ===");
+            @err.WriteLine($"Assembly:         {assembly.Name}");
+            @err.WriteLine($"Models:           {assembly.Models.Count}");
+            @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
+            @err.WriteLine($"Total Materials:  {assembly.AllMaterials.Count}");
+            @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
+            @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
             if (bvhStats)
             {
                 var idx = assembly.SpatialIndex;
-                Console.Error.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
+                @err.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
             }
             if (clashes is not null)
             {
-                Console.Error.WriteLine($"Clashes Detected: {clashes.Count}");
+                @err.WriteLine($"Clashes Detected: {clashes.Count}");
             }
-            Console.Error.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
-            Console.Error.WriteLine($"Output:           {outputPath}");
+            @err.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
+            @err.WriteLine($"Output:           {outputPath}");
         }
         else
         {
-            Console.WriteLine(FormattableString.Invariant(
+            infoOut.WriteLine(FormattableString.Invariant(
                 $"Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes, {assembly.AllMaterials.Count} materials exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
@@ -1400,9 +1428,19 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
-        bool includeTree = true)
+        bool includeTree = true,
+        Stream? stdoutStream = null,
+        TextWriter? outWriter = null,
+        TextWriter? errorWriter = null)
     {
-        outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
+        var @out = outWriter ?? Console.Out;
+        var @err = errorWriter ?? Console.Error;
+        TextWriter infoOut = (outputPath == "-") ? @err : @out;
+
+        if (outputPath != "-")
+        {
+            outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
+        }
         var assembly = NwcAssembly.OpenNwf(nwfPath, new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
@@ -1453,7 +1491,7 @@ internal static class Program
         if (linkTimeLiner && assembly.TimeLiner is not null)
         {
             int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
-            Console.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+            infoOut.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
         }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
@@ -1517,6 +1555,20 @@ internal static class Program
                 fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
                 meshes: assembly.AllMeshes);
             merged.Save(outputPath);
+        }
+        else if (outputPath == "-")
+        {
+            if (stdoutStream != null)
+            {
+                assembly.SaveJson(stdoutStream, new NwcJsonExportOptions { Indented = indent });
+                stdoutStream.Flush();
+            }
+            else
+            {
+                using var stdout = Console.OpenStandardOutput();
+                assembly.SaveJson(stdout, new NwcJsonExportOptions { Indented = indent });
+                stdout.Flush();
+            }
         }
         else
         {
@@ -1586,57 +1638,57 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitClashMatrixMdPath);
                 assembly.ExportClashMatrixMarkdown(explicitClashMatrixMdPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix summary exported to Markdown: '{explicitClashMatrixMdPath}'.");
             }
             if (!string.IsNullOrEmpty(explicitClashMatrixBcfPath))
             {
                 EnsureParentDirectory(explicitClashMatrixBcfPath);
                 assembly.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
-                if (printReport) Console.Error.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix conflicts exported to BCF 2.1: '{explicitClashMatrixBcfPath}'.");
             }
 
-            Console.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
+            infoOut.WriteLine(assembly.ClashMatrix.ToMarkdownTable());
         }
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg);
+            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err);
         }
 
         if (listViewpoints)
         {
-            PrintViewpoints(assembly.SavedViewpoints);
+            PrintViewpoints(assembly.SavedViewpoints, infoOut);
         }
 
         sw.Stop();
 
         if (printReport)
         {
-            Console.Error.WriteLine("=== NwcIO NWF Assembly Report ===");
-            Console.Error.WriteLine($"NWF File:         {nwfPath}");
+            @err.WriteLine("=== NwcIO NWF Assembly Report ===");
+            @err.WriteLine($"NWF File:         {nwfPath}");
             // Models[0] is the .nwf document itself; report the component files separately.
-            Console.Error.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
-            Console.Error.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
-            Console.Error.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
-            Console.Error.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
+            @err.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
+            @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
+            @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
+            @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
             foreach (var xref in assembly.UnresolvedXRefs)
             {
-                Console.Error.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
+                @err.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
             }
             foreach (var xref in assembly.SkippedXRefs)
             {
-                Console.Error.WriteLine($"Warning: skipped unsupported reference (not .nwc/.nwd): '{xref.EffectivePath}'");
+                @err.WriteLine($"Warning: skipped unsupported reference (not .nwc/.nwd): '{xref.EffectivePath}'");
             }
             if (clashes is not null)
             {
-                Console.Error.WriteLine($"Clashes Detected: {clashes.Count}");
+                @err.WriteLine($"Clashes Detected: {clashes.Count}");
             }
-            Console.Error.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
-            Console.Error.WriteLine($"Output:           {outputPath}");
+            @err.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
+            @err.WriteLine($"Output:           {outputPath}");
         }
         else
         {
-            Console.WriteLine(FormattableString.Invariant(
+            infoOut.WriteLine(FormattableString.Invariant(
                 $"NWF Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
