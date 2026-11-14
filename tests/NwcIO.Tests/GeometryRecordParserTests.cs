@@ -7,6 +7,18 @@ namespace NwcIO.Tests;
 
 public class GeometryRecordParserTests
 {
+    private static readonly RgbaColor Red = new(1, 0, 0, 1), Green = new(0, 1, 0, 1);
+
+    [Fact]
+    public void Parse_LinePalette_IsAbgr()
+    {
+        Assert.Equal(Enumerable.Repeat(new RgbaColor(0x33 / 255f, 0x22 / 255f, 0x11 / 255f, 1), 6), GeometryRecordParser.Parse(FormatVectors.R3, 16).LineColors!);
+        Assert.Equal([Red, Red], GeometryRecordParser.Parse(FormatVectors.R6, 16).LineColors!);
+        Assert.Equal([Red, Red, Green, Green], GeometryRecordParser.Parse(FormatVectors.R7, 16).LineColors!);
+        Assert.Equal([0, 1, 2, 3], GeometryRecordParser.Parse(FormatVectors.R7, 16).LineIndices);
+        Assert.Null(GeometryRecordParser.Parse(FormatVectors.R1, 16).LineColors);
+    }
+
     private static void AssertR1(GeometryRecord g)
     {
         Assert.False(g.IsLines);

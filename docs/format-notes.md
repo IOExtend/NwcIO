@@ -124,6 +124,7 @@ UVBODY := [p1][fc][fc x f32] TOKENS(p1, fc/2)?        (raw; tokens iff fc/2 != p
         | [-p1][4 x f32][w][m][ceil(m*(bu+bv)/32) words] TOKENS(p1, m)?   (quantised; tokens iff m != p1)
 ```
 
+- **Colour palette**: entries are `[A=0xFF][B][G][R]` (a little-endian `uint32` `0xRRGGBBAA`). Evidence: a level's line colour equals its type's colour parameter (a Revit colour int, red in the low byte) in 218 of 218 level lines that are not black; the 95 whose colour tells the orders apart all match this order. A line record can carry several colours, per vertex.
 - **Class**: `94` triangles, `95` lines. Class 94 always has a normal slot and never a colour slot; class 95 has only the colour slot. Object ids run 100, 101, then 102, 103 over the slots present.
 - **`p1` is the render-vertex count**, not the position count. `p2/3` positions are stored; `VMAP` maps each render vertex to a position and is the identity when absent. Quantised positions (negative `p1`) and point records (class 96) are not supported.
 - **PACKED(count, w)**: bit `j` of the stream is bit `31 - j%32` of little-endian word `j/32`; value `k` occupies bits `k*w` to `k*w+w-1`, most significant first.

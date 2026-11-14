@@ -44,6 +44,9 @@ public class ModelGraphReaderTests
         Assert.Empty(doc.Meshes[2].Indices);
         Assert.Equal([0, 1, 1, 2, 2, 3, 4, 5], doc.Meshes[2].LineIndices);
         Assert.Null(doc.Meshes[2].Normals);
+        Assert.Equal([0, 1, 2, 0, 0], doc.Meshes.Select(m => m.GeometryIndex));
+        Assert.Equal(6, doc.Meshes[2].LineColors!.Count);
+        Assert.Null(doc.Meshes[0].LineColors);
         Assert.Equal(-1.0, doc.Transforms[3].Scale);
         Assert.All(doc.Meshes.Skip(3), m => { Assert.Same(doc.Meshes[0].Vertices, m.Vertices); Assert.Same(doc.Meshes[0].Indices, m.Indices); });
         Assert.Equal(new Vector3d(0, 5, 0), doc.Meshes[1].GetWorldVertices()[0]);
@@ -52,6 +55,13 @@ public class ModelGraphReaderTests
         Assert.Equal(
             [NwcStreamKind.Transforms, NwcStreamKind.Geometry, NwcStreamKind.Geometry, NwcStreamKind.Toc],
             doc.Container.Streams.Skip(1).Take(4).Select(s => s.Kind));
+    }
+
+    [Fact]
+    public void Create_MeshOutsideModelFile_HasNoGeometryIndex()
+    {
+        var doc = NwcDocument.Create(meshes: [new NwcMesh { Id = 0, Vertices = [], Indices = [] }]);
+        Assert.Equal(-1, doc.Meshes[0].GeometryIndex);
     }
 
     [Theory]

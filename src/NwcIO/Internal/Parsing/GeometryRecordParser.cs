@@ -20,6 +20,9 @@ internal sealed class GeometryRecord
     /// <summary>One unit normal per render vertex, <see cref="Vector3d.Zero"/> for none; null for lines.</summary>
     public required Vector3d[]? Normals { get; init; }
 
+    /// <summary>One colour per render vertex for lines; null for triangles.</summary>
+    public RgbaColor[]? LineColors { get; init; }
+
     /// <summary>Axis-aligned bounds of the stored positions.</summary>
     public required BoundingBox3d Bounds { get; init; }
 
@@ -189,6 +192,7 @@ internal static class GeometryRecordParser
         at = pos;
         id = ReadInt32(record, ref pos);
         bool hasColour = id != 0;
+        RgbaColor[]? lineColors = null;
         if (hasColour)
         {
             ExpectId(id, ref nextId, at);
@@ -202,12 +206,21 @@ internal static class GeometryRecordParser
                 throw Fail("colour palette size is not positive", at);
             }
 
-            // Colour entries are 4 bytes whose channels are not decoded: read for length only.
-            Skip(record, ref pos, 4L * cpal, "colour entries pass the end");
-            if (cpal != p1)
+            // Entry [b0 b1 b2 b3] is A = b0, B = b1, G = b2, R = b3 (docs/format-notes.md §2.6).
+            if (4L * cpal > record.Length - pos)
             {
-                Tokens(record, ref pos, p1, cpal, false);
+                throw Fail("colour entries pass the end", pos);
             }
+
+            var palette = new RgbaColor[cpal];
+            for (int k = 0; k < cpal; k++, pos += 4)
+            {
+                palette[k] = new RgbaColor(record[pos + 3] / 255f, record[pos + 2] / 255f, record[pos + 1] / 255f, record[pos] / 255f);
+            }
+
+            lineColors = cpal == p1
+                ? palette
+                : Array.ConvertAll(Tokens(record, ref pos, p1, cpal, false), k => palette[k]);
         }
 
         if (lines ? hasUv || normals is not null || !hasColour : normals is null || hasColour)
@@ -328,6 +341,7 @@ internal static class GeometryRecordParser
             Indices = indices,
             LineIndices = lineIndices,
             Normals = normals,
+            LineColors = lineColors,
             Bounds = bounds,
         };
     }

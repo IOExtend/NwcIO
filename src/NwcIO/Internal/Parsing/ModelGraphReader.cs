@@ -177,6 +177,8 @@ internal static class ModelGraphReader
                         Indices = record.Indices,
                         Normals = record.Normals,
                         LineIndices = record.LineIndices,
+                        LineColors = record.LineColors,
+                        GeometryIndex = fragment.Record - 1,
                         BoundingBox = record.Bounds,
                         Transform = transform,
                         Node = leaf,
