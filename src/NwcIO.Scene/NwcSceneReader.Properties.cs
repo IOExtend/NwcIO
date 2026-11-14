@@ -81,10 +81,11 @@ public static partial class NwcSceneReader
         _ => null,
     };
 
-    private static string? Number(string stored, double factor, string unit) =>
-        double.TryParse(stored, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) && double.IsFinite(value * factor)
-            ? string.Create(CultureInfo.InvariantCulture, $"{value * factor:G6}{unit}")
-            : null;
+    private static string? Number(string stored, double factor, string unit)
+    {
+        double value = double.Parse(stored, NumberStyles.Float, CultureInfo.InvariantCulture) * factor;
+        return double.IsFinite(value) ? string.Create(CultureInfo.InvariantCulture, $"{value:G6}{unit}") : null;
+    }
 
     // \z, not $, which also matches before a final newline.
     [GeneratedRegex(@"^(lcldrevit_parameter_-[0-9]+|revit_(?!mat_cust_prop_)[A-Za-z0-9_]+)\z", RegexOptions.CultureInvariant)]
