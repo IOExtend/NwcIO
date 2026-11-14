@@ -166,8 +166,23 @@ internal static class SyntheticTree
             {
                 case 0:
                     break;
-                case 1 or 5 or 6 or 7 or 10 or 11:
+                case 1 or 6 or 7 or 10 or 11:
                     w.Double((double)prop.Value!);
+                    break;
+                case 5:
+                    if (prop.Value is long l) w.Long(l);
+                    else if (prop.Value is DateTime dt) w.Long(((DateTimeOffset)dt).ToUnixTimeSeconds());
+                    else if (prop.Value is DateTimeOffset dto) w.Long(dto.ToUnixTimeSeconds());
+                    else if (prop.Value is double d) w.Double(d);
+                    else w.Long(Convert.ToInt64(prop.Value, System.Globalization.CultureInfo.InvariantCulture));
+                    break;
+                case 12:
+                    var (x3, y3, z3) = ((double, double, double))prop.Value!;
+                    w.Double(x3).Double(y3).Double(z3);
+                    break;
+                case 13:
+                    var (x2, y2) = ((double, double))prop.Value!;
+                    w.Double(x2).Double(y2);
                     break;
                 case 2 or 3:
                     w.Int((int)prop.Value!);

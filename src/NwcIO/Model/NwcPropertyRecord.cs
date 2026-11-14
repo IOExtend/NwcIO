@@ -15,7 +15,7 @@ public sealed class NwcPropertyRecord
 
     public required string Class { get; init; }
 
-    /// <summary>Value type marker stored in the record (4 = string observed so far).</summary>
+    /// <summary>Value type marker stored in the record (matching <see cref="NwcVariantDataType"/>).</summary>
     public int ValueType { get; init; }
 
     /// <summary>String value when <see cref="ValueType"/> is a known text type; otherwise null.</summary>

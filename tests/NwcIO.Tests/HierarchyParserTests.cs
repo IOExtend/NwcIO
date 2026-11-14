@@ -91,6 +91,39 @@ public class HierarchyParserTests
     }
 
     [Fact]
+    public void Read_ValueType5_IsDateTimeFromUnixSeconds()
+    {
+        var leaf = HierarchyParser.Read(GroupWithLeaf(1, w =>
+        {
+            w.New(86);
+            w.Str("T");
+            Username(w, "T", "lcT");
+            w.Int(0).Int(1);
+            Username(w, "CreatedDate", "lcDate");
+            w.Int(5).Long(1775044800L); // 2026-04-01T12:00:00Z
+        }), "Model")[2];
+        Assert.Equal((5, "2026-04-01T12:00:00Z"), (leaf.Properties[0].ValueType, leaf.Properties[0].Value));
+    }
+
+    [Fact]
+    public void Read_ValueType12And13_Are3DAnd2DPoints()
+    {
+        var leaf = HierarchyParser.Read(GroupWithLeaf(1, w =>
+        {
+            w.New(86);
+            w.Str("T");
+            Username(w, "T", "lcT");
+            w.Int(0).Int(2);
+            Username(w, "P3", "lcP3");
+            w.Int(12).Double(10.5).Double(20.5).Double(30.5);
+            Username(w, "P2", "lcP2");
+            w.Int(13).Double(0.25).Double(0.75);
+        }), "Model")[2];
+        Assert.Equal((12, "(10.5, 20.5, 30.5)"), (leaf.Properties[0].ValueType, leaf.Properties[0].Value));
+        Assert.Equal((13, "(0.25, 0.75)"), (leaf.Properties[1].ValueType, leaf.Properties[1].Value));
+    }
+
+    [Fact]
     public void Read_EveryAttributeClass_ParsesAndKeepsOnlyProperties()
     {
         var bytes = GroupWithLeaf(6, w =>
@@ -123,7 +156,7 @@ public class HierarchyParserTests
     [InlineData("itemFlag185", "class-185 item flag 2 is neither 0 nor 1")]      // the 185 item with e = 2
     [InlineData("lengthNegative185", "byte length -1 is negative")]               // the 185 item with length -1
     [InlineData("payloadPastEnd185", "1000 bytes pass the end of the data")]      // the 185 item with length 1000
-    [InlineData("valueType12", "property value type 12 is unknown")]              // unknown class-86 value type
+    [InlineData("valueType99", "property value type 99 is unknown")]              // unknown class-86 value type
     public void Read_AttributeDefect_Throws(string defect, string rule) => AssertRule(rule, Defective(defect));
 
     [Theory]
@@ -474,14 +507,14 @@ public class HierarchyParserTests
         "itemFlag185" => GroupWithLeaf(1, w => Extra(w, itemFlag: 2)),
         "lengthNegative185" => GroupWithLeaf(1, w => Extra(w, length: -1)),
         "payloadPastEnd185" => GroupWithLeaf(1, w => Extra(w, length: 1000)),
-        "valueType12" => GroupWithLeaf(1, w =>
+        "valueType99" => GroupWithLeaf(1, w =>
         {
             w.New(86);
             w.Str("T");
             Username(w, "T", "lcT");
             w.Int(0).Int(1);
             Username(w, "K", "lcK");
-            w.Int(12).Int(0);
+            w.Int(99).Int(0);
         }),
         "topLevelLeaf" => End(LeafAtTopLevel()),
         "kZero" => GroupWithLeaf(0, _ => { }, k: 0),
