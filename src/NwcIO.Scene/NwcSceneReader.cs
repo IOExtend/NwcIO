@@ -98,11 +98,26 @@ public static partial class NwcSceneReader
             CreatedAt = document.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
         });
 
+        double? metresPerUnit = unit == NwcLengthUnit.Feet ? 0.3048 : null;
+        var diagnostics = new List<SceneDiagnostic>();
+        HashSet<NwcNode> placed;
+        if (metresPerUnit is double metres)
+        {
+            placed = AddGeometry(document, scene, metres, diagnostics);
+        }
+        else
+        {
+            placed = [];
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "unit-unknown",
+                $"The file does not name its length unit (loader {loader ?? "none"}): geometry, grid lines and length, area, volume and angle values are left out. Set NwcSceneOptions.LengthUnit to convert them."));
+        }
+
         var root = document.RootNode!;   // Open with the default BuildSceneTree always builds one; Read(document) rejects a document without one
         bool revit = loader == "LcNwcLoaderPlugin:lcldrevit";
         var levelElementIds = revit ? LevelElementIds(root) : [];
         int elementCount = 0;
         int leavesOutsideElements = 0;
+        int elementsWithGeometry = 0;
         int nodesWithPropertiesOutsideTabs = 0;
         var tabSets = new Dictionary<NwcPropertyTab, int?>(ReferenceEqualityComparer.Instance);
         var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId)>();
@@ -129,6 +144,7 @@ public static partial class NwcSceneReader
             {
                 kind = SceneNodeKind.Element;
                 leavesOutsideElements++;
+                elementsWithGeometry += placed.Contains(node) ? 1 : 0;
             }
             else
             {
@@ -138,6 +154,7 @@ public static partial class NwcSceneReader
             if (node.IsElement)
             {
                 elementCount++;
+                elementsWithGeometry += placed.Contains(node) ? 1 : 0;
             }
 
             if (node.PropertyTabs.Count == 0 && node.Properties.Count > 0)
@@ -171,7 +188,6 @@ public static partial class NwcSceneReader
             }
         }
 
-        var diagnostics = new List<SceneDiagnostic>();
         if (leavesOutsideElements > 0)
         {
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "no-source-id",
@@ -189,8 +205,11 @@ public static partial class NwcSceneReader
             Document = scene,
             Diagnostics = diagnostics,
             ElementCount = elementCount + leavesOutsideElements,
+            ElementsWithGeometry = elementsWithGeometry,
+            GeometryCount = scene.Geometries.Count,
+            InstanceCount = scene.Instances.Count,
             LengthUnit = unit,
-            MetresPerUnit = unit == NwcLengthUnit.Feet ? 0.3048 : null,
+            MetresPerUnit = metresPerUnit,
         };
     }
 

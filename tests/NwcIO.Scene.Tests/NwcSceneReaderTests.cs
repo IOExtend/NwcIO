@@ -218,7 +218,140 @@ public sealed class NwcSceneReaderTests
         Assert.Empty(doc.PropertySets);
     }
 
+    [Fact]
+    public void Read_RevitSample_SharesGeometryAndPlacesInstances()
+    {
+        var result = Scene(RevitSample.Build());
+        var doc = result.Document;
+        Assert.Equal([SceneTopology.Triangles, SceneTopology.Lines, SceneTopology.Lines, SceneTopology.Lines], doc.Geometries.Select(g => g.Topology));
+        Assert.Equal([(6L, 1), (7L, 1), (9L, 1), (10L, 2), (13L, 3), (13L, 4)], doc.Instances.Select(i => (i.ElementId, i.GeometryId)));
+        Assert.Equal((4, 6, 4), (result.GeometryCount, result.InstanceCount, result.ElementsWithGeometry));
+        Assert.Equal(new Vector3d(0.3048, 0.3048, 0), doc.Geometries[0].Vertices[3]);
+        Assert.Equal([0, 1], doc.Geometries[2].Indices);
+        Assert.Equal([2, 3], doc.Geometries[3].Indices);
+        Assert.All(doc.Geometries.Skip(1), g => Assert.Null(g.Normals));   // lines never carry normals
+    }
+
+    [Fact]
+    public void Read_RotatedInstance_KeepsTheRowVectorAxes()
+    {
+        // 90° about Z, translation (1, 2, 3) ft: NwcTransform.ToMatrix4x4 rows are the images of X, Y, Z (row vectors)
+        double h = Math.Sqrt(0.5);
+        var mesh = new NwcMesh { Id = 0, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 0, Rotation = new(0, 0, h, h), Translation = new(1, 2, 3) } };
+        var result = SceneOf(mesh);
+        var t = result.Document.Instances[0].Transform!.Value;
+        AssertNear(new Vector3d(0, 1, 0), t.XAxis);
+        AssertNear(new Vector3d(-1, 0, 0), t.YAxis);
+        AssertNear(new Vector3d(0.3048, 0.6096, 0.9144), t.Translation);
+        var w = mesh.GetWorldVertices()[1];
+        AssertNear(new Vector3d(w.X * 0.3048, w.Y * 0.3048, w.Z * 0.3048), t.Apply(result.Document.Geometries[0].Vertices[1]));
+        Assert.Null(result.Document.Geometries[0].Normals);   // no stored normals
+    }
+
+    [Fact]
+    public void Read_EmptyMesh_HasNoGeometryAndIsReported()
+    {
+        var result = SceneOf(new NwcMesh { Id = 0, Vertices = [], Indices = [] });
+        Assert.Empty(result.Document.Geometries);
+        Assert.Empty(result.Document.Instances);
+        Assert.Contains((SceneSeverity.Info, "empty-mesh"), result.Diagnostics.Select(d => (d.Severity, d.Code)));
+    }
+
+    [Fact]
+    public void Read_RevitSample_KeepsMirrorAndMetreTranslation()
+    {
+        var doc = Scene(RevitSample.Build()).Document;
+        var t0 = doc.Instances[0].Transform!.Value;
+        Assert.Equal(new Vector3d(1, 0, 0), t0.XAxis);
+        AssertNear(new Vector3d(0.3048, 0.6096, 0.9144), t0.Translation);
+        var t1 = doc.Instances[1].Transform!.Value;
+        Assert.Equal((new Vector3d(-1, 0, 0), new Vector3d(0, -1, 0), new Vector3d(0, 0, -1)), (t1.XAxis, t1.YAxis, t1.ZAxis));
+        AssertNear(new Vector3d(3.048, 0, 0), t1.Translation);
+    }
+
+    [Fact]
+    public void Read_RevitSample_WritesFileMaterialsAndLineColours()
+    {
+        var doc = Scene(RevitSample.Build()).Document;
+        Assert.Equal(
+            [("Concrete", new RgbaColor(128, 128, 128, 255)), ("Default", new RgbaColor(128, 128, 128, 255)), ("Glass", new RgbaColor(0, 0, 255, 128)),
+             ("Default", new RgbaColor(255, 255, 255, 255))],
+            doc.Materials.Select(m => (m.Name, m.Color)));
+        Assert.All(doc.Materials, m => Assert.Equal((0.5, 0.1), (m.Roughness, m.Metalness)));   // IOScene defaults, as RvtIO.Scene
+        Assert.Equal([null, null, null, new RgbaColor(255, 0, 0, 255), new RgbaColor(255, 0, 0, 255), new RgbaColor(0, 255, 0, 255)], doc.Instances.Select(i => i.Color));
+        Assert.Equal([1, 2, 3, 4, 4, 4], doc.Instances.Select(i => i.MaterialId));
+    }
+
+    [Fact]
+    public void Read_SegmentWithTwoColours_IsDrawnWithTheMaterialAndReported()
+    {
+        // R7 with vertex 1 green: segment (0,1) joins red and green
+        byte[] r7 = FormatVectors.Patched(FormatVectors.R7, 104, [0xFF, 0x00, 0xFF, 0x00]);
+        var (h, p) = SyntheticTree.Write(1, new TreeNode("L", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1, Slots: [new PId(5)])]));
+        var file = SyntheticNwcFile.Build(h, SyntheticFragments.Build(new Frag(2, NwcIO.Model.Vector3d.Zero, 1, 2, 4, Rec: 1)), [r7], [136],
+            extraStreams: [("LcOpGuidStore", SyntheticNwcFile.GuidStore(RevitSample.G1)), ("LcOpDBCache", SyntheticNwcFile.PartitionHeader("a.rvt", 1, "LcNwcLoaderPlugin:lcldrevit"))], partitionProps: p);
+        var result = Scene(file);
+        Assert.Equal([null, new RgbaColor(0, 255, 0, 255)], result.Document.Instances.Select(i => i.Color));
+        Assert.Equal((SceneSeverity.Warning, "line-colour-mixed"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+    }
+
+    [Fact]
+    public void Read_ZeroNormals_AreAveragedFromTheTriangles()
+    {
+        // two triangles of a unit square in z = 0, CCW seen from +Z; vertex 3 stores no normal
+        var mesh = new NwcMesh { Id = 0, GeometryIndex = -1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = [0, 1, 2, 2, 1, 3],
+            Normals = [new(0, 0, 1), new(0, 0, 1), new(0, 0, 1), NwcIO.Model.Vector3d.Zero] };
+        Assert.Equal(new Vector3d(0, 0, 1), SceneOf(mesh).Document.Geometries[0].Normals![3]);
+    }
+
+    // A Revit-loader document whose root holds one leaf carrying the mesh.
+    private static NwcSceneResult SceneOf(NwcMesh mesh)
+    {
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
+        root.Children.Add(leaf); leaf.Meshes.Add(mesh); mesh.Node = leaf;
+        return Valid(NwcSceneReader.Read(NwcDocument.Create(new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, meshes: [mesh], rootNode: root), new() { ModelKey = "k" }));
+    }
+
+    [Fact]
+    public void Read_NonRevitLoader_LeavesOutUnitDataAndWarns()
+    {
+        var result = Scene(RevitSample.Build("LcNwcLoaderPlugin:mock"));
+        Assert.Empty(result.Document.Geometries); Assert.Empty(result.Document.Instances); Assert.Empty(result.Document.Materials);
+        Assert.DoesNotContain(result.Document.PropertySets.SelectMany(s => s.Properties), p => p.Name is "Area" or "Volume" or "Angle" or "Width" or "Elevation");
+        Assert.Equal((SceneSeverity.Warning, "unit-unknown"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+        Assert.Empty(result.Document.Validate());
+
+        var converted = Scene(RevitSample.Build("LcNwcLoaderPlugin:mock"), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Feet });
+        Assert.Equal(6, converted.InstanceCount);
+        Assert.DoesNotContain(converted.Diagnostics, d => d.Code == "unit-unknown");
+        var texts = converted.Document.PropertySets.SelectMany(s => s.Properties).Select(p => (p.Name, p.Value.Text)).ToList();
+        Assert.Contains(("Area", "10 m²"), texts);
+        Assert.Contains(("Elevation", "3000 mm"), texts);
+        Assert.Equal(new Vector3d(0.3048, 0.3048, 0), converted.Document.Geometries[0].Vertices[3]);
+    }
+
+    [Fact]
+    public void Read_MeshWithoutNode_IsReportedNotPlaced()
+    {
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var doc = NwcDocument.Create(new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root,
+            meshes: [new NwcMesh { Id = 0, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] }]);
+        var result = Valid(NwcSceneReader.Read(doc, new() { ModelKey = "k" }));
+        Assert.Empty(result.Document.Instances);
+        Assert.Equal((SceneSeverity.Warning, "unplaced-mesh"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+    }
+
     private static ScenePropertySet[] Sets(SceneDocument doc, long element) => [.. doc.Elements[(int)element].PropertySetIds.Select(id => doc.PropertySets[id - 1])];
+
+    // Compares each component with precision 12.
+    private static void AssertNear(Vector3d expected, Vector3d actual)
+    {
+        Assert.Equal(expected.X, actual.X, 12);
+        Assert.Equal(expected.Y, actual.Y, 12);
+        Assert.Equal(expected.Z, actual.Z, 12);
+    }
 
     // Every converted document must pass Validate() without errors or warnings (design §2, §6.5).
     private static NwcSceneResult Valid(NwcSceneResult r)
