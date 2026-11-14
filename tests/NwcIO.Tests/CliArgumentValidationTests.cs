@@ -7,22 +7,10 @@ public class CliArgumentValidationTests
 {
     private static (int ExitCode, string StdOut, string StdErr) Run(params string[] args)
     {
-        var originalOut = Console.Out;
-        var originalErr = Console.Error;
         using var swOut = new StringWriter();
         using var swErr = new StringWriter();
-        try
-        {
-            Console.SetOut(swOut);
-            Console.SetError(swErr);
-            int exit = NwcIO.Cli.Program.Main(args);
-            return (exit, swOut.ToString(), swErr.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalErr);
-        }
+        int exit = NwcIO.Cli.Program.Run(args, stdoutStream: null, outWriter: swOut, errorWriter: swErr);
+        return (exit, swOut.ToString(), swErr.ToString());
     }
 
     private static string TempModel()
