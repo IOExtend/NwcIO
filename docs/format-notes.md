@@ -1,6 +1,6 @@
 # Navisworks File Format Notes (.nwc / .nwd)
 
-This document records reverse-engineering findings obtained from hex and stream analysis of real Autodesk Navisworks cache files (`.nwc`, version 448 / Navisworks 2021–2024 era) and clean-room study of format specifications.
+This document records reverse-engineering findings obtained from hex and stream analysis of real Autodesk Navisworks cache files (`.nwc`, version 448 / Navisworks 2016–2025 era) and clean-room study of format specifications.
 
 ## 1. High-Level Container: `#LcUStream`
 
@@ -19,7 +19,7 @@ Key tokens:
 - **Format identifier**: `#LcUStream-V1.1`
 - **Double precision**: `double` (floating-point numbers in geometry and matrices are 64-bit doubles)
 - **Character encoding**: `C` (8-bit locale-dependent ASCII) or `utf8`
-- **Internal version**: `navisworks:448` (format version identifier, e.g. 448 in Navisworks 2021–2024)
+- **Internal version**: `navisworks:448` (format version identifier, e.g. 448 in Navisworks 2016–2025, corresponding to Autodesk's `DocumentFileVersion` 448)
 - **Chunk marker**: `lichunk-008` (chunked container layout) or `lizlib` (raw zlib stream block)
 
 A single `.nwc` file often contains multiple `#LcUStream` sections (e.g. partition 0 for model data, partition 1 for xrefs/caches).

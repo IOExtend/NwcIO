@@ -1026,6 +1026,10 @@ internal static class Program
             Console.Error.WriteLine($"Input:            {inputPath}");
             Console.Error.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
             Console.Error.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
+            if (doc.FileInfo.FormatVersion is not null)
+            {
+                Console.Error.WriteLine($"Format version:   {doc.FileInfo.FormatVersion}");
+            }
             Console.Error.WriteLine($"Timestamp:        {doc.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "<unknown>"}");
             Console.Error.WriteLine($"Scene tree nodes: {treeNodeCount}");
             Console.Error.WriteLine($"Property records: {doc.PropertyRecords.Count}");
