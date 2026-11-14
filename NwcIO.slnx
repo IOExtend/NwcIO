@@ -1,5 +1,7 @@
 <Solution>
   <Project Path="src/NwcIO/NwcIO.csproj" />
   <Project Path="src/NwcIO.Cli/NwcIO.Cli.csproj" />
+  <Project Path="src/NwcIO.Scene/NwcIO.Scene.csproj" />
   <Project Path="tests/NwcIO.Tests/NwcIO.Tests.csproj" />
+  <Project Path="tests/NwcIO.Scene.Tests/NwcIO.Scene.Tests.csproj" />
 </Solution>

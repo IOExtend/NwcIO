@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Packs release assets into artifacts: binary archives of library and CLI, source zip, NuGet packages and SHA256SUMS.txt.
+    Packs release assets into artifacts: binary archives of library, CLI archives, source zip, NuGet packages and SHA256SUMS.txt.
 #>
 param(
     [string]$Output = (Join-Path $PSScriptRoot '..\artifacts')
@@ -27,6 +27,40 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 function Invoke-DotNet {
     & dotnet @args
     if ($LASTEXITCODE -ne 0) { throw "dotnet $($args -join ' ') failed with exit code $LASTEXITCODE" }
+}
+
+function Assert-AdapterNuspec([string]$NuspecPath, [string]$EngineId, [string]$Version) {
+    $dependencies = @(([xml](Get-Content -LiteralPath $NuspecPath -Raw)).SelectNodes("//*[local-name()='dependency']"))
+    # (a) Guards the PinProjectReferencesExactly target, which hooks a private NuGet target and would fail silently if an SDK renamed it.
+    $engine = @($dependencies | Where-Object { $_.GetAttribute('id') -eq $EngineId })
+    if ($engine.Count -eq 0) { throw "$NuspecPath has no dependency on $EngineId." }
+    foreach ($dependency in $engine) {
+        if ($dependency.GetAttribute('version') -cne "[$Version]") {
+            throw "$NuspecPath depends on $EngineId '$($dependency.GetAttribute('version'))'; it must be exactly '[$Version]'."
+        }
+    }
+    # (b) Replaces the NU5104 protection that the IOScene range switches off: no adapter built on a preview contract reaches nuget.org.
+    $scene = @($dependencies | Where-Object { $_.GetAttribute('id') -eq 'IOScene' })
+    if ($scene.Count -eq 0) { throw "$NuspecPath has no dependency on IOScene." }
+    foreach ($dependency in $scene) {
+        $range = $dependency.GetAttribute('version')
+        $lower = $range.TrimStart('[', '(').Split(',')[0].Trim()
+        if ($lower -eq '' -or $lower.Contains('-')) {
+            throw "$NuspecPath depends on IOScene '$range', whose lower bound is missing or a prerelease; release IOScene first and require its stable version."
+        }
+    }
+    # (c) nuget.org refuses a dependency bound with metadata, or one whose prerelease label has one part and does not start
+    # with a letter (NuGetGallery ManifestValidator.ValidateDependencyVersion); dotnet pack accepts both, so only the push would fail.
+    foreach ($dependency in $dependencies) {
+        $range = $dependency.GetAttribute('version')
+        foreach ($bound in $range.Trim('[', ']', '(', ')').Split(',')) {
+            $bound = $bound.Trim()
+            $label = if ($bound.Contains('-')) { $bound.Substring($bound.IndexOf('-') + 1) } else { '' }
+            if ($bound.Contains('+') -or ($label -ne '' -and -not $label.Contains('.') -and $label -notmatch '^[a-z][0-9a-z-]*$')) {
+                throw "$NuspecPath depends on $($dependency.GetAttribute('id')) '$range', whose bound '$bound' nuget.org refuses."
+            }
+        }
+    }
 }
 
 function New-Zip([string]$SourceDir, [string]$ZipPath) {
@@ -75,6 +109,17 @@ New-Zip $cli10Stage (Join-Path $Output "NwcIO-Cli-$version-net10.0.zip")
 # 4. NuGet packages
 Write-Host "Packing NuGet packages..."
 Invoke-DotNet pack (Join-Path $root 'NwcIO.slnx') -c Release --no-build -o $Output
+
+Write-Host "Checking NwcIO.Scene dependencies..."
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$adapterNuspec = Join-Path $stage 'NwcIO.Scene.nuspec'
+$adapterPackage = [System.IO.Compression.ZipFile]::OpenRead((Join-Path $Output "NwcIO.Scene.$version.nupkg"))
+try {
+    $entry = @($adapterPackage.Entries | Where-Object { $_.FullName -notlike '*/*' -and $_.Name -like '*.nuspec' })[0]
+    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $adapterNuspec, $true)
+}
+finally { $adapterPackage.Dispose() }
+Assert-AdapterNuspec $adapterNuspec 'NwcIO' $version
 
 # 5. Source code archive
 Write-Host "Creating source code archive..."
