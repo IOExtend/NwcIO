@@ -152,7 +152,7 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 
 ## Limitations
 
-- Version 0.11.0 is a preview. The API can evolve before 1.0.
+- Version 0.12.0 is a preview. The API can evolve before 1.0.
 - Geometry extraction decodes triangle strips, polylines and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported.
 - `.nwd` scene trees with partition nodes are not decoded yet: open with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference `.nwd` files.
 - The `.nwc` writer stores vertex positions and rotation/translation; it rejects scaled transforms, line meshes and meshes whose triangles differ from the single strip the reader rebuilds over the positions.

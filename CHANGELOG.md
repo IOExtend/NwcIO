@@ -4,6 +4,8 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-14
+
 ### Added
 - `NwcLengthUnit`, `NwcDocument.LengthUnit` and `NwcDocument.MetresPerUnit`: feet for caches written by the Revit loader (`LcNwcLoaderPlugin:lcldrevit`), `Unknown` otherwise.
 - `NwcNode.IsElement` and `NwcNode.Element`.
