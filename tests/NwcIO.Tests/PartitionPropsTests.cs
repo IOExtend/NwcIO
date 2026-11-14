@@ -100,7 +100,7 @@ public class PartitionPropsTests
 
         var props = new LcGraphWriter();
         HierarchyParserTests.PropertyTab(props, 129);
-        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(HierarchyParserTests.End(w), "Model", true, null, [props.ToArray()]));
+        var ex = Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(HierarchyParserTests.End(w), "Model", true, null, () => [props.ToArray()]));
         Assert.Contains("134217728 property references", ex.Message);
     }
 
@@ -143,16 +143,40 @@ public class PartitionPropsTests
     [Fact]
     public void Open_TwoPropsEntries_Throws()
     {
-        var (h, p) = SyntheticTree.Write(2, Top());
-        var file = SyntheticNwcFile.Build(h, null, [], [], partitionProps: p,
-            editDirectory: e => e.Add(e.Single(x => x.Name.EndsWith("LcOaPartitionProps", StringComparison.Ordinal))));
-        var ex = Assert.Throws<InvalidDataException>(() => NwcDocument.Open(new MemoryStream(file)));
+        var ex = Assert.Throws<InvalidDataException>(() => NwcDocument.Open(new MemoryStream(TwoPropsEntriesFile())));
         Assert.StartsWith("LcOaPartitionProps DbCache entry at file byte ", ex.Message);
         Assert.EndsWith(": named more than once in the directory", ex.Message);
     }
 
+    [Fact]
+    public void Open_PartitionHierarchy_ThrowsNotSupportedBeforeThePropsChecks() =>
+        Assert.Throws<NotSupportedException>(() => NwcDocument.Open(new MemoryStream(PartitionFileWithBrokenToc())));
+
+    [Fact]
+    public void Open_WithoutTree_ChecksNoPropsEntry()
+    {
+        var options = new NwcReaderOptions { BuildSceneTree = false };
+        Assert.Null(NwcDocument.Open(new MemoryStream(PartitionFileWithBrokenToc()), options).RootNode);
+        Assert.Null(NwcDocument.Open(new MemoryStream(TwoPropsEntriesFile()), options).RootNode);
+    }
+
+    [Fact]
+    public void Open_SegmentWithOnlyItsToc_Throws()
+    {
+        // The entry is moved onto the TOC stream alone, a TOC for k = 0: a present segment with no root stream, header [1][1].
+        var file = SyntheticNwcFile.Build(H([1], 1), null, [], [], partitionProps: [OneTab], editPropsToc: _ => new byte[8],
+            editDirectory: e =>
+            {
+                int i = e.FindIndex(x => x.Name.EndsWith("LcOaPartitionProps", StringComparison.Ordinal));
+                long b = e[i].Extra >> 32;
+                e[i] = e[i] with { Offset = e[i].Offset + e[i].Length - b - 4, Length = b + 4 };
+            });
+        var ex = Assert.Throws<InvalidDataException>(() => NwcDocument.Open(new MemoryStream(file)));
+        Assert.Equal("LcOaPartitionProps: 0 root streams, but the hierarchy header names 1", ex.Message);
+    }
+
     private static IReadOnlyList<NwcNode> Read(byte[] h, byte[][] p, bool includeProperties = true) =>
-        HierarchyParser.Read(h, "Model", includeProperties, null, p);
+        HierarchyParser.Read(h, "Model", includeProperties, null, () => p);
 
     private static TreeNode[] Top() =>
         [new("G", "LcRevitLayer", Children: [
@@ -165,6 +189,21 @@ public class PartitionPropsTests
         var (h, p) = SyntheticTree.Write(2, Top());
         return SyntheticNwcFile.Build(h, null, [], [], partitionProps: p, editPropsToc: editPropsToc);
     }
+
+    private static byte[] TwoPropsEntriesFile()
+    {
+        var (h, p) = SyntheticTree.Write(2, Top());
+        return SyntheticNwcFile.Build(h, null, [], [], partitionProps: p,
+            editDirectory: e => e.Add(e.Single(x => x.Name.EndsWith("LcOaPartitionProps", StringComparison.Ordinal))));
+    }
+
+    // A .nwd-like hierarchy (a class-32 top-level node) whose header names one root, with a props TOC that names 3 streams, not 1.
+    private static byte[] PartitionFileWithBrokenToc() =>
+        SyntheticNwcFile.Build(HierarchyParserTests.PartitionHierarchy([1]), null, [], [], partitionProps: [OneTab], editPropsToc: toc =>
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(toc, 3);
+            return toc;
+        });
 
     // A top-level group whose one leaf has nullSlots null attribute slots; header [roots.Length][roots].
     private static byte[] H(int[] roots, int nullSlots)

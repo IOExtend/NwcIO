@@ -4,7 +4,10 @@ using NwcIO.Model;
 
 namespace NwcIO.Internal.Parsing;
 
-/// <summary>The model segments a DbCache directory locates (docs/format-notes.md §2.7); an absent segment is null or empty.</summary>
+/// <summary>
+/// The model segments a DbCache directory locates (docs/format-notes.md §2.7); an absent segment is null or empty. PartitionProps
+/// locates and checks the <c>LcOaPartitionProps</c> segment only when called, and returns null when the directory names none.
+/// </summary>
 internal sealed record ModelSegments(
     NwcDbCacheDirectory Directory,
     LcRawStream? Hierarchy,
@@ -12,7 +15,7 @@ internal sealed record ModelSegments(
     IReadOnlyList<LcRawStream> GeometryChunks,
     LcRawStream? Toc,
     LcRawStream? GuidStore,
-    IReadOnlyList<LcRawStream> PartitionProps);
+    Func<IReadOnlyList<byte[]>?> PartitionProps);
 
 /// <summary>The strictly read model: the tree root (null without a scene tree), one mesh and transform per fragment, and the GUID table (empty when not read).</summary>
 internal sealed record ModelGraph(NwcNode? Root, IReadOnlyList<NwcMesh> Meshes, IReadOnlyList<NwcTransform> Transforms, IReadOnlyList<Guid> Guids);
@@ -41,7 +44,8 @@ internal static class ModelGraphReader
             return null;
         }
 
-        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null, guidStore = null, props = null;
+        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null, guidStore = null;
+        var props = new List<NwcDbCacheEntry>();
         foreach (var entry in directory.Entries)
         {
             switch (entry.Name[(entry.Name.LastIndexOf('\\') + 1)..])
@@ -59,7 +63,8 @@ internal static class ModelGraphReader
                     guidStore = Once(guidStore, entry, GuidStoreSegment);
                     break;
                 case PartitionPropsSegment:
-                    props = Once(props, entry, PartitionPropsSegment);
+                    // Only recorded: the tree reader checks them, so a .nwd fails at its first class-32 node first (docs/format-notes.md §2.2.1).
+                    props.Add(entry);
                     break;
             }
         }
@@ -73,7 +78,6 @@ internal static class ModelGraphReader
         var hierarchyStream = hierarchy is null ? null : SingleStream(streams, hierarchy, HierarchySegment);
         var fragmentsStream = fragments is null ? null : SingleStream(streams, fragments, FragmentsSegment);
         var guidStoreStream = guidStore is null ? null : SingleStream(streams, guidStore, GuidStoreSegment);
-        LcRawStream[] propsStreams = props is null ? [] : PrefixedStreams(streams, props, PartitionPropsSegment);
         LcRawStream[] chunks = [];
         LcRawStream? toc = null;
         if (geometry is not null)
@@ -98,7 +102,7 @@ internal static class ModelGraphReader
             toc.Kind = NwcStreamKind.Toc;
         }
 
-        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc, guidStoreStream, propsStreams);
+        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc, guidStoreStream, () => PartitionRootStreams(streams, props));
     }
 
     /// <summary>The tree first, so a tree that cannot be read fails before any geometry work; then geometry, fragments and links.</summary>
@@ -115,7 +119,7 @@ internal static class ModelGraphReader
         {
             preorder = segments.Hierarchy is null
                 ? [new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 }]
-                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords, guids, PartitionRootStreams(segments.PartitionProps));
+                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords, guids, segments.PartitionProps);
         }
 
         var meshes = new List<NwcMesh>();
@@ -211,16 +215,23 @@ internal static class ModelGraphReader
     }
 
     // The LcOaPartitionProps root streams, once the last stream, the table of contents [i32 k][k x i32 compressed length] zero-padded
-    // to 8, matches them (docs/format-notes.md §2.2.1); empty when the file has no such segment.
-    private static byte[][] PartitionRootStreams(IReadOnlyList<LcRawStream> segment)
+    // to 8, matches them (docs/format-notes.md §2.2.1); null when the directory names no such segment, empty for a TOC alone (k = 0).
+    private static byte[][]? PartitionRootStreams(IReadOnlyList<LcRawStream> streams, List<NwcDbCacheEntry> entries)
     {
-        if (segment.Count == 0)
+        NwcDbCacheEntry? entry = null;
+        foreach (var named in entries)
         {
-            return [];
+            entry = Once(entry, named, PartitionPropsSegment);
         }
 
+        if (entry is null)
+        {
+            return null;
+        }
+
+        var segment = PrefixedStreams(streams, entry, PartitionPropsSegment);
         byte[] toc = segment[^1].Data;
-        int k = segment.Count - 1;
+        int k = segment.Length - 1;
         int expected = (4 + (4 * k) + 7) & ~7;
         if (toc.Length != expected)
         {

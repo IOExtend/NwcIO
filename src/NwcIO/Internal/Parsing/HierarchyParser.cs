@@ -38,7 +38,10 @@ internal static class HierarchyParser
 
     /// <param name="includeProperties">False leaves every node's properties empty; the class-86 bodies are still read and checked.</param>
     /// <param name="guids">The <c>LcOpGuidStore</c> table that element indices point into; null is an empty table.</param>
-    /// <param name="partitionProps">The <c>LcOaPartitionProps</c> root streams, its table of contents excluded; null or empty when the file has no such segment.</param>
+    /// <param name="partitionProps">
+    /// Gives the <c>LcOaPartitionProps</c> root streams, its table of contents excluded; called once, at the first null attribute slot or
+    /// after the hierarchy tail. It returns null, or is null, when the file has no such segment; an empty list is a segment without streams.
+    /// </param>
     /// <returns>The nodes in preorder; [0] is the synthetic root (Id 0, Name <paramref name="rootName"/>, Class "Model", Tag 0).</returns>
     /// <exception cref="NotSupportedException">One element index sits on nodes under different parents (a linked Revit model).</exception>
     public static IReadOnlyList<NwcNode> Read(
@@ -46,10 +49,10 @@ internal static class HierarchyParser
         string rootName,
         bool includeProperties = true,
         IReadOnlyList<Guid>? guids = null,
-        IReadOnlyList<byte[]>? partitionProps = null)
+        Func<IReadOnlyList<byte[]>?>? partitionProps = null)
     {
         guids ??= [];
-        var (top, total) = new Parser(new LcObjectReader(data, Segment), guids.Count, partitionProps ?? []).ReadStream();
+        var (top, total) = new Parser(new LcObjectReader(data, Segment), guids.Count, partitionProps ?? (() => null)).ReadStream();
         return Expand(top, rootName, total, includeProperties, guids);
     }
 
@@ -162,13 +165,13 @@ internal static class HierarchyParser
         private readonly int _guidCount;
 
         // Null in a parser of one LcOaPartitionProps stream, which holds roots and no nodes.
-        private readonly IReadOnlyList<byte[]>? _partitionProps;
+        private readonly Func<IReadOnlyList<byte[]>?>? _partitionProps;
         private readonly Func<int, object> _readBody;
 
         // The roots the null attribute slots take; ReadStream sets it from the header.
         private PartitionRoots? _roots;
 
-        public Parser(LcObjectReader reader, int guidCount, IReadOnlyList<byte[]>? partitionProps)
+        public Parser(LcObjectReader reader, int guidCount, Func<IReadOnlyList<byte[]>?>? partitionProps)
         {
             _reader = reader;
             _guidCount = guidCount;
@@ -473,7 +476,8 @@ internal static class HierarchyParser
     {
         private readonly LcObjectReader _hierarchy;
         private readonly int[] _counts;
-        private readonly IReadOnlyList<byte[]> _streams;
+        private readonly Func<IReadOnlyList<byte[]>?> _source;
+        private IReadOnlyList<byte[]> _streams = [];
         private long _unread;
         private bool _checked;
         private int _slots;
@@ -483,11 +487,11 @@ internal static class HierarchyParser
         private int _taken;
         private Parser? _current;
 
-        public PartitionRoots(LcObjectReader hierarchy, int[] counts, IReadOnlyList<byte[]> streams)
+        public PartitionRoots(LcObjectReader hierarchy, int[] counts, Func<IReadOnlyList<byte[]>?> source)
         {
             _hierarchy = hierarchy;
             _counts = counts;
-            _streams = streams;
+            _source = source;
             _unread = counts.Sum(c => (long)c);
         }
 
@@ -526,7 +530,8 @@ internal static class HierarchyParser
             }
 
             _checked = true;
-            if (_streams.Count == 0)
+            var streams = _source();
+            if (streams is null)
             {
                 if (_unread > 0)
                 {
@@ -536,11 +541,12 @@ internal static class HierarchyParser
                 return;
             }
 
-            if (_streams.Count != _counts.Length)
+            if (streams.Count != _counts.Length)
             {
-                throw new InvalidDataException($"{PropsSegment}: {_streams.Count} root streams, but the hierarchy header names {_counts.Length}");
+                throw new InvalidDataException($"{PropsSegment}: {streams.Count} root streams, but the hierarchy header names {_counts.Length}");
             }
 
+            _streams = streams;
             EndReadStreams();
         }
 

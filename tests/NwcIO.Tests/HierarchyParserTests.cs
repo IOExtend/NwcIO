@@ -339,10 +339,10 @@ public class HierarchyParserTests
         Assert.InRange(allocated, 0, 16 << 20);
     }
 
-    // [k = 1][0][root 100][n = 1], then the top-level partition node: [i32 0] + a class-53 body + 16 zero bytes for its trailer.
-    internal static byte[] PartitionHierarchy()
+    // [k = 1][roots ?? 0][root 100][n = 1], then the top-level partition node: [i32 0] + a class-53 body + 16 zero bytes for its trailer.
+    internal static byte[] PartitionHierarchy(int[]? roots = null)
     {
-        var w = Begin();
+        var w = Begin(roots: roots);
         w.New(32);
         w.Int(0);
         w.Str("P");
