@@ -34,4 +34,22 @@ public class PartitionHeaderParserTests
         Assert.Null(doc.FileInfo.SourceByteSize);
         Assert.Null(doc.FileInfo.LoaderPlugin);
     }
+
+    [Fact]
+    public void Save_SourceByteSize_RoundtripsSuccessfully()
+    {
+        var original = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write(
+            [SyntheticNwcFile.PartitionHeader("model.rvt", 1767225600, "LcNwcLoaderPlugin:lcldrevit", 123456789)])));
+
+        Assert.Equal(123456789L, original.FileInfo.SourceByteSize);
+
+        using var ms = new MemoryStream();
+        original.Save(ms);
+        ms.Position = 0;
+
+        var roundtripped = NwcDocument.Open(ms);
+        Assert.Equal(123456789L, roundtripped.FileInfo.SourceByteSize);
+        Assert.Equal("model.rvt", roundtripped.FileInfo.SourcePath);
+        Assert.Equal("LcNwcLoaderPlugin:lcldrevit", roundtripped.FileInfo.LoaderPlugin);
+    }
 }
