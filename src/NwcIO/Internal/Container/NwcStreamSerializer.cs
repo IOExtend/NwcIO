@@ -281,32 +281,7 @@ internal static class NwcStreamSerializer
                     WritePaddedString(w, r.Name);
                     WritePaddedString(w, r.Class);
                     w.Write(r.ValueType);
-
-                    switch (r.ValueType)
-                    {
-                        case 4:
-                            WritePaddedString(w, r.Value ?? string.Empty);
-                            break;
-                        case 0:
-                        case 1:
-                        case 2:
-                        case 3:
-                            w.Write(int.TryParse(r.Value, out var iv) ? iv : 0);
-                            break;
-                        case 5:
-                        case 7:
-                            w.Write(double.TryParse(r.Value, CultureInfo.InvariantCulture, out var dv) ? dv : 0.0);
-                            break;
-                        case 8:
-                            w.Write(0);
-                            w.Write(0);
-                            WritePaddedString(w, r.Value ?? string.Empty);
-                            WritePaddedString(w, string.Empty);
-                            break;
-                        default:
-                            w.Write(0);
-                            break;
-                    }
+                    WritePropertyValue(w, r.ValueType, r.Value);
                 }
             }
         }
@@ -316,6 +291,79 @@ internal static class NwcStreamSerializer
         }
 
         return ms.ToArray();
+    }
+
+    private static void WritePropertyValue(BinaryWriter w, int valueType, string? value)
+    {
+        switch (valueType)
+        {
+            case 4:
+            case 9:
+                WritePaddedString(w, value ?? string.Empty);
+                break;
+            case 0:
+            case 2:
+            case 3:
+                w.Write(int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var iv) ? iv : 0);
+                break;
+            case 1:
+            case 6:
+            case 7:
+            case 10:
+            case 11:
+                w.Write(double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv) ? dv : 0.0);
+                break;
+            case 5:
+                long unixSec = 0L;
+                if (value is not null)
+                {
+                    if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto))
+                    {
+                        unixSec = dto.ToUnixTimeSeconds();
+                    }
+                    else
+                    {
+                        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out unixSec);
+                    }
+                }
+                w.Write(unixSec);
+                break;
+            case 8:
+                w.Write(0);
+                w.Write(0);
+                WritePaddedString(w, value ?? string.Empty);
+                WritePaddedString(w, string.Empty);
+                break;
+            case 12:
+                WritePointDoubles(w, value, 3);
+                break;
+            case 13:
+                WritePointDoubles(w, value, 2);
+                break;
+            default:
+                w.Write(0);
+                break;
+        }
+    }
+
+    private static void WritePointDoubles(BinaryWriter w, string? value, int count)
+    {
+        var doubles = new double[count];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            var parts = value.Trim('(', ')').Split(',', StringSplitOptions.TrimEntries);
+            for (int i = 0; i < Math.Min(parts.Length, count); i++)
+            {
+                if (double.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
+                {
+                    doubles[i] = d;
+                }
+            }
+        }
+        for (int i = 0; i < count; i++)
+        {
+            w.Write(doubles[i]);
+        }
     }
 
     private static void FlattenNode(BinaryWriter w, NwcNode node)
@@ -340,8 +388,9 @@ internal static class NwcStreamSerializer
             w.Write(52);
             WritePaddedString(w, prop.Name);
             WritePaddedString(w, prop.Class);
-            w.Write(4); // string
-            WritePaddedString(w, prop.Value ?? string.Empty);
+            int vType = prop.ValueType != 0 ? prop.ValueType : 4;
+            w.Write(vType);
+            WritePropertyValue(w, vType, prop.Value);
         }
 
         foreach (var child in node.Children)

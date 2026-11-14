@@ -601,4 +601,36 @@ public class WriterTests
             if (File.Exists(outputPath)) File.Delete(outputPath);
         }
     }
+
+    [Fact]
+    public void Save_NodePropertyNamedConstant_RoundtripsWithoutBecomingNull()
+    {
+        var root = new NwcNode
+        {
+            Id = 1,
+            Name = "Element 1",
+            Class = "LcRevitElement",
+        };
+        root.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 1,
+            Tag = 52,
+            Name = "Phase Status",
+            Class = "Item",
+            ValueType = (int)NwcVariantDataType.NamedConstant,
+            Value = "Existing",
+        });
+
+        var doc = NwcDocument.Create(rootNode: root);
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        ms.Position = 0;
+
+        var reopened = NwcDocument.Open(ms);
+        Assert.NotNull(reopened.RootNode);
+        var prop = Assert.Single(reopened.RootNode.Properties, p => p.Name == "Phase Status");
+        Assert.Equal("Phase Status", prop.Name);
+        Assert.Equal((int)NwcVariantDataType.NamedConstant, prop.ValueType);
+        Assert.Equal("Existing", prop.Value);
+    }
 }
