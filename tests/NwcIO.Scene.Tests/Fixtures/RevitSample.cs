@@ -31,7 +31,8 @@ internal static class RevitSample
             new Prop("Color", "revit_Color", 4, "128, 128, 128"), new Prop("Note", "revit_mat_cust_prop_Note", 4, "x"));
         var wallB = new Tab(null, "Element", "LcRevitData_Element",
             new Prop("Id", "LcRevitPropertyElementId", 2, 1002), new Prop("Category Id", "LcRevitPropertyElementCategoryId", 2, -2000011),
-            new Prop("IfcGUID", "lcldrevit_parameter_-1019000", 4, "3Ax9$kQwz0Bf8cYp2LmN4r"));
+            new Prop("IfcGUID", "lcldrevit_parameter_-1019000", 4, "3Ax9$kQwz0Bf8cYp2LmN4r"), new Prop("Family", "LcRevitPropertyElementFamily", 4, "Basic Wall"),
+            new Prop("Type", "LcRevitPropertyElementType", 4, "Generic 200"));
         var door = new Tab(null, "Element", "LcRevitData_Element",
             new Prop("Id", "LcRevitPropertyElementId", 2, 1003), new Prop("Category Id", "LcRevitPropertyElementCategoryId", 2, doorCategoryId));
         var line = new Tab(null, "Element", "LcRevitData_Element",

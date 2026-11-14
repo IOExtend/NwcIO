@@ -46,6 +46,8 @@ public class NwcSceneGoldenTests
         "value nwc:LcRevitData_Element.LcRevitPropertyElementId Text - 1002",
         "value nwc:LcRevitData_Element.LcRevitPropertyElementCategoryId Text - -2000011",
         "value nwc:LcRevitData_Element.lcldrevit_parameter_-1019000 Text - 3Ax9$kQwz0Bf8cYp2LmN4r",
+        "value nwc:LcRevitData_Element.LcRevitPropertyElementFamily Text - Basic Wall",
+        "value nwc:LcRevitData_Element.LcRevitPropertyElementType Text - Generic 200",
         "set nwc:LcRevitId",
         "value nwc:LcRevitId.LcRevitId Text - 1002",
         "set nwc:LcRevitData_Element",

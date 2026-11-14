@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the `NwcIO` library and CLI are documented in this file.
+All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapter are documented in this file.
 
 ## [Unreleased]
 
@@ -16,7 +16,7 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 - **`NwcIO.Scene` NuGet package**: published on the `NwcIO` release tag and depends on exactly the same `NwcIO` version (`[X.Y.Z]`) and on `IOScene` `[0.1.0, 0.2.0-0.0)`; the release fails while it would depend on an `IOScene` preview.
 
 ### Changed
-- **Breaking:** The partition header is read with its zero pads after the source path (to 4 bytes) and before the timestamp (to 8 bytes): `NwcFileInfo.SourceTimestampUtc` and `LoaderPlugin` are now read from every Navisworks model file, where 0.11 read them only when the path length was a multiple of 4 and no pad was needed. `NwcWriter` writes the same layout, so a file written by NwcIO 0.11 whose source path needed a pad opens without timestamp and loader plugin.
+- **Breaking:** The partition header is read with its zero pads after the source path (to 4 bytes) and before the timestamp (to 8 bytes): `NwcFileInfo.SourceTimestampUtc` and `LoaderPlugin` are now read from every Navisworks model file, where 0.11 read them only when the path length was a multiple of 4 and no pad was needed. `NwcWriter` writes the same layout, so a file written by NwcIO 0.11 whose source path needed either pad opens without timestamp, loader plugin and export options (`NwcFileInfo.Options`), and one whose loader plugin name needed a pad (the default `LcOpRevitExport` does) opens without export options.
 - **Breaking:** `NwcNode.ElementGuid` is the element's export GUID on Revit element nodes of the strict path (read from `LcOpGuidStore` by its element index), where 0.11 left it null; diff and set matching by `ElementGuid` now match these elements. On the strict path `NwcDocument.Guids` is the `LcOpGuidStore` table.
 - **Breaking:** Opening a model whose tree places one element under two different parents (a linked Revit model) throws `NotSupportedException` unless `BuildSceneTree` is false; a malformed `LcOpGuidStore` or an element index outside it throws `InvalidDataException`.
 - Property value type 9 is read as a string instead of failing the file.
