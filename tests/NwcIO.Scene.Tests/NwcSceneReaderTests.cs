@@ -67,6 +67,78 @@ public sealed class NwcSceneReaderTests
         Assert.Equal((unit, symbol), (result.LengthUnit, result.Document.Models[0].SourceLengthUnit));
     }
 
+    [Fact]
+    public void Read_RevitSample_MapsTheTree()
+    {
+        var doc = Scene(RevitSample.Build()).Document;
+        Assert.Equal(Enumerable.Range(0, 14).Select(i => (long)i), doc.Elements.Select(e => e.Id));
+        Assert.Equal([SceneNodeKind.Model, SceneNodeKind.Level, SceneNodeKind.Group, SceneNodeKind.Group, SceneNodeKind.Group, SceneNodeKind.Element, SceneNodeKind.Element,
+                      SceneNodeKind.Element, SceneNodeKind.Element, SceneNodeKind.Element, SceneNodeKind.Element, SceneNodeKind.Group, SceneNodeKind.Group, SceneNodeKind.Element],
+                     doc.Elements.Select(e => e.Kind));
+        Assert.Equal([null, 0L, 1L, 2L, 3L, 4L, 5L, 4L, 4L, 8L, 8L, 0L, 11L, 12L], doc.Elements.Select(e => e.ParentId));   // 10 is a part of 8
+        Assert.Equal(["Tower", "Level 1", "Walls", "Basic Wall", "Generic 200", "Wall A", "Solid", "Wall B", "Door", "Panel", "Door", "No level", "Lines", "Line 1"],
+                     doc.Elements.Select(e => e.Name));
+    }
+
+    [Fact]
+    public void Read_RevitSample_GivesElementsTheirIdentity()
+    {
+        var doc = Scene(RevitSample.Build()).Document;
+        Assert.Equal(
+            [(5L, "7b0c5a4e-3f2d-4b1a-9c8e-6d5f4e3ef9b1", "1x35fEForB6foERLzEFlcn"), (7L, "11111111-2222-4333-8444-555555555555", "3Ax9$kQwz0Bf8cYp2LmN4r"),
+             (8L, "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e", "0F7YqyIrf9Q8TuQLfBF2qU"), (13L, "a0b1c2d3-e4f5-4a6b-9c7d-8e9fa0b1c2d3", "2WiSBJvFLAQvnzZf_WiSBJ")],
+            doc.Elements.Where(e => e.SourceId != null).Select(e => (e.Id, e.SourceId, e.IfcGuid)));
+    }
+
+    [Fact]
+    public void Read_RevitSample_SetsCategoryTypeAndLevel()
+    {
+        var result = Scene(RevitSample.Build());
+        var doc = result.Document;
+        Assert.All(doc.Elements.Where(e => e.Id is >= 5 and <= 10), e => Assert.Equal(("Walls", "Generic 200"), (e.Category, e.TypeName)));
+        Assert.Equal(("Lines", ""), (doc.Elements[13].Category, doc.Elements[13].TypeName));
+        Assert.All(doc.Elements.Where(e => e.Kind != SceneNodeKind.Element), e => Assert.Equal(("", ""), (e.Category, e.TypeName)));
+        var level = Assert.Single(doc.Levels);
+        Assert.Equal((1, 1, "Level 1", (double?)null), (level.Id, level.ModelId, level.Name, level.Elevation));
+        Assert.Equal([null, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, null, null, null], doc.Elements.Select(e => e.LevelId));
+        Assert.Equal(4, result.ElementCount);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void Read_OtherLoader_HasNoCategoriesOrLevels()
+    {
+        var doc = Scene(RevitSample.Build("LcNwcLoaderPlugin:mock")).Document;
+        Assert.Empty(doc.Levels);
+        Assert.Equal(SceneNodeKind.Group, doc.Elements[1].Kind);
+        Assert.All(doc.Elements, e => Assert.Equal("", e.Category));
+    }
+
+    [Fact]
+    public void Read_LeafOutsideElements_IsAnElementWithoutSourceId()
+    {
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var group = new NwcNode { Id = 1, Name = "G", Class = "Group", Tag = 53, Parent = root };
+        var leaf = new NwcNode { Id = 2, Name = "L", Class = "Leaf", Tag = 22, Parent = group };
+        root.Children.Add(group); group.Children.Add(leaf);
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root), new() { ModelKey = "k" }));
+        Assert.Equal((SceneNodeKind.Element, (string?)null), (result.Document.Elements[2].Kind, result.Document.Elements[2].SourceId));
+        var d = Assert.Single(result.Diagnostics);
+        Assert.Equal((SceneSeverity.Info, "no-source-id"), (d.Severity, d.Code));
+        Assert.Equal(1, result.ElementCount);
+    }
+
+    [Fact]
+    public void Read_PairWithASiblingBetween_MakesTheSecondAPartOfTheFirst()
+    {
+        var (h, _) = SyntheticTree.Write(1, new TreeNode("T", "LcRevitCollection", Children: [
+            new("Grid", "LcRevitComposite", X: 1), new("Other", "LcRevitInstance", X: 3), new("Grid", "LcRevitComposite", X: 1)]));
+        var file = SyntheticNwcFile.Build(h, null, [], [], extraStreams: [("LcOpGuidStore", SyntheticNwcFile.GuidStore(RevitSample.G1, RevitSample.G1, RevitSample.G2))]);
+        var doc = Scene(file).Document;   // 0 root, 1 T, 2 Grid, 3 Other, 4 Grid
+        Assert.Equal([null, 0L, 1L, 1L, 2L], doc.Elements.Select(e => e.ParentId));
+        Assert.Equal([null, null, RevitSample.G1.ToString("D"), RevitSample.G2.ToString("D"), null], doc.Elements.Select(e => e.SourceId));
+    }
+
     // Every converted document must pass Validate() without errors or warnings (design §2, §6.5).
     private static NwcSceneResult Valid(NwcSceneResult r)
     {
