@@ -12,6 +12,7 @@ internal static class SyntheticNwcFile
     private const string Hierarchy = "LcOpNwdLogicalHierarchy";
     private const string Fragments = "LcOpNwdFragments";
     private const string Geometry = "LcOpNwdGeometry";
+    private const string PartitionProps = "LcOaPartitionProps";
 
     /// <summary>
     /// Section 0: the default header line, then the geometry segment (first when <paramref name="geometryFirst"/>, else after the
@@ -21,12 +22,15 @@ internal static class SyntheticNwcFile
     /// zlib stream with a (0,0) entry named exactly its name. Section 1: the header line + zlib(directory); model entries are
     /// named <paramref name="namePrefix"/> + segment name, with absolute offsets, (0,0) for single streams and (4, b) for geometry.
     /// <paramref name="editDirectory"/> runs on the entries before the directory is written; <paramref name="section1"/>, when set,
-    /// is written as section 1's one stream in place of the directory.
+    /// is written as section 1's one stream in place of the directory. Non-empty <paramref name="partitionProps"/> are written before
+    /// the hierarchy as [i32 0] + zlib(stream)... + zlib(TOC), TOC = [i32 k][k x i32 compressed size] zero-padded to 8 and replaced by
+    /// <paramref name="editPropsToc"/> before compression, with a (4, b) entry.
     /// </summary>
     public static byte[] Build(byte[]? hierarchy, byte[]? fragments, IReadOnlyList<byte[]> chunks, IReadOnlyList<int> recordLengths,
                                string namePrefix = @"cache\", bool geometryFirst = false, Action<byte[]>? editToc = null,
                                Action<List<NwcDbCacheEntry>>? editDirectory = null,
-                               IReadOnlyList<(string Name, byte[] Data)>? extraStreams = null, byte[]? section1 = null)
+                               IReadOnlyList<(string Name, byte[] Data)>? extraStreams = null, byte[]? section1 = null,
+                               IReadOnlyList<byte[]>? partitionProps = null, Func<byte[], byte[]>? editPropsToc = null)
     {
         var header = Encoding.ASCII.GetBytes(NwcContainerWriter.DefaultHeader);
         var file = new List<byte>(header);
@@ -70,11 +74,35 @@ internal static class SyntheticNwcFile
             entries.Add(new NwcDbCacheEntry(namePrefix + Geometry, 1, offset, file.Count - offset, 4 + ((long)tocZlib.Length << 32)));
         }
 
+        void PropsSegment()
+        {
+            if (partitionProps is null || partitionProps.Count == 0)
+            {
+                return;
+            }
+
+            long offset = file.Count;
+            file.AddRange(BitConverter.GetBytes(0));
+            var toc = new byte[(4 + (4 * partitionProps.Count) + 7) & ~7];
+            BinaryPrimitives.WriteInt32LittleEndian(toc, partitionProps.Count);
+            for (int i = 0; i < partitionProps.Count; i++)
+            {
+                var zlib = Zlib(partitionProps[i]);
+                file.AddRange(zlib);
+                BinaryPrimitives.WriteInt32LittleEndian(toc.AsSpan(4 + (4 * i)), zlib.Length);
+            }
+
+            var tocZlib = Zlib(editPropsToc?.Invoke(toc) ?? toc);
+            file.AddRange(tocZlib);
+            entries.Add(new NwcDbCacheEntry(namePrefix + PartitionProps, 1, offset, file.Count - offset, 4 + ((long)tocZlib.Length << 32)));
+        }
+
         if (geometryFirst)
         {
             GeometrySegment();
         }
 
+        PropsSegment();
         if (hierarchy is not null)
         {
             Single(namePrefix + Hierarchy, hierarchy);

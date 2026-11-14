@@ -51,7 +51,7 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 
 ### 2.2 Logical Hierarchy (`LcOpNwdLogicalHierarchy`)
 - **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced.
-- **Stream framing**: `[int32 k][k x int32] [int32 100] [int32 n] n x pointer [int32 1]`, zero-padded to a multiple of 8. `k` is the number of `LcOaPartitionProps` streams minus one; the `k` ints are not decoded. Id 100 is the implicit root and has no class or body.
+- **Stream framing**: `[int32 k][k x int32] [int32 100] [int32 n] n x pointer [int32 1]`, zero-padded to a multiple of 8. `k` is the number of `LcOaPartitionProps` root streams; the `k` ints are their root counts (§2.2.1). Id 100 is the implicit root and has no class or body.
 - **Pointer rule**: a pointer is `0` (null), `[1][id]` (back-reference to an object whose body is complete) or `[nextId][classId][body]` (new object). `nextId` starts at 100; an object takes its id before its body is read, so nested new objects take the following ids in depth-first order. Any other first value, an unknown class, or a back-reference to an unfinished object is invalid. Ids are per stream: equal ids in different streams mean nothing.
 - **Primitives**: strings are `[int32 len][UTF-8][zero pad to 4]` with `-1` for null; `f64` and `i64` values are aligned to 8 bytes from the stream start, with one zero `int32` of padding when needed.
 - **Classes**:
@@ -63,6 +63,21 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Attributes** (slots may be null): `86` property tab `[str name][ptr 52][i32 flags][i32 n] n x ([ptr 52 key][i32 type][value])` with value by type `0` none, `1,5,6,7,10,11` `f64`, `2,3` `i32`, `4` and `9` string (type 9 was never seen; it is read as a string), `8` class-52 pointer; `31` material; `40` translation; `41` translation and quaternion (`x -> R(q)x + t`); `39` 3x3 column-major matrix and translation; `79` hyperlinks; `200` and `185` material JSON.
 - **Shared subtrees**: a child pointer may back-reference an earlier node, so the hierarchy is a directed acyclic graph. A node reached through several parents appears once per path when the tree is expanded.
 - **Preorder index (`seq`)**: walk from the implicit root in stored order, counting groups, with a shared subtree walked again at every place it occurs. The root has index 0. Every fragment's `seq` indexes this expanded sequence and lands on a leaf; `seq` never decreases along the fragments stream, and a leaf owns one contiguous run of fragments.
+
+### 2.2.1 `LcOaPartitionProps`
+
+```text
+ENTRY     LcOaPartitionProps : flags 1, (a, b) = (4, b)
+SEGMENT := [int32 0]  ZSTREAM{k}  ZTOC          contiguous zlib streams from offset+4 to offset+length; b = compressed length of ZTOC
+ZTOC    := [int32 k] [k x int32 compressed length of ZSTREAM i] zero pad to 8      (length roundup8(4 + 4k))
+HIERARCHY HEADER := [int32 k >= 1] [k x int32 n_i]          n_i = number of roots in ZSTREAM i
+ZSTREAM i := ROOT{n_i} zero pad to 8                          ids from 100 per stream, no implicit root
+ROOT      := a new object (never null, never a back-reference) of class 86, 79 or 66; nested objects are class 52
+66        := [str name = null] [ptr 52 key, internal "LcRevitId"] [i32 flags = 0x01000000] PAD8 [i64 value in 1..2^31-1]
+LINK      := the n-th null attribute slot of a hierarchy node, in byte order, takes the n-th root of ZSTREAM 0 ‖ ZSTREAM 1 ‖ ...
+```
+
+The roots are the tabs a node uses once (element, parameter, type, material and room tabs) and its element id; tabs shared by two or more nodes stay in the hierarchy. A class-66 root becomes a one-property tab named by its key (`LcRevitId`). The per-node order the exporter writes (`86* 79? 66?`, the 66 last) is not enforced.
 
 ### 2.3 GUID Table (`Guids`)
 - **Location**: the DbCache entry `LcOpGuidStore`, one zlib stream `[i32 a = 1][i32 n][n x 16-byte GUID]` in Windows layout. The GUID of element `X` is the Revit export GUID of the element (its UniqueId's session GUID with the last 32 bits XORed with the element id).
@@ -143,7 +158,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
 - **`(a, b)` shapes**:
   - `(0, 0)`: one zlib stream starts at `offset` and its compressed length is `length`;
   - `(4, b)`: a 4-byte prefix sits at `offset`, then consecutive zlib streams follow with no gaps; the last stream's compressed length is `b`, and the segment ends at `offset + length`.
-- **Segments the reader uses**: `LcOpNwdLogicalHierarchy` (§2.2), `LcOpGuidStore` (§2.3) and `LcOpNwdFragments` (§2.4) are `(0, 0)`; `LcOpNwdGeometry` (§2.5) is `(4, b)`. `LcOpNwdGeometryCompress` is 40 raw bytes and is not decoded. Other entries are listed but not parsed.
+- **Segments the reader uses**: `LcOpNwdLogicalHierarchy` (§2.2), `LcOpGuidStore` (§2.3) and `LcOpNwdFragments` (§2.4) are `(0, 0)`; `LcOpNwdGeometry` (§2.5) and `LcOaPartitionProps` (§2.2.1) are `(4, b)`. `LcOpNwdGeometryCompress` is 40 raw bytes and is not decoded. Other entries are listed but not parsed.
 - **Strict path**: a container is read through these segments when section 1 holds exactly one stream, the stream parses as this directory and it names `LcOpNwdLogicalHierarchy`, `LcOpNwdFragments` or `LcOpNwdGeometry`. Any other container keeps the previous reader. NwcIO's writer still emits its own single-section layout, which the reader keeps.
 - **Model API**: `NwcDbCacheEntry.Offset` is the absolute file offset, `Extra` equals `a + b * 2^32`, and `DatabaseName` is the name of the `LcOpDBCache` entry, or `""` when there is none.
 

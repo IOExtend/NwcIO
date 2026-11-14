@@ -16,6 +16,7 @@ internal static class HierarchyParser
     public const int MaxExpandedProperties = 1 << 27;
 
     private const string Segment = "LcOpNwdLogicalHierarchy";
+    private const string PropsSegment = "LcOaPartitionProps";
 
     // Attribute bodies other than class 86 are parsed and dropped.
     private static readonly object Dropped = new();
@@ -31,16 +32,24 @@ internal static class HierarchyParser
 
     private static ReadOnlySpan<int> ExtraClasses => [185];
 
+    private static ReadOnlySpan<int> PartitionRootClasses => [86, 79, 66];
+
     private static ReadOnlySpan<int> KnownClasses => [53, 22, 32, 52, 86, 31, 40, 41, 39, 79, 200, 185];
 
     /// <param name="includeProperties">False leaves every node's properties empty; the class-86 bodies are still read and checked.</param>
     /// <param name="guids">The <c>LcOpGuidStore</c> table that element indices point into; null is an empty table.</param>
+    /// <param name="partitionProps">The <c>LcOaPartitionProps</c> root streams, its table of contents excluded; null or empty when the file has no such segment.</param>
     /// <returns>The nodes in preorder; [0] is the synthetic root (Id 0, Name <paramref name="rootName"/>, Class "Model", Tag 0).</returns>
     /// <exception cref="NotSupportedException">One element index sits on nodes under different parents (a linked Revit model).</exception>
-    public static IReadOnlyList<NwcNode> Read(byte[] data, string rootName, bool includeProperties = true, IReadOnlyList<Guid>? guids = null)
+    public static IReadOnlyList<NwcNode> Read(
+        byte[] data,
+        string rootName,
+        bool includeProperties = true,
+        IReadOnlyList<Guid>? guids = null,
+        IReadOnlyList<byte[]>? partitionProps = null)
     {
         guids ??= [];
-        var (top, total) = new Parser(new LcObjectReader(data, Segment), guids.Count).ReadStream();
+        var (top, total) = new Parser(new LcObjectReader(data, Segment), guids.Count, partitionProps ?? []).ReadStream();
         return Expand(top, rootName, total, includeProperties, guids);
     }
 
@@ -151,16 +160,23 @@ internal static class HierarchyParser
     {
         private readonly LcObjectReader _reader;
         private readonly int _guidCount;
+
+        // Null in a parser of one LcOaPartitionProps stream, which holds roots and no nodes.
+        private readonly IReadOnlyList<byte[]>? _partitionProps;
         private readonly Func<int, object> _readBody;
 
-        public Parser(LcObjectReader reader, int guidCount)
+        // The roots the null attribute slots take; ReadStream sets it from the header.
+        private PartitionRoots? _roots;
+
+        public Parser(LcObjectReader reader, int guidCount, IReadOnlyList<byte[]>? partitionProps)
         {
             _reader = reader;
             _guidCount = guidCount;
+            _partitionProps = partitionProps;
             _readBody = ReadBody;
         }
 
-        // [k][k ints][100][n][n ptr][1], then the zero pad to 8 (docs/format-notes.md §2.2).
+        // [k][k root counts][100][n][n ptr][1], then the zero pad to 8 (docs/format-notes.md §2.2).
         public (Node[] Top, long Total) ReadStream()
         {
             int k = _reader.ReadCount(4);
@@ -169,11 +185,13 @@ internal static class HierarchyParser
                 throw _reader.Fail("header count k is below 1");
             }
 
+            var rootCounts = new int[k];
             for (int i = 0; i < k; i++)
             {
-                _reader.ReadInt32();
+                rootCounts[i] = _reader.ReadCount(0);
             }
 
+            _roots = new PartitionRoots(_reader, rootCounts, _partitionProps!);
             _reader.ReadImplicitRoot();
             var top = ReadNodes(TopLevelClasses);
             var (total, _, _) = Measure(top, 0);
@@ -182,9 +200,15 @@ internal static class HierarchyParser
                 throw _reader.Fail("hierarchy tail is not 1");
             }
 
+            _roots.End();
             _reader.ReadEnd();
             return (top, total);
         }
+
+        // A LcOaPartitionProps root is always a new object (docs/format-notes.md §2.2.1).
+        public object ReadPartitionRoot() => _reader.ReadPointer(PartitionRootClasses, _readBody, allowNull: false, allowBackReference: false)!;
+
+        public void ReadEnd() => _reader.ReadEnd();
 
         private object ReadBody(int classId) => classId switch
         {
@@ -199,6 +223,7 @@ internal static class HierarchyParser
             79 => ReadHyperlinks(),
             200 => ReadExtra(),
             185 => ReadMaterialJson(_reader),
+            66 => ReadElementId(),
             _ => throw new InvalidOperationException($"class {classId} has no body reader"),
         };
 
@@ -234,7 +259,8 @@ internal static class HierarchyParser
             long ownProperties = 0;
             for (int i = 0; i < attributeCount; i++)
             {
-                if (_reader.ReadPointer(AttributeClasses, _readBody) is NwcPropertyTab tab)
+                // A null slot takes the next LcOaPartitionProps root (docs/format-notes.md §2.2.1); a stored node is read once, so a shared one takes its roots once.
+                if ((_reader.ReadPointer(AttributeClasses, _readBody) ?? _roots!.Take()) is NwcPropertyTab tab)
                 {
                     tabs.Add(tab);
 
@@ -334,6 +360,43 @@ internal static class HierarchyParser
             return new NwcPropertyTab { Name = tab, InternalName = username.Internal, Properties = records };
         }
 
+        // Class 66 (docs/format-notes.md §2.2.1): [str name = null][ptr 52 key][i32 flags = 0x01000000] PAD8 [i64 value in 1..2^31-1],
+        // a one-property tab named by its key.
+        private NwcPropertyTab ReadElementId()
+        {
+            if (_reader.ReadString() is not null)
+            {
+                throw _reader.Fail("class-66 name is not null");
+            }
+
+            var key = ReadUsername();
+            int flags = _reader.ReadInt32();
+            if (flags != 0x01000000)
+            {
+                throw _reader.Fail($"class-66 flags {flags:X8} are not 01000000");
+            }
+
+            long value = _reader.ReadInt64();
+            if (value is < 1 or > int.MaxValue)
+            {
+                throw _reader.Fail($"class-66 value {value} is outside 1..{int.MaxValue}");
+            }
+
+            string name = key.Display ?? "";
+            var record = new NwcPropertyRecord
+            {
+                FirstInt = key.Id,
+                Tag = 52,
+                Name = name,
+                Class = name,
+                ValueType = 2,
+                Value = value.ToString(CultureInfo.InvariantCulture),
+                TabInternalName = key.Internal,
+                InternalName = key.Internal,
+            };
+            return new NwcPropertyTab { Name = name, InternalName = key.Internal, Properties = [record] };
+        }
+
         // Class 31: [str name][15 x f64].
         private object ReadMaterial()
         {
@@ -380,8 +443,9 @@ internal static class HierarchyParser
                 _reader.ReadString();
                 _reader.ReadString();
 
-                // The item pointer's class family was not measured, so any class this parser knows, or null, is accepted.
-                _reader.ReadPointer(KnownClasses, _readBody);
+                // In a LcOaPartitionProps root the item is class 52, so no node can start there (docs/format-notes.md §2.2.1). In the
+                // hierarchy the item pointer's class family was not measured, so any class this parser knows, or null, is accepted.
+                _reader.ReadPointer(_partitionProps is null ? UsernameClasses : KnownClasses, _readBody);
                 int points = _reader.ReadCount(24);
                 for (int p = 0; p < 3 * points; p++)
                 {
@@ -401,5 +465,97 @@ internal static class HierarchyParser
             _reader.ReadPointer(ExtraClasses, _readBody, allowNull: false);
             return Dropped;
         }
+    }
+
+    // The LcOaPartitionProps roots (docs/format-notes.md §2.2.1), read on demand so that a .nwd fails at its first class-32 node before
+    // any of them: the n-th null attribute slot of the hierarchy takes the n-th root of stream 0, then stream 1, and so on.
+    private sealed class PartitionRoots
+    {
+        private readonly LcObjectReader _hierarchy;
+        private readonly int[] _counts;
+        private readonly IReadOnlyList<byte[]> _streams;
+        private long _unread;
+        private bool _checked;
+        private int _slots;
+
+        // The current stream, the roots read from it and its parser; the streams before it are read and ended.
+        private int _stream;
+        private int _taken;
+        private Parser? _current;
+
+        public PartitionRoots(LcObjectReader hierarchy, int[] counts, IReadOnlyList<byte[]> streams)
+        {
+            _hierarchy = hierarchy;
+            _counts = counts;
+            _streams = streams;
+            _unread = counts.Sum(c => (long)c);
+        }
+
+        /// <summary>The root of the next null attribute slot.</summary>
+        public object Take()
+        {
+            Check();
+            _slots++;
+            if (_stream == _streams.Count)
+            {
+                throw _hierarchy.Fail($"null attribute slot {_slots} has no {PropsSegment} root");
+            }
+
+            object root = Current().ReadPartitionRoot();
+            _taken++;
+            _unread--;
+            EndReadStreams();
+            return root;
+        }
+
+        /// <summary>After the hierarchy tail: every root filled a slot. Each stream was ended after its last root, or when passed.</summary>
+        public void End()
+        {
+            Check();
+            if (_unread > 0)
+            {
+                throw _hierarchy.Fail($"{_unread} {PropsSegment} roots fill no null attribute slot");
+            }
+        }
+
+        private void Check()
+        {
+            if (_checked)
+            {
+                return;
+            }
+
+            _checked = true;
+            if (_streams.Count == 0)
+            {
+                if (_unread > 0)
+                {
+                    throw _hierarchy.Fail($"the header names {_unread} {PropsSegment} roots, but the file has no {PropsSegment} segment");
+                }
+
+                return;
+            }
+
+            if (_streams.Count != _counts.Length)
+            {
+                throw new InvalidDataException($"{PropsSegment}: {_streams.Count} root streams, but the hierarchy header names {_counts.Length}");
+            }
+
+            EndReadStreams();
+        }
+
+        // Ends the current stream while all its roots are read, so a stream with no roots is ended when passed.
+        private void EndReadStreams()
+        {
+            while (_stream < _streams.Count && _taken == _counts[_stream])
+            {
+                Current().ReadEnd();
+                _stream++;
+                _taken = 0;
+                _current = null;
+            }
+        }
+
+        private Parser Current() => _current ??= new Parser(new LcObjectReader(_streams[_stream], $"{PropsSegment} stream {_stream}"), 0, null);
     }
 }

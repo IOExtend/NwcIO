@@ -11,7 +11,8 @@ internal sealed record ModelSegments(
     LcRawStream? Fragments,
     IReadOnlyList<LcRawStream> GeometryChunks,
     LcRawStream? Toc,
-    LcRawStream? GuidStore);
+    LcRawStream? GuidStore,
+    IReadOnlyList<LcRawStream> PartitionProps);
 
 /// <summary>The strictly read model: the tree root (null without a scene tree), one mesh and transform per fragment, and the GUID table (empty when not read).</summary>
 internal sealed record ModelGraph(NwcNode? Root, IReadOnlyList<NwcMesh> Meshes, IReadOnlyList<NwcTransform> Transforms, IReadOnlyList<Guid> Guids);
@@ -26,6 +27,7 @@ internal static class ModelGraphReader
     private const string FragmentsSegment = "LcOpNwdFragments";
     private const string GeometrySegment = "LcOpNwdGeometry";
     private const string GuidStoreSegment = "LcOpGuidStore";
+    private const string PartitionPropsSegment = "LcOaPartitionProps";
 
     /// <returns>The segments, or null when the container is not a model file (it then keeps the lenient path).</returns>
     /// <exception cref="InvalidDataException">The directory names a model segment more than once or in a wrong shape.</exception>
@@ -39,7 +41,7 @@ internal static class ModelGraphReader
             return null;
         }
 
-        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null, guidStore = null;
+        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null, guidStore = null, props = null;
         foreach (var entry in directory.Entries)
         {
             switch (entry.Name[(entry.Name.LastIndexOf('\\') + 1)..])
@@ -56,6 +58,9 @@ internal static class ModelGraphReader
                 case GuidStoreSegment:
                     guidStore = Once(guidStore, entry, GuidStoreSegment);
                     break;
+                case PartitionPropsSegment:
+                    props = Once(props, entry, PartitionPropsSegment);
+                    break;
             }
         }
 
@@ -68,11 +73,12 @@ internal static class ModelGraphReader
         var hierarchyStream = hierarchy is null ? null : SingleStream(streams, hierarchy, HierarchySegment);
         var fragmentsStream = fragments is null ? null : SingleStream(streams, fragments, FragmentsSegment);
         var guidStoreStream = guidStore is null ? null : SingleStream(streams, guidStore, GuidStoreSegment);
+        LcRawStream[] propsStreams = props is null ? [] : PrefixedStreams(streams, props, PartitionPropsSegment);
         LcRawStream[] chunks = [];
         LcRawStream? toc = null;
         if (geometry is not null)
         {
-            var segment = GeometryStreams(streams, geometry);
+            var segment = PrefixedStreams(streams, geometry, GeometrySegment);
             chunks = segment[..^1];
             toc = segment[^1];
         }
@@ -92,7 +98,7 @@ internal static class ModelGraphReader
             toc.Kind = NwcStreamKind.Toc;
         }
 
-        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc, guidStoreStream);
+        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc, guidStoreStream, propsStreams);
     }
 
     /// <summary>The tree first, so a tree that cannot be read fails before any geometry work; then geometry, fragments and links.</summary>
@@ -109,7 +115,7 @@ internal static class ModelGraphReader
         {
             preorder = segments.Hierarchy is null
                 ? [new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 }]
-                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords, guids);
+                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords, guids, PartitionRootStreams(segments.PartitionProps));
         }
 
         var meshes = new List<NwcMesh>();
@@ -204,6 +210,46 @@ internal static class ModelGraphReader
         return guids;
     }
 
+    // The LcOaPartitionProps root streams, once the last stream, the table of contents [i32 k][k x i32 compressed length] zero-padded
+    // to 8, matches them (docs/format-notes.md §2.2.1); empty when the file has no such segment.
+    private static byte[][] PartitionRootStreams(IReadOnlyList<LcRawStream> segment)
+    {
+        if (segment.Count == 0)
+        {
+            return [];
+        }
+
+        byte[] toc = segment[^1].Data;
+        int k = segment.Count - 1;
+        int expected = (4 + (4 * k) + 7) & ~7;
+        if (toc.Length != expected)
+        {
+            throw new InvalidDataException($"{PartitionPropsSegment}: the table of contents is {toc.Length} bytes, not {expected}");
+        }
+
+        int count = BinaryPrimitives.ReadInt32LittleEndian(toc);
+        if (count != k)
+        {
+            throw new InvalidDataException($"{PartitionPropsSegment}: the table of contents names {count} streams, not {k}");
+        }
+
+        for (int i = 0; i < k; i++)
+        {
+            int length = BinaryPrimitives.ReadInt32LittleEndian(toc.AsSpan(4 + (4 * i)));
+            if (length != segment[i].CompressedLength)
+            {
+                throw new InvalidDataException($"{PartitionPropsSegment}: the table of contents gives stream {i} {length} bytes, not {segment[i].CompressedLength}");
+            }
+        }
+
+        if (toc.AsSpan(4 + (4 * k)).IndexOfAnyExcept((byte)0) >= 0)
+        {
+            throw new InvalidDataException($"{PartitionPropsSegment}: the table of contents pad is not zero");
+        }
+
+        return [.. segment.Take(k).Select(s => s.Data)];
+    }
+
     private static NwcDbCacheEntry Once(NwcDbCacheEntry? found, NwcDbCacheEntry entry, string segment) =>
         found is null ? entry : throw Entry(segment, entry, "named more than once in the directory");
 
@@ -225,19 +271,20 @@ internal static class ModelGraphReader
         return streams[i];
     }
 
-    // (4, b): a 4-byte prefix, then contiguous streams up to offset + length, the last of compressed length b.
-    private static LcRawStream[] GeometryStreams(IReadOnlyList<LcRawStream> streams, NwcDbCacheEntry entry)
+    // (4, b): a 4-byte prefix, then contiguous streams up to offset + length, the last of compressed length b. The prefix lies outside
+    // every stream, which the container does not keep, so it is not checked.
+    private static LcRawStream[] PrefixedStreams(IReadOnlyList<LcRawStream> streams, NwcDbCacheEntry entry, string segment)
     {
-        CheckFlags(entry, GeometrySegment);
+        CheckFlags(entry, segment);
         if ((int)entry.Extra != 4)
         {
-            throw Entry(GeometrySegment, entry, "a is not 4");
+            throw Entry(segment, entry, "a is not 4");
         }
 
         int first = IndexAt(streams, entry.Offset + 4);
         if (first < 0)
         {
-            throw Entry(GeometrySegment, entry, "no stream starts after the 4-byte prefix");
+            throw Entry(segment, entry, "no stream starts after the 4-byte prefix");
         }
 
         long end = entry.Offset + entry.Length;
@@ -246,7 +293,7 @@ internal static class ModelGraphReader
         {
             if (last + 1 == streams.Count || streams[last + 1].FileOffset != EndOf(streams[last]))
             {
-                throw Entry(GeometrySegment, entry, "streams are not contiguous up to the entry's end");
+                throw Entry(segment, entry, "streams are not contiguous up to the entry's end");
             }
 
             last++;
@@ -254,12 +301,12 @@ internal static class ModelGraphReader
 
         if (EndOf(streams[last]) != end)
         {
-            throw Entry(GeometrySegment, entry, "streams do not end at the entry's end");
+            throw Entry(segment, entry, "streams do not end at the entry's end");
         }
 
         if (streams[last].CompressedLength != (int)(entry.Extra >> 32))
         {
-            throw Entry(GeometrySegment, entry, "b is not the last stream's compressed length");
+            throw Entry(segment, entry, "b is not the last stream's compressed length");
         }
 
         return [.. streams.Skip(first).Take(last - first + 1)];

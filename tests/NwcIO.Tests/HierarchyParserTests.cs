@@ -93,7 +93,7 @@ public class HierarchyParserTests
     [Fact]
     public void Read_EveryAttributeClass_ParsesAndKeepsOnlyProperties()
     {
-        var bytes = GroupWithLeaf(7, w =>
+        var bytes = GroupWithLeaf(6, w =>
         {
             w.New(31);
             w.Str("m");
@@ -110,7 +110,6 @@ public class HierarchyParserTests
             w.Int(0);
             Hyperlinks(w);
             Extra(w);
-            w.Null();
         });
 
         var nodes = HierarchyParser.Read(bytes, "Model");
@@ -356,14 +355,14 @@ public class HierarchyParserTests
     // A group whose one leaf holds a three-item class-86 tab.
     internal static byte[] PropertyLeafHierarchy() => GroupWithLeaf(1, w => PropertyTab(w, 3));
 
-    // [k][k zero ints][root 100][n]; the n top-level objects follow.
-    private static LcGraphWriter Begin(int k = 1, int n = 1)
+    // [k][roots, else k zeros][root 100][n]; the n top-level objects follow.
+    internal static LcGraphWriter Begin(int k = 1, int n = 1, int[]? roots = null)
     {
         var w = new LcGraphWriter();
         w.Int(k);
-        for (int i = 0; i < k; i++)
+        foreach (int count in roots ?? new int[k])
         {
-            w.Int(0);
+            w.Int(count);
         }
 
         w.ImplicitRoot();
@@ -372,7 +371,7 @@ public class HierarchyParserTests
     }
 
     // The tail [1] and the zero pad to a multiple of 8.
-    private static byte[] End(LcGraphWriter w) => w.Int(1).ToArray();
+    internal static byte[] End(LcGraphWriter w) => w.Int(1).ToArray();
 
     private static void AssertRule(string rule, byte[] bytes)
     {
@@ -390,7 +389,7 @@ public class HierarchyParserTests
     }
 
     // New class-86 tab "T" whose count items each back-reference its username as the key and carry no value: 12 bytes per item.
-    private static void PropertyTab(LcGraphWriter w, int count)
+    internal static void PropertyTab(LcGraphWriter w, int count)
     {
         w.New(86);
         w.Str("T");
@@ -402,7 +401,7 @@ public class HierarchyParserTests
         }
     }
 
-    private static int Username(LcGraphWriter w, string? name, string? internalName)
+    internal static int Username(LcGraphWriter w, string? name, string? internalName)
     {
         int id = w.New(52);
         w.Str(name).Str(internalName);
@@ -410,7 +409,7 @@ public class HierarchyParserTests
     }
 
     // New group "G" with no attributes; its childCount children follow.
-    private static void Group(LcGraphWriter w, int childCount)
+    internal static void Group(LcGraphWriter w, int childCount)
     {
         w.New(53);
         w.Str("G");
@@ -418,7 +417,7 @@ public class HierarchyParserTests
         w.Int(0).Int(0).Int(0).Int(childCount);
     }
 
-    private static void Leaf(LcGraphWriter w, int attributeCount, Action<LcGraphWriter> attributes)
+    internal static void Leaf(LcGraphWriter w, int attributeCount, Action<LcGraphWriter> attributes)
     {
         w.New(22);
         w.Str("L");

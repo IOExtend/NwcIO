@@ -15,6 +15,7 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 - **Breaking:** Opening a model whose tree places one element under two different parents (a linked Revit model) throws `NotSupportedException` unless `BuildSceneTree` is false; a malformed `LcOpGuidStore` or an element index outside it throws `InvalidDataException`.
 - Property value type 9 is read as a string instead of failing the file.
 - The expanded-property cap (134,217,728) counts each property tab reference as well as the records.
+- **Breaking:** Strict-path node properties include the tabs and element id stored in `LcOaPartitionProps` (about a third of a Revit export's properties), in stored slot order; the element id is a one-property tab named by its key (`LcRevitId`). A file whose null attribute slots and `LcOaPartitionProps` roots or table of contents disagree throws `InvalidDataException`.
 
 ## [0.11.0] - 2026-11-14
 
