@@ -41,6 +41,13 @@ public sealed class NwcDocument
 
     public NwcFileInfo FileInfo { get; }
 
+    /// <summary>Feet when the cache was written by the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c>; no file names its unit. Computed from <see cref="FileInfo"/>.</summary>
+    public NwcLengthUnit LengthUnit =>
+        FileInfo.LoaderPlugin == "LcNwcLoaderPlugin:lcldrevit" ? NwcLengthUnit.Feet : NwcLengthUnit.Unknown;
+
+    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet, which the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> writes; no file names its unit); null when the unit is unknown.</summary>
+    public double? MetresPerUnit => LengthUnit == NwcLengthUnit.Feet ? 0.3048 : null;
+
     /// <summary>Flat records parsed from the scene-tree/property streams.</summary>
     public IReadOnlyList<NwcPropertyRecord> PropertyRecords { get; }
 

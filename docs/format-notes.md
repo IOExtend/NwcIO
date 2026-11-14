@@ -47,6 +47,7 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
   - `int32 len` + UTF-8 string: loader plugin ID (e.g., `LcNwcLoaderPlugin:lcldrevit`), then zero pad to 4
   - Subsequent length-prefixed UTF-8 strings: loader export configuration options.
 - The pads are zero; 0.11 skipped them and read the timestamp only when the path length was a multiple of 4 and no 8-byte pad was needed. The parser stops at the first unexpected field (a non-zero pad, an int after the path other than -1).
+- No stream names the length unit. The Revit loader writes coordinates and length values in feet, areas in ft², volumes in ft³.
 
 ### 2.2 Logical Hierarchy (`LcOpNwdLogicalHierarchy`)
 - **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced.
