@@ -4,6 +4,9 @@ using NwcIO.Model;
 using NwcIO.Scene;
 using NwcIO.Tests;
 using Xunit;
+using Vector3d = IOScene.Vector3d;
+using RgbaColor = IOScene.RgbaColor;
+using BoundingBox3d = IOScene.BoundingBox3d;
 
 namespace NwcIO.Scene.Tests;
 
