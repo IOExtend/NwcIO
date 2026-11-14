@@ -84,11 +84,20 @@ internal static class Program
     // The reader throws NotSupportedException only for a scene tree it cannot convert (class-32 partition nodes, linked Revit models); --no-tree reads around both.
     private const string NoTreeHint = " Use --no-tree to read geometry and placement without the scene tree.";
 
-    public static int Main(string[] args)
+    public static int Main(string[] args) => Run(args, null, null, null);
+
+    internal static int Run(
+        string[] args,
+        Stream? stdoutStream = null,
+        TextWriter? outWriter = null,
+        TextWriter? errorWriter = null)
     {
+        var @out = outWriter ?? Console.Out;
+        var @err = errorWriter ?? Console.Error;
+
         if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
         {
-            Console.WriteLine(UsageText);
+            @out.WriteLine(UsageText);
             return args.Length == 0 ? 1 : 0;
         }
 
@@ -98,7 +107,7 @@ internal static class Program
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
                 ?? typeof(Program).Assembly.GetName().Version?.ToString()
                 ?? "0.1.0";
-            Console.WriteLine($"nwcio {version}");
+            @out.WriteLine($"nwcio {version}");
             return 0;
         }
 
@@ -571,6 +580,7 @@ internal static class Program
 
         // Single NWC/NWD document
         outputPath ??= Path.ChangeExtension(inputPath, ".json");
+        TextWriter infoOut = (outputPath == "-") ? @err : @out;
 
         NwcDocument doc;
         try
@@ -708,7 +718,7 @@ internal static class Program
                 {
                     linked = Model.TimeLiner.NwcTimeLinerLinker.LinkByNodeName(doc.TimeLiner, doc.RootNode);
                 }
-                Console.WriteLine($"Linked {linked} TimeLiner tasks to model elements.");
+                infoOut.WriteLine($"Linked {linked} TimeLiner tasks to model elements.");
             }
 
             if (outputIsBcf)
@@ -765,8 +775,17 @@ internal static class Program
 
                 if (outputPath == "-")
                 {
-                    using var stdout = Console.OpenStandardOutput();
-                    JsonExporter.Write(doc, stdout, exportOptions);
+                    if (stdoutStream != null)
+                    {
+                        JsonExporter.Write(doc, stdoutStream, exportOptions);
+                        stdoutStream.Flush();
+                    }
+                    else
+                    {
+                        using var stdout = Console.OpenStandardOutput();
+                        JsonExporter.Write(doc, stdout, exportOptions);
+                        stdout.Flush();
+                    }
                 }
                 else
                 {
@@ -932,12 +951,12 @@ internal static class Program
                     }
                 }
 
-                Console.WriteLine($"Model Revision Comparison ({diffReport.BaselineName} vs {diffReport.RevisionName}):");
-                Console.WriteLine($"  Added:     {diffReport.Added.Count}");
-                Console.WriteLine($"  Deleted:   {diffReport.Deleted.Count}");
-                Console.WriteLine($"  Modified:  {diffReport.Modified.Count}");
-                Console.WriteLine($"  Unchanged: {diffReport.Unchanged.Count}");
-                Console.WriteLine($"  Total:     {diffReport.TotalChangesCount} changes");
+                infoOut.WriteLine($"Model Revision Comparison ({diffReport.BaselineName} vs {diffReport.RevisionName}):");
+                infoOut.WriteLine($"  Added:     {diffReport.Added.Count}");
+                infoOut.WriteLine($"  Deleted:   {diffReport.Deleted.Count}");
+                infoOut.WriteLine($"  Modified:  {diffReport.Modified.Count}");
+                infoOut.WriteLine($"  Unchanged: {diffReport.Unchanged.Count}");
+                infoOut.WriteLine($"  Total:     {diffReport.TotalChangesCount} changes");
             }
 
             if (!string.IsNullOrEmpty(explicitTimeLinerCsvPath))
@@ -971,47 +990,47 @@ internal static class Program
                     singleAss.ExportClashMatrixBcf(explicitClashMatrixBcfPath);
                 }
 
-                Console.WriteLine(singleAss.ClashMatrix.ToMarkdownTable());
+                infoOut.WriteLine(singleAss.ClashMatrix.ToMarkdownTable());
             }
 
             if (!string.IsNullOrEmpty(simulateDateStr))
             {
                 if (doc.TimeLiner is null || doc.TimeLiner.Tasks.Count == 0)
                 {
-                    Console.Error.WriteLine("Notice: Document has no TimeLiner schedule tasks to simulate.");
+                    @err.WriteLine("Notice: Document has no TimeLiner schedule tasks to simulate.");
                 }
                 else if (DateTimeOffset.TryParse(simulateDateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var simDate))
                 {
-                    Console.WriteLine($"4D TimeLiner Simulation at {simDate:yyyy-MM-dd HH:mm:ss}:");
-                    Console.WriteLine($"  Overall Progress: {doc.TimeLiner.GetSimulationProgressAt(simDate):P1}");
+                    infoOut.WriteLine($"4D TimeLiner Simulation at {simDate:yyyy-MM-dd HH:mm:ss}:");
+                    infoOut.WriteLine($"  Overall Progress: {doc.TimeLiner.GetSimulationProgressAt(simDate):P1}");
                     var active = doc.TimeLiner.GetActiveTasksAt(simDate);
-                    Console.WriteLine($"  Active Tasks ({active.Count}):");
+                    infoOut.WriteLine($"  Active Tasks ({active.Count}):");
                     foreach (var t in active)
                     {
-                        Console.WriteLine($"    - [{t.Id}] {t.Name} ({t.TaskType}) from {t.PlannedStart:yyyy-MM-dd} to {t.PlannedEnd:yyyy-MM-dd}");
+                        infoOut.WriteLine($"    - [{t.Id}] {t.Name} ({t.TaskType}) from {t.PlannedStart:yyyy-MM-dd} to {t.PlannedEnd:yyyy-MM-dd}");
                     }
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
+                    @err.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error exporting to '{outputPath}': {ex.Message}");
+            @err.WriteLine($"Error exporting to '{outputPath}': {ex.Message}");
             return 3;
         }
 
         // Raycast test if requested
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(doc.SpatialIndex, raycastArg);
+            ExecuteRaycastTest(doc.SpatialIndex, raycastArg, infoOut, @err);
         }
 
         if (listViewpoints)
         {
-            PrintViewpoints(doc.SavedViewpoints);
+            PrintViewpoints(doc.SavedViewpoints, infoOut);
         }
 
         sw.Stop();
@@ -1022,48 +1041,48 @@ internal static class Program
             int totalVertices = doc.Meshes.Sum(m => m.Vertices.Count);
             int totalTriangles = doc.Meshes.Sum(m => m.TriangleCount);
 
-            Console.Error.WriteLine("=== NwcIO Execution Report ===");
-            Console.Error.WriteLine($"Input:            {inputPath}");
-            Console.Error.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
-            Console.Error.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
-            Console.Error.WriteLine($"Timestamp:        {doc.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "<unknown>"}");
-            Console.Error.WriteLine($"Scene tree nodes: {treeNodeCount}");
-            Console.Error.WriteLine($"Property records: {doc.PropertyRecords.Count}");
-            Console.Error.WriteLine($"GUIDs:            {doc.Guids.Count}");
-            Console.Error.WriteLine($"3D Transforms:    {doc.Transforms.Count}");
-            Console.Error.WriteLine($"3D Meshes:        {doc.Meshes.Count}");
-            Console.Error.WriteLine($"Vertices:         {totalVertices:N0}");
-            Console.Error.WriteLine($"Triangles:        {totalTriangles:N0}");
-            Console.Error.WriteLine($"Materials:        {doc.Materials.Count}");
-            Console.Error.WriteLine($"Saved viewpoints: {doc.SavedViewpoints.Count}");
+            @err.WriteLine("=== NwcIO Execution Report ===");
+            @err.WriteLine($"Input:            {inputPath}");
+            @err.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
+            @err.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
+            @err.WriteLine($"Timestamp:        {doc.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "<unknown>"}");
+            @err.WriteLine($"Scene tree nodes: {treeNodeCount}");
+            @err.WriteLine($"Property records: {doc.PropertyRecords.Count}");
+            @err.WriteLine($"GUIDs:            {doc.Guids.Count}");
+            @err.WriteLine($"3D Transforms:    {doc.Transforms.Count}");
+            @err.WriteLine($"3D Meshes:        {doc.Meshes.Count}");
+            @err.WriteLine($"Vertices:         {totalVertices:N0}");
+            @err.WriteLine($"Triangles:        {totalTriangles:N0}");
+            @err.WriteLine($"Materials:        {doc.Materials.Count}");
+            @err.WriteLine($"Saved viewpoints: {doc.SavedViewpoints.Count}");
             if (doc.SelectionSets.Count > 0)
             {
-                Console.Error.WriteLine($"Selection Sets:   {doc.SelectionSets.Count}");
+                @err.WriteLine($"Selection Sets:   {doc.SelectionSets.Count}");
             }
             if (doc.TimeLiner is not null)
             {
-                Console.Error.WriteLine($"TimeLiner Tasks:  {doc.TimeLiner.Tasks.Count} (Planned Budget: {doc.TimeLiner.TotalPlannedCost:C0})");
+                @err.WriteLine($"TimeLiner Tasks:  {doc.TimeLiner.Tasks.Count} (Planned Budget: {doc.TimeLiner.TotalPlannedCost:C0})");
             }
             if (doc.XRefs is not null)
             {
-                Console.Error.WriteLine($"XRefs:            {doc.XRefs.References.Count}");
+                @err.WriteLine($"XRefs:            {doc.XRefs.References.Count}");
             }
             if (doc.DbCache is not null)
             {
-                Console.Error.WriteLine($"DbCache Entries:  {doc.DbCache.Entries.Count}");
+                @err.WriteLine($"DbCache Entries:  {doc.DbCache.Entries.Count}");
             }
             if (bvhStats && doc.Meshes.Count > 0)
             {
                 var idx = doc.SpatialIndex;
-                Console.Error.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
-                Console.Error.WriteLine($"Bounding box:     {idx.Bounds}");
+                @err.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
+                @err.WriteLine($"Bounding box:     {idx.Bounds}");
             }
-            Console.Error.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
-            Console.Error.WriteLine($"Output:           {outputPath}");
+            @err.WriteLine($"Elapsed:          {sw.ElapsedMilliseconds} ms");
+            @err.WriteLine($"Output:           {outputPath}");
         }
         else
         {
-            Console.WriteLine(FormattableString.Invariant(
+            infoOut.WriteLine(FormattableString.Invariant(
                 $"Exported {doc.PropertyRecords.Count} records, {doc.Guids.Count} GUIDs, {doc.Transforms.Count} transforms, {doc.Meshes.Count} meshes, {doc.Materials.Count} materials to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
@@ -1624,12 +1643,13 @@ internal static class Program
         return 0;
     }
 
-    private static void PrintViewpoints(IReadOnlyList<NwcSavedViewpoint> viewpoints)
+    private static void PrintViewpoints(IReadOnlyList<NwcSavedViewpoint> viewpoints, TextWriter? writer = null)
     {
-        Console.WriteLine($"=== Saved Viewpoints ({viewpoints.Count}) ===");
+        var @out = writer ?? Console.Out;
+        @out.WriteLine($"=== Saved Viewpoints ({viewpoints.Count}) ===");
         if (viewpoints.Count == 0)
         {
-            Console.WriteLine("No saved viewpoints found.");
+            @out.WriteLine("No saved viewpoints found.");
             return;
         }
 
@@ -1637,17 +1657,19 @@ internal static class Program
         {
             var vp = viewpoints[i];
             var cam = vp.Camera;
-            Console.WriteLine(FormattableString.Invariant(
+            @out.WriteLine(FormattableString.Invariant(
                 $"[{i + 1}] \"{vp.Name}\" ({cam.Projection}) Pos: {cam.Position} Dir: {cam.Direction} Up: {cam.Up} Target: {cam.Target} FOV: {cam.FieldOfView:F1}° FocalDist: {cam.FocalDistance:F2}"));
             if (vp.Comments.Count > 0)
             {
-                Console.WriteLine($"     Comments: {string.Join("; ", vp.Comments)}");
+                @out.WriteLine($"     Comments: {string.Join("; ", vp.Comments)}");
             }
         }
     }
 
-    private static void ExecuteRaycastTest(NwcSpatialIndex index, string coords)
+    private static void ExecuteRaycastTest(NwcSpatialIndex index, string coords, TextWriter? writer = null, TextWriter? errWriter = null)
     {
+        var @out = writer ?? Console.Out;
+        var @err = errWriter ?? Console.Error;
         var parts = coords.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 6 ||
             !double.TryParse(parts[0], CultureInfo.InvariantCulture, out double ox) ||
@@ -1657,7 +1679,7 @@ internal static class Program
             !double.TryParse(parts[4], CultureInfo.InvariantCulture, out double dy) ||
             !double.TryParse(parts[5], CultureInfo.InvariantCulture, out double dz))
         {
-            Console.Error.WriteLine($"Warning: Invalid raycast format '{coords}'. Expected: ox,oy,oz,dx,dy,dz");
+            @err.WriteLine($"Warning: Invalid raycast format '{coords}'. Expected: ox,oy,oz,dx,dy,dz");
             return;
         }
 
@@ -1666,12 +1688,12 @@ internal static class Program
 
         if (index.Raycast(origin, dir, out var hit))
         {
-            Console.WriteLine(FormattableString.Invariant(
+            @out.WriteLine(FormattableString.Invariant(
                 $"Raycast HIT at distance {hit.Distance:F3}: Point={hit.Point}, Normal={hit.Normal}, MeshId={hit.Mesh.Id}, Triangle={hit.TriangleIndex}"));
         }
         else
         {
-            Console.WriteLine("Raycast MISS: no intersecting surface found along the ray.");
+            @out.WriteLine("Raycast MISS: no intersecting surface found along the ray.");
         }
     }
 
