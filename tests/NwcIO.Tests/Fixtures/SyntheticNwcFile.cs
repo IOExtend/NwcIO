@@ -119,4 +119,8 @@ internal static class SyntheticNwcFile
 
         return output.ToArray();
     }
+
+    /// <summary>The partition-0 header stream with its zero pads (docs/format-notes.md §2.1).</summary>
+    public static byte[] PartitionHeader(string sourcePath, long unixSeconds, string loaderPlugin) =>
+        new LcGraphWriter().Long(7).Str(sourcePath).Int(-1).Long(unixSeconds).Long(0).Str(loaderPlugin).ToArray();
 }

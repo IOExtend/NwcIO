@@ -40,12 +40,13 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - **Signature**: `[int64 7]` followed by length-prefixed strings.
 - **Fields**:
   - `int64`: marker `7`
-  - `int32 len` + UTF-8 string: full path of originating source document (e.g., `C:\Projects\Building_Structural.rvt`)
-  - `int32 -1`
+  - `int32 len` + UTF-8 string: full path of originating source document (e.g., `C:\Projects\Building_Structural.rvt`), then zero pad to 4
+  - `int32 -1`, then zero pad to 8 from the stream start
   - `int64`: modification timestamp as Unix epoch seconds
   - `int64`: source file size in bytes
-  - `int32 len` + UTF-8 string: loader plugin ID (e.g., `LcNwcLoaderPlugin:lcldrevit`)
+  - `int32 len` + UTF-8 string: loader plugin ID (e.g., `LcNwcLoaderPlugin:lcldrevit`), then zero pad to 4
   - Subsequent length-prefixed UTF-8 strings: loader export configuration options.
+- The pads are zero; 0.11 skipped them and read the timestamp only when the path length was a multiple of 4 and no 8-byte pad was needed. The parser stops at the first unexpected field (a non-zero pad, an int after the path other than -1).
 
 ### 2.2 Logical Hierarchy (`LcOpNwdLogicalHierarchy`)
 - **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced.

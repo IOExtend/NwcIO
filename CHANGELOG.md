@@ -4,6 +4,9 @@ All notable changes to the `NwcIO` library and CLI are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** The partition header is read with its zero pads after the source path (to 4 bytes) and before the timestamp (to 8 bytes): `NwcFileInfo.SourceTimestampUtc` and `LoaderPlugin` are now read from every Navisworks model file, where 0.11 read them only when the path length was a multiple of 4 and no pad was needed. `NwcWriter` writes the same layout, so a file written by NwcIO 0.11 whose source path needed a pad opens without timestamp and loader plugin.
+
 ## [0.11.0] - 2026-11-14
 
 ### Changed

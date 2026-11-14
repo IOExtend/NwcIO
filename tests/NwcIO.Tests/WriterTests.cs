@@ -251,6 +251,7 @@ public class WriterTests
         writer.Write(4);
         writer.Write(System.Text.Encoding.UTF8.GetBytes("a.rv"));
         writer.Write(-1);
+        writer.Write(0);
         writer.Write(seconds);
         writer.Write(0L);
         using var file = new MemoryStream(NwcContainerWriter.Write([header.ToArray()]));

@@ -7,8 +7,9 @@ namespace NwcIO.Internal.Parsing;
 
 /// <summary>
 /// Parses the partition-0 header stream (kind <see cref="NwcStreamKind.PartitionHeader"/>):
-/// [int64 7][len-prefixed source path][int32 -1][int64 timestamp][int64 source size]
-/// [len-prefixed loader plugin] followed by export options (partially decoded).
+/// [int64 7][len-prefixed source path][zero pad to 4][int32 -1][zero pad to 8 from the stream start]
+/// [int64 timestamp][int64 source size][len-prefixed loader plugin][zero pad to 4]
+/// followed by export options (partially decoded). It stops at the first unexpected field.
 /// </summary>
 public static class PartitionHeaderParser
 {
@@ -18,34 +19,53 @@ public static class PartitionHeaderParser
         var data = stream.Data;
         int pos = 8; // skip int64 marker
 
-        if (TryReadLengthPrefixedString(data, ref pos, out var path))
+        if (!TryReadLengthPrefixedString(data, ref pos, out var path, out bool padded))
         {
-            info.SourcePath = path;
+            return info;
         }
 
-        // [int32 -1][int64 timestamp][int64 source size]
-        if (pos + 4 <= data.Length && BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos)) == -1)
+        info.SourcePath = path;
+        if (!padded || pos + 4 > data.Length || BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos)) != -1)
         {
-            pos += 4;
-            if (pos + 8 <= data.Length)
+            return info;
+        }
+
+        pos += 4;
+        if (pos % 8 == 4)
+        {
+            if (pos + 4 > data.Length || BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos)) != 0)
             {
-                long seconds = BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(pos));
-                pos += 8;
-                if (seconds is > 0 and <= 253402300799)
-                {
-                    info.SourceTimestampUtc = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
-                }
+                return info;
             }
 
-            pos += 8; // source file size
+            pos += 4;
         }
 
-        if (TryReadLengthPrefixedString(data, ref pos, out var plugin) && plugin is not null)
+        // [int64 timestamp][int64 source size]
+        if (pos + 16 > data.Length)
         {
-            info.LoaderPlugin = plugin.TrimEnd('\0');
+            return info;
         }
 
-        info.Options = ScanOptionStrings(data, pos);
+        long seconds = BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(pos));
+        if (seconds is > 0 and <= 253402300799)
+        {
+            info.SourceTimestampUtc = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
+        }
+
+        pos += 16;
+
+        if (!TryReadLengthPrefixedString(data, ref pos, out var plugin, out padded))
+        {
+            return info;
+        }
+
+        info.LoaderPlugin = plugin!.TrimEnd('\0');
+        if (padded)
+        {
+            info.Options = ScanOptionStrings(data, pos);
+        }
+
         return info;
     }
 
@@ -88,9 +108,11 @@ public static class PartitionHeaderParser
         return result;
     }
 
-    private static bool TryReadLengthPrefixedString(byte[] data, ref int pos, out string? value)
+    /// <summary>Reads [i32 len][len bytes] and steps over the zero pad to 4; <paramref name="padded"/> is false when the pad runs past the end or is not zero.</summary>
+    private static bool TryReadLengthPrefixedString(byte[] data, ref int pos, out string? value, out bool padded)
     {
         value = null;
+        padded = false;
         if (pos + 4 > data.Length)
         {
             return false;
@@ -103,7 +125,9 @@ public static class PartitionHeaderParser
         }
 
         value = Encoding.UTF8.GetString(data, pos + 4, len);
-        pos += 4 + len;
+        int end = pos + 4 + len;
+        pos += 4 + ((len + 3) & ~3);
+        padded = pos <= data.Length && !data.AsSpan(end, pos - end).ContainsAnyExcept((byte)0);
         return true;
     }
 }
