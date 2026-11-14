@@ -1049,6 +1049,10 @@ internal static class Program
             @err.WriteLine($"Input:            {inputPath}");
             @err.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
             @err.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
+            if (doc.FileInfo.FormatVersion is not null)
+            {
+                @err.WriteLine($"Format version:   {doc.FileInfo.FormatVersion}");
+            }
             @err.WriteLine($"Timestamp:        {doc.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture) ?? "<unknown>"}");
             @err.WriteLine($"Scene tree nodes: {treeNodeCount}");
             @err.WriteLine($"Property records: {doc.PropertyRecords.Count}");

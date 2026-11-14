@@ -142,6 +142,10 @@ public sealed class NwcDocument
             fileInfo = PartitionHeaderParser.Parse(headerStream);
         }
 
+        fileInfo.FormatVersion ??= container.Sections.Select(s => s.InternalVersion).FirstOrDefault(v => v is not null);
+        fileInfo.Encoding ??= container.Sections.Select(s => s.Encoding).FirstOrDefault(e => e is not null);
+        fileInfo.ChunkMarker ??= container.Sections.Select(s => s.Marker).FirstOrDefault(m => m is not null);
+
         string rootName = Path.GetFileNameWithoutExtension(fileInfo.SourcePath ?? fallbackName ?? "Model");
 
         var records = new List<NwcPropertyRecord>();

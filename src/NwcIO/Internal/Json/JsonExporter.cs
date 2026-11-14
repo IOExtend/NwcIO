@@ -20,6 +20,18 @@ public static class JsonExporter
         writer.WriteString("sourcePath", document.FileInfo.SourcePath);
         writer.WriteString("sourceTimestampUtc", document.FileInfo.SourceTimestampUtc?.ToString("O"));
         writer.WriteString("loaderPlugin", document.FileInfo.LoaderPlugin);
+        if (document.FileInfo.FormatVersion is not null)
+        {
+            writer.WriteNumber("formatVersion", document.FileInfo.FormatVersion.Value);
+        }
+        if (document.FileInfo.Encoding is not null)
+        {
+            writer.WriteString("encoding", document.FileInfo.Encoding);
+        }
+        if (document.FileInfo.ChunkMarker is not null)
+        {
+            writer.WriteString("chunkMarker", document.FileInfo.ChunkMarker);
+        }
         writer.WriteStartArray("options");
         foreach (var option in document.FileInfo.Options)
         {
