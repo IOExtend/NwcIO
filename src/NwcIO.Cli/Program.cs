@@ -86,20 +86,10 @@ internal static class Program
 
     public static int Main(string[] args)
     {
-        if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+        if (args.Length == 0)
         {
             Console.WriteLine(UsageText);
-            return args.Length == 0 ? 1 : 0;
-        }
-
-        if (args.Contains("--version") || args.Contains("-v"))
-        {
-            var version = typeof(Program).Assembly
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-                ?? typeof(Program).Assembly.GetName().Version?.ToString()
-                ?? "0.1.0";
-            Console.WriteLine($"nwcio {version}");
-            return 0;
+            return 1;
         }
 
         string? inputPath = null;
@@ -135,6 +125,7 @@ internal static class Program
         string? explicitGridsPath = null;
         string? explicitExportGridsPath = null;
         double diffTolerance = 0.005;
+        bool diffToleranceSpecified = false;
         string? clashGroupMode = null;
         double clashRadius = 1.0;
         string? raycastArg = null;
@@ -157,6 +148,18 @@ internal static class Program
             var arg = args[i];
             switch (arg)
             {
+                case "--help":
+                case "-h":
+                    Console.WriteLine(UsageText);
+                    return 0;
+                case "--version":
+                case "-v":
+                    var version = typeof(Program).Assembly
+                        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                        ?? typeof(Program).Assembly.GetName().Version?.ToString()
+                        ?? "0.1.0";
+                    Console.WriteLine($"nwcio {version}");
+                    return 0;
                 case "--catalog":
                     includeCatalog = true;
                     break;
@@ -182,233 +185,137 @@ internal static class Program
                     checkClashes = true;
                     break;
                 case "--raycast":
-                    if (i + 1 >= args.Length)
+                    if (!TryConsumeValue(args, ref i, "--raycast", out raycastArg)) return 1;
+                    var rayParts = raycastArg.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                    if (rayParts.Length != 6 ||
+                        !double.TryParse(rayParts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out _))
                     {
-                        Console.Error.WriteLine("Error: Missing argument for --raycast.");
+                        Console.Error.WriteLine($"Error: Invalid raycast format '{raycastArg}'. Expected: ox,oy,oz,dx,dy,dz");
                         return 1;
                     }
-                    raycastArg = args[++i];
                     break;
                 case "--nwc":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --nwc.");
-                        return 1;
-                    }
-                    explicitNwcPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--nwc", out explicitNwcPath)) return 1;
                     break;
                 case "--sets-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --sets-xml.");
-                        return 1;
-                    }
-                    explicitSetsXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--sets-xml", out explicitSetsXmlPath)) return 1;
                     break;
                 case "--timeliner-csv":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-csv.");
-                        return 1;
-                    }
-                    explicitTimeLinerCsvPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--timeliner-csv", out explicitTimeLinerCsvPath)) return 1;
                     break;
                 case "--timeliner-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-xml.");
-                        return 1;
-                    }
-                    explicitTimeLinerXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--timeliner-xml", out explicitTimeLinerXmlPath)) return 1;
                     break;
                 case "--timeliner-msproject":
                 case "--timeliner-msp":
                 case "--export-msproject":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-msproject.");
-                        return 1;
-                    }
-                    explicitTimeLinerMsProjectPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, arg, out explicitTimeLinerMsProjectPath)) return 1;
                     break;
                 case "--timeliner-primavera":
                 case "--timeliner-p6":
                 case "--export-primavera":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-primavera.");
-                        return 1;
-                    }
-                    explicitTimeLinerPrimaveraPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, arg, out explicitTimeLinerPrimaveraPath)) return 1;
                     break;
                 case "--link-timeliner":
                     linkTimeLiner = true;
                     break;
                 case "--clash-matrix":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix.");
-                        return 1;
-                    }
-                    explicitClashMatrixJsonPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-matrix", out explicitClashMatrixJsonPath)) return 1;
                     break;
                 case "--clash-matrix-md":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix-md.");
-                        return 1;
-                    }
-                    explicitClashMatrixMdPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-matrix-md", out explicitClashMatrixMdPath)) return 1;
                     break;
                 case "--clash-matrix-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix-bcf.");
-                        return 1;
-                    }
-                    explicitClashMatrixBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-matrix-bcf", out explicitClashMatrixBcfPath)) return 1;
                     break;
                 case "--timeliner-simulate":
-                    if (i + 1 >= args.Length)
+                    if (!TryConsumeValue(args, ref i, "--timeliner-simulate", out simulateDateStr)) return 1;
+                    if (!DateTimeOffset.TryParse(simulateDateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out _))
                     {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-simulate.");
+                        Console.Error.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
                         return 1;
                     }
-                    simulateDateStr = args[++i];
                     break;
                 case "--profiler":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --profiler.");
-                        return 1;
-                    }
-                    explicitProfilerPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--profiler", out explicitProfilerPath)) return 1;
                     break;
                 case "--export-profiler":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --export-profiler.");
-                        return 1;
-                    }
-                    explicitExportProfilerPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--export-profiler", out explicitExportProfilerPath)) return 1;
                     break;
                 case "--clash-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-xml.");
-                        return 1;
-                    }
-                    explicitClashXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-xml", out explicitClashXmlPath)) return 1;
                     break;
                 case "--clash-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-bcf.");
-                        return 1;
-                    }
-                    explicitClashBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-bcf", out explicitClashBcfPath)) return 1;
                     break;
                 case "--clash-group":
-                    if (i + 1 >= args.Length)
+                    if (!TryConsumeValue(args, ref i, "--clash-group", out clashGroupMode)) return 1;
+                    if (clashGroupMode != "proximity" && clashGroupMode != "element" && clashGroupMode != "grid" && clashGroupMode != "layer")
                     {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-group.");
+                        Console.Error.WriteLine($"Error: Invalid clash group mode '{clashGroupMode}'. Supported modes: proximity, element, grid, layer.");
                         return 1;
                     }
-                    clashGroupMode = args[++i];
                     break;
                 case "--clash-radius":
-                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out clashRadius))
+                    if (!TryConsumeValue(args, ref i, "--clash-radius", out string clashRadiusStr) ||
+                        !double.TryParse(clashRadiusStr, NumberStyles.Float, CultureInfo.InvariantCulture, out clashRadius) ||
+                        double.IsNaN(clashRadius) || double.IsInfinity(clashRadius) || clashRadius <= 0)
                     {
-                        Console.Error.WriteLine("Error: Invalid or missing argument for --clash-radius.");
+                        Console.Error.WriteLine($"Error: Invalid value for --clash-radius: '{clashRadiusStr}'. Expected positive number.");
                         return 1;
                     }
                     break;
                 case "--html-viewer":
                 case "--viewer":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --html-viewer.");
-                        return 1;
-                    }
-                    explicitHtmlViewerPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, arg, out explicitHtmlViewerPath)) return 1;
                     break;
                 case "--clash-tolerance":
-                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out clashTolerance))
+                    if (!TryConsumeValue(args, ref i, "--clash-tolerance", out string clashTolStr) ||
+                        !double.TryParse(clashTolStr, NumberStyles.Float, CultureInfo.InvariantCulture, out clashTolerance) ||
+                        double.IsNaN(clashTolerance) || double.IsInfinity(clashTolerance) || clashTolerance < 0)
                     {
-                        Console.Error.WriteLine("Error: Invalid or missing argument for --clash-tolerance.");
+                        Console.Error.WriteLine($"Error: Invalid value for --clash-tolerance: '{clashTolStr}'. Expected non-negative number.");
                         return 1;
                     }
                     break;
                 case "--diff":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --diff.");
-                        return 1;
-                    }
-                    explicitDiffBaseline = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--diff", out explicitDiffBaseline)) return 1;
                     break;
                 case "--diff-json":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --diff-json.");
-                        return 1;
-                    }
-                    explicitDiffJsonPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--diff-json", out explicitDiffJsonPath)) return 1;
                     break;
                 case "--diff-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --diff-bcf.");
-                        return 1;
-                    }
-                    explicitDiffBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--diff-bcf", out explicitDiffBcfPath)) return 1;
                     break;
                 case "--diff-tolerance":
-                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out diffTolerance))
+                    diffToleranceSpecified = true;
+                    if (!TryConsumeValue(args, ref i, "--diff-tolerance", out string diffTolStr) ||
+                        !double.TryParse(diffTolStr, NumberStyles.Float, CultureInfo.InvariantCulture, out diffTolerance) ||
+                        double.IsNaN(diffTolerance) || double.IsInfinity(diffTolerance) || diffTolerance < 0)
                     {
-                        Console.Error.WriteLine("Error: Invalid or missing argument for --diff-tolerance.");
+                        Console.Error.WriteLine($"Error: Invalid value for --diff-tolerance: '{diffTolStr}'. Expected non-negative number.");
                         return 1;
                     }
                     break;
                 case "--grids":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --grids.");
-                        return 1;
-                    }
-                    explicitGridsPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--grids", out explicitGridsPath)) return 1;
                     break;
                 case "--export-grids":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --export-grids.");
-                        return 1;
-                    }
-                    explicitExportGridsPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--export-grids", out explicitExportGridsPath)) return 1;
                     break;
                 case "--nwf-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --nwf-xml.");
-                        return 1;
-                    }
-                    explicitNwfXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--nwf-xml", out explicitNwfXmlPath)) return 1;
                     break;
                 case "--ifc":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --ifc.");
-                        return 1;
-                    }
-                    explicitIfcPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--ifc", out explicitIfcPath)) return 1;
                     break;
                 case "--ifc-schema":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --ifc-schema.");
-                        return 1;
-                    }
-                    string schemaStr = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--ifc-schema", out string schemaStr)) return 1;
                     if (schemaStr.Equals("IFC4", StringComparison.OrdinalIgnoreCase))
                     {
                         ifcSchema = NwcIfcSchemaVersion.Ifc4;
@@ -427,55 +334,25 @@ internal static class Program
                     exportIfcTypes = false;
                     break;
                 case "--obj":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --obj.");
-                        return 1;
-                    }
-                    explicitObjPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--obj", out explicitObjPath)) return 1;
                     break;
                 case "--glb":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --glb.");
-                        return 1;
-                    }
-                    explicitGlbPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--glb", out explicitGlbPath)) return 1;
                     break;
                 case "--bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --bcf.");
-                        return 1;
-                    }
-                    explicitBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--bcf", out explicitBcfPath)) return 1;
                     break;
                 case "--viewpoints-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --viewpoints-bcf.");
-                        return 1;
-                    }
-                    explicitViewpointsBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--viewpoints-bcf", out explicitViewpointsBcfPath)) return 1;
                     break;
                 case "--viewpoints-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --viewpoints-xml.");
-                        return 1;
-                    }
-                    explicitViewpointsXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--viewpoints-xml", out explicitViewpointsXmlPath)) return 1;
                     break;
                 case "--viewpoints":
                     listViewpoints = true;
                     break;
                 case "--clash-html":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-html.");
-                        return 1;
-                    }
-                    explicitClashHtmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-html", out explicitClashHtmlPath)) return 1;
                     break;
                 case "--no-indent":
                     indent = false;
@@ -516,8 +393,28 @@ internal static class Program
             return 1;
         }
 
+        if (explicitDiffBaseline is null && (explicitDiffJsonPath != null || explicitDiffBcfPath != null || diffToleranceSpecified))
+        {
+            Console.Error.WriteLine("Error: --diff-json, --diff-bcf, and --diff-tolerance require --diff <baseline>.");
+            return 1;
+        }
+
         bool isDirectory = Directory.Exists(inputPath);
         bool isFile = File.Exists(inputPath);
+
+        if (isDirectory || inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
+        {
+            if (explicitDiffBaseline != null || explicitDiffJsonPath != null || explicitDiffBcfPath != null || diffToleranceSpecified)
+            {
+                Console.Error.WriteLine("Error: --diff, --diff-json, --diff-bcf, and --diff-tolerance are not supported for folder or .nwf assembly inputs.");
+                return 1;
+            }
+            if (!string.IsNullOrEmpty(simulateDateStr))
+            {
+                Console.Error.WriteLine("Error: --timeliner-simulate is not supported for folder or .nwf assembly inputs.");
+                return 1;
+            }
+        }
 
         if (!isDirectory && !isFile)
         {
@@ -994,6 +891,7 @@ internal static class Program
                 else
                 {
                     Console.Error.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
+                    return 1;
                 }
             }
         }
@@ -1724,5 +1622,17 @@ internal static class Program
         }
 
         return count;
+    }
+
+    private static bool TryConsumeValue(string[] args, ref int i, string optionName, out string value)
+    {
+        if (i + 1 >= args.Length || (args[i + 1].StartsWith('-') && args[i + 1] != "-"))
+        {
+            Console.Error.WriteLine($"Error: Missing argument for {optionName}.");
+            value = string.Empty;
+            return false;
+        }
+        value = args[++i];
+        return true;
     }
 }
