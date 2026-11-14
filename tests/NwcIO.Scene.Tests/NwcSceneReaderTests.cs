@@ -203,6 +203,8 @@ public sealed class NwcSceneReaderTests
 
     [Theory]   // guard: before this task no set is written at all
     [InlineData(6, "NaN")]
+    [InlineData(6, "x")]
+    [InlineData(1, "1,5")]
     [InlineData(4, null)]
     [InlineData(13, "x")]
     public void Read_ValueThatCannotBeShown_IsLeftOut(int type, string? value)
