@@ -54,8 +54,9 @@ public static partial class NwcSceneReader
     /// Give a document opened from a model file with the default <see cref="NwcReaderOptions"/>. With
     /// <see cref="NwcReaderOptions.ReadPropertyRecords"/>, <see cref="NwcReaderOptions.ReadMeshes"/> or
     /// <see cref="NwcReaderOptions.ReadMaterials"/> off the scene lacks property sets and levels, geometry, or materials, without a
-    /// diagnostic (the document does not record its options); a document not read through the file's DbCache directory has meshes
-    /// without tree nodes and properties outside tabs, both reported and left out.
+    /// diagnostic (the document does not record its options, so the loss happened before the conversion and cannot be reported);
+    /// a document not read through the file's DbCache directory has meshes without tree nodes and properties outside tabs, both
+    /// reported and left out.
     /// </summary>
     /// <param name="document">The document, for example from <see cref="NwcDocument.Open(Stream, NwcReaderOptions?, string?)"/>.</param>
     /// <param name="options">Conversion options with <see cref="NwcSceneOptions.ModelKey"/>.</param>
@@ -134,6 +135,7 @@ public static partial class NwcSceneReader
         int leavesOutsideElements = 0;
         int elementsWithGeometry = 0;
         int nodesWithPropertiesOutsideTabs = 0;
+        int propertyValuesSkipped = 0;
         var tabSets = new Dictionary<NwcPropertyTab, int?>(ReferenceEqualityComparer.Instance);
         var lineMeshes = new Dictionary<NwcNode, List<NwcMesh>>(ReferenceEqualityComparer.Instance);   // by element
         if (revit && metresPerUnit is not null)
@@ -230,7 +232,7 @@ public static partial class NwcSceneReader
                 Category = category,
                 TypeName = typeName,
                 LevelId = levelId,
-                PropertySetIds = PropertySetIds(node, scene, tabSets, unit),
+                PropertySetIds = PropertySetIds(node, scene, tabSets, unit, ref propertyValuesSkipped),
             });
 
             for (int i = node.Children.Count - 1; i >= 0; i--)
@@ -255,6 +257,33 @@ public static partial class NwcSceneReader
         {
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "viewpoints-skipped",
                 "Saved viewpoints are not converted: Navisworks stores no stable viewpoint id."));
+        }
+
+        if (document.XRefs is { References.Count: > 0 } xRefs)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "xrefs-skipped",
+                $"The document lists {xRefs.References.Count} external references (the models a .nwf file refers to): they are not loaded, so the scene holds none of their content."));
+        }
+
+        if (document.SelectionSets.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "selection-sets-skipped", "Selection sets and search sets are not converted."));
+        }
+
+        if (document.TimeLiner is not null)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "timeliner-skipped", "The TimeLiner schedule is not converted."));
+        }
+
+        if (document.ClashTests.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "clash-tests-skipped", "Clash tests are not converted."));
+        }
+
+        if (propertyValuesSkipped > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "properties-skipped",
+                $"{propertyValuesSkipped} property values are not in the scene: they have no text, an unknown value type, or numeric text that is not a finite number."));
         }
 
         return new NwcSceneResult

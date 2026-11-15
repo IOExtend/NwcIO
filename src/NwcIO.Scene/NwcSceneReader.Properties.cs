@@ -20,7 +20,8 @@ public static partial class NwcSceneReader
 
     // The ids of the sets of the node's tabs in slot order, each once; a tab's set is made at its first use, and a tab whose
     // properties are all left out has none (null in tabSets).
-    private static List<int> PropertySetIds(NwcNode node, SceneDocument scene, Dictionary<NwcPropertyTab, int?> tabSets, NwcLengthUnit unit)
+    // valuesSkipped counts the values of each tab once, at the tab's first use.
+    private static List<int> PropertySetIds(NwcNode node, SceneDocument scene, Dictionary<NwcPropertyTab, int?> tabSets, NwcLengthUnit unit, ref int valuesSkipped)
     {
         var ids = new List<int>();
         var seen = new HashSet<int>();   // a crafted file can give one node any number of tabs, so the dedup stays linear
@@ -28,7 +29,7 @@ public static partial class NwcSceneReader
         {
             if (!tabSets.TryGetValue(tab, out int? id))
             {
-                id = AddPropertySet(scene, tab, unit);
+                id = AddPropertySet(scene, tab, unit, ref valuesSkipped);
                 tabSets.Add(tab, id);
             }
 
@@ -41,7 +42,7 @@ public static partial class NwcSceneReader
         return ids;
     }
 
-    private static int? AddPropertySet(SceneDocument scene, NwcPropertyTab tab, NwcLengthUnit unit)
+    private static int? AddPropertySet(SceneDocument scene, NwcPropertyTab tab, NwcLengthUnit unit, ref int valuesSkipped)
     {
         string? setKey = tab.InternalName is { } tabName && KeyedTabs.Contains(tabName) ? "nwc:" + tabName : null;
         var properties = new List<SceneProperty>();
@@ -49,6 +50,7 @@ public static partial class NwcSceneReader
         {
             if (ValueText(record, unit) is not { } text)
             {
+                valuesSkipped += NeedsUnit(record, unit) ? 0 : 1;
                 continue;
             }
 
@@ -90,6 +92,11 @@ public static partial class NwcSceneReader
             _ => null,
         };
     }
+
+    // A dimensioned value (length, area, volume, angle, the types ValueText converts by unit) that is left out only because the unit
+    // is unknown: `unit-unknown` reports it, so it is not counted as skipped.
+    private static bool NeedsUnit(NwcPropertyRecord record, NwcLengthUnit unit) =>
+        record.Value is not null && record.ValueType is 6 or 7 or 10 or 11 && unit.GetMetresPerUnit() is null;
 
     // Text that is not an invariant number is left out like a non-finite one (design §6.3: never guessed, never a crash).
     private static string? Number(string stored, double factor, string unit) =>
