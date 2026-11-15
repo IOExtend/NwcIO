@@ -66,6 +66,9 @@ public static class GlbExporter
             matIndexMap[materialTable[i]] = i;
         }
 
+        var materialsWithBlend = new HashSet<int>();
+        int? defaultLineBlendMatIdx = null;
+
         for (int m = 0; m < meshes.Count; m++)
         {
             var mesh = meshes[m];
@@ -325,6 +328,48 @@ public static class GlbExporter
                 }
 
                 matIdx = foundIdx;
+                if (mesh.Material.Color.A < 1.0f)
+                {
+                    materialsWithBlend.Add(foundIdx);
+                }
+            }
+
+            bool hasTransparentLineColors = lineIndices.Count > 0 &&
+                mesh.LineColors is { Count: > 0 } lc &&
+                lc.Any(c => c.A < 1.0f);
+
+            int? lineMatIdx = matIdx;
+            if (hasTransparentLineColors)
+            {
+                if (indices.Count == 0 && matIdx.HasValue)
+                {
+                    materialsWithBlend.Add(matIdx.Value);
+                    lineMatIdx = matIdx.Value;
+                }
+                else if (matIdx.HasValue && mesh.Material!.Color.A < 1.0f)
+                {
+                    materialsWithBlend.Add(matIdx.Value);
+                    lineMatIdx = matIdx.Value;
+                }
+                else
+                {
+                    if (!defaultLineBlendMatIdx.HasValue)
+                    {
+                        var lineMat = new NwcMaterial
+                        {
+                            Id = -materialTable.Count - 1,
+                            Name = "LineColors_Blend",
+                            Color = RgbaColor.White,
+                            DoubleSided = true,
+                            Metallic = 0f,
+                            Roughness = 1f
+                        };
+                        defaultLineBlendMatIdx = materialTable.Count;
+                        materialTable.Add(lineMat);
+                        materialsWithBlend.Add(defaultLineBlendMatIdx.Value);
+                    }
+                    lineMatIdx = defaultLineBlendMatIdx.Value;
+                }
             }
 
             var primitives = new List<PrimitiveDef>();
@@ -346,7 +391,7 @@ public static class GlbExporter
                     null,
                     colAccessorIdx,
                     lineIdxAccessor.Value,
-                    matIdx,
+                    lineMatIdx,
                     1)); // LINES
             }
 
@@ -365,7 +410,8 @@ public static class GlbExporter
             bufferViews,
             binData.Length,
             generatorName ?? "NwcIO glTF 2.0 Exporter",
-            viewpoints);
+            viewpoints,
+            materialsWithBlend);
 
         // Align JSON chunk to 4 bytes with 0x20 spaces as per glTF spec
         int jsonPadding = (4 - (jsonData.Length % 4)) % 4;
@@ -408,7 +454,8 @@ public static class GlbExporter
         List<BufferViewDef> bufferViews,
         int binByteLength,
         string generator,
-        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
+        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null,
+        HashSet<int>? materialsWithBlend = null)
     {
         using var ms = new MemoryStream();
         using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = false }))
@@ -566,6 +613,11 @@ public static class GlbExporter
                 writer.WriteStartObject();
                 writer.WriteString("name", mat.Name);
                 writer.WriteBoolean("doubleSided", mat.DoubleSided);
+
+                if ((materialsWithBlend != null && materialsWithBlend.Contains(i)) || mat.Color.A < 1.0f)
+                {
+                    writer.WriteString("alphaMode", "BLEND");
+                }
 
                 writer.WriteStartObject("pbrMetallicRoughness");
                 writer.WriteStartArray("baseColorFactor");

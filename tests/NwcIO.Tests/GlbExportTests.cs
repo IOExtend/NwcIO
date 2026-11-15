@@ -472,4 +472,60 @@ public class GlbExportTests
         Assert.Equal(1, linePrim.GetProperty("mode").GetInt32());
         Assert.False(linePrim.GetProperty("attributes").TryGetProperty("NORMAL", out _));
     }
+
+    [Fact]
+    public void GlbExporter_TransparentLineColors_SetsMaterialAlphaModeBlend()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 8,
+            Name = "TransparentLines",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(10, 10, 10)],
+            Indices = [],
+            LineIndices = [0, 1],
+            LineColors = [new RgbaColor(1f, 0f, 0f, 0.5f), new RgbaColor(0f, 1f, 0f, 0.5f)],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var prim = root.GetProperty("meshes")[0].GetProperty("primitives")[0];
+        Assert.Equal(1, prim.GetProperty("mode").GetInt32());
+        Assert.True(prim.TryGetProperty("material", out var matIdx));
+
+        var materials = root.GetProperty("materials");
+        var mat = materials[matIdx.GetInt32()];
+        Assert.Equal("BLEND", mat.GetProperty("alphaMode").GetString());
+    }
+
+    [Fact]
+    public void GlbExporter_TransparentMaterial_SetsAlphaModeBlend()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 9,
+            Name = "GlassMesh",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = new NwcMaterial
+            {
+                Id = 1,
+                Name = "Glass",
+                Color = new RgbaColor(0.8f, 0.8f, 0.9f, 0.3f),
+            }
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [mesh.Material], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var materials = root.GetProperty("materials");
+        var mat = materials[0];
+        Assert.Equal("BLEND", mat.GetProperty("alphaMode").GetString());
+    }
 }
