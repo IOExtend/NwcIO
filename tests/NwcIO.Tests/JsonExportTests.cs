@@ -20,4 +20,43 @@ public sealed class JsonExportTests
         Assert.Equal(-1.0, transforms[0].GetProperty("scale").GetDouble());
         Assert.False(transforms[1].TryGetProperty("scale", out _));
     }
+
+    [Fact]
+    public void Json_WritesNodeHyperlinks()
+    {
+        var node = new NwcNode
+        {
+            Id = 1,
+            Name = "Wall_1",
+            Class = "LcRevitData_Element",
+        };
+        var link = new NwcHyperlink
+        {
+            Name = "Detail Drawing",
+            Url = "https://example.com/detail.dwg",
+            Category = "Drawings",
+        };
+        link.AttachmentPoints.Add(new Vector3d(1.0, 2.0, 3.0));
+        node.Hyperlinks.Add(link);
+
+        var doc = new NwcDocumentBuilder()
+            .SetRootNode(node)
+            .Build();
+
+        using var json = JsonDocument.Parse(doc.ToJson());
+        var rootNode = json.RootElement.GetProperty("sceneTree");
+        var hyperlinks = rootNode.GetProperty("hyperlinks");
+        Assert.Equal(1, hyperlinks.GetArrayLength());
+
+        var h0 = hyperlinks[0];
+        Assert.Equal("Detail Drawing", h0.GetProperty("name").GetString());
+        Assert.Equal("https://example.com/detail.dwg", h0.GetProperty("url").GetString());
+        Assert.Equal("Drawings", h0.GetProperty("category").GetString());
+
+        var pts = h0.GetProperty("attachmentPoints");
+        Assert.Equal(1, pts.GetArrayLength());
+        Assert.Equal(1.0, pts[0][0].GetDouble());
+        Assert.Equal(2.0, pts[0][1].GetDouble());
+        Assert.Equal(3.0, pts[0][2].GetDouble());
+    }
 }

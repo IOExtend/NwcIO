@@ -8,7 +8,12 @@ public sealed class NwcSceneResult
     /// <summary>The scene: one model with the document's selection tree, geometry, materials and property sets, in metres.</summary>
     public required SceneDocument Document { get; init; }
 
-    /// <summary>What the conversion could not carry over; empty when nothing was lost.</summary>
+    /// <summary>
+    /// What the conversion left out of the document it was given and could detect; empty when it detected nothing. It cannot report
+    /// what was already missing from the document: one read with <see cref="NwcReaderOptions.ReadPropertyRecords"/>,
+    /// <see cref="NwcReaderOptions.ReadMeshes"/> or <see cref="NwcReaderOptions.ReadMaterials"/> off does not record its options
+    /// (see <see cref="NwcSceneReader.Read(NwcDocument, NwcSceneOptions)"/>).
+    /// </summary>
     public IReadOnlyList<SceneDiagnostic> Diagnostics { get; init; } = [];
 
     /// <summary>The number of elements in the scene: Revit element nodes plus leaves outside elements.</summary>

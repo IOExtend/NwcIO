@@ -28,6 +28,9 @@ public sealed class NwcNode
     /// <summary>The property tabs of this node in stored slot order, for Navisworks model files read through their DbCache directory; <see cref="Properties"/> is their records in that order (the same objects). Other files and <c>ReadPropertyRecords = false</c> leave it empty.</summary>
     public List<NwcPropertyTab> PropertyTabs { get; } = [];
 
+    /// <summary>Hyperlinks / URLs attached directly to this node (class 79 <c>LcOaURLAttribute</c>).</summary>
+    public List<NwcHyperlink> Hyperlinks { get; } = [];
+
     /// <summary>
     /// Element unique identifier (GUID) if assigned. On a model file read through its DbCache directory it is the Revit export GUID
     /// of element nodes (<see cref="IsElement"/>), read from <c>LcOpGuidStore</c> whatever <see cref="NwcReaderOptions.ReadGuids"/>
