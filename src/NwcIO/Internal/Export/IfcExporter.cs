@@ -210,7 +210,7 @@ internal static class IfcExporter
             // Export properties if requested
             if (options.ExportProperties)
             {
-                WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale);
+                WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
             }
         }
 
@@ -437,7 +437,7 @@ internal static class IfcExporter
 
                 if (options.ExportProperties)
                 {
-                    WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale);
+                    WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
                 }
             }
 
@@ -594,7 +594,8 @@ internal static class IfcExporter
         NwcMesh mesh,
         int ownerHistoryId,
         IReadOnlyList<Vector3d> vertices,
-        double scale)
+        double scale,
+        bool isIfc4 = false)
     {
         var propIds = new List<int>();
 
@@ -647,8 +648,10 @@ internal static class IfcExporter
         {
             foreach (var link in hyperlinks)
             {
-                int docRefId = w.Add("IFCDOCUMENTREFERENCE",
-                    $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")},$");
+                string docRefArgs = isIfc4
+                    ? $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")},$,$"
+                    : $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")}";
+                int docRefId = w.Add("IFCDOCUMENTREFERENCE", docRefArgs);
                 w.Add("IFCRELASSOCIATESDOCUMENT",
                     $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(docRefId)}");
             }

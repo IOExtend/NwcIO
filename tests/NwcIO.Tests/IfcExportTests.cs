@@ -49,13 +49,23 @@ public class IfcExportTests
         var mesh = TestMeshes.MirroredQuad();
         mesh.Node = node;
 
-        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        // IFC2X3: exactly 3 arguments (Location, ItemReference, Name)
+        string ifc2x3 = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
         {
+            SchemaVersion = NwcIfcSchemaVersion.Ifc2x3,
             ExportProperties = true,
         });
+        Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet');", ifc2x3);
+        Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc2x3);
 
-        Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet',foo".Replace("foo", "$)"), ifc);
-        Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc);
+        // IFC4: exactly 5 arguments (Location, Identification, Name, Description, ReferencedDocument)
+        string ifc4 = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = NwcIfcSchemaVersion.Ifc4,
+            ExportProperties = true,
+        });
+        Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet',$,$);", ifc4);
+        Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
     }
 
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
