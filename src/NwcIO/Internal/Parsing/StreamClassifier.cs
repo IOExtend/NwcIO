@@ -41,8 +41,9 @@ public static class StreamClassifier
             return NwcStreamKind.Unknown;
         }
 
-        // Partition header: starts with int64 7, then a length-prefixed source path.
-        if (BinaryPrimitives.ReadInt64LittleEndian(data) == 7 && LooksLikeLengthPrefixedText(data, 8))
+        // Partition header: starts with int64 7, then a length-prefixed source path, or a null path [-1] and the -1 marker.
+        if (BinaryPrimitives.ReadInt64LittleEndian(data) == 7 &&
+            (LooksLikeLengthPrefixedText(data, 8) || (ReadInt32(data, 8) == -1 && ReadInt32(data, 12) == -1)))
         {
             return NwcStreamKind.PartitionHeader;
         }

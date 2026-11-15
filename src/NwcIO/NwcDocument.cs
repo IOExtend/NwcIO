@@ -41,11 +41,16 @@ public sealed class NwcDocument
 
     public NwcFileInfo FileInfo { get; }
 
-    /// <summary>Feet when the cache was written by the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c>; no file names its unit. Computed from <see cref="FileInfo"/>.</summary>
-    public NwcLengthUnit LengthUnit =>
-        FileInfo.LoaderPlugin == "LcNwcLoaderPlugin:lcldrevit" ? NwcLengthUnit.Feet : NwcLengthUnit.Unknown;
+    /// <summary>
+    /// True when the loader plugin is exactly (ordinal) the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> (Navisworks reading a
+    /// <c>.rvt</c>) or the Revit NWC exporter <c>nwexportrevit</c>. Computed from <see cref="FileInfo"/>.
+    /// </summary>
+    public bool IsRevitSource => FileInfo.LoaderPlugin is "LcNwcLoaderPlugin:lcldrevit" or "nwexportrevit";
 
-    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet, which the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> writes; no file names its unit); null when the unit is unknown.</summary>
+    /// <summary>Feet when <see cref="IsRevitSource"/> (the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> or the Revit NWC exporter <c>nwexportrevit</c>); no file names its unit. Computed from <see cref="FileInfo"/>.</summary>
+    public NwcLengthUnit LengthUnit => IsRevitSource ? NwcLengthUnit.Feet : NwcLengthUnit.Unknown;
+
+    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet, which the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> and the Revit NWC exporter <c>nwexportrevit</c> write; no file names its unit); null when the unit is unknown.</summary>
     public double? MetresPerUnit => LengthUnit.GetMetresPerUnit();
 
     /// <summary>Flat records parsed from the scene-tree/property streams.</summary>

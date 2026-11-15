@@ -28,7 +28,7 @@ internal static class FragmentParser
     // Slot families as observed (docs/format-notes.md §2.4).
     private static ReadOnlySpan<int> FragmentClasses => [13];
 
-    private static ReadOnlySpan<int> PoseClasses => [15, 16];
+    private static ReadOnlySpan<int> PoseClasses => [14, 15, 16];
 
     private static ReadOnlySpan<int> AppearanceClasses => [55];
 
@@ -46,8 +46,8 @@ internal static class FragmentParser
 
     private sealed class Parser
     {
-        // A fragment takes at least [id][13], D, four ints, a new class-15 pose and two back-references.
-        private const int MinFragmentBytes = 8 + 8 + 16 + 8 + 56 + 8 + 8;
+        // A fragment takes at least [id][13], D, four ints, a new class-14 pose and two back-references.
+        private const int MinFragmentBytes = 8 + 8 + 16 + 8 + 24 + 8 + 8;
 
         private readonly LcObjectReader _reader;
         private readonly Func<int, object> _readBody;
@@ -74,6 +74,7 @@ internal static class FragmentParser
         private object ReadBody(int classId) => classId switch
         {
             13 => ReadFragment(),
+            14 => new Pose(ReadTranslation(), Quaterniond.Identity, 1.0),
             15 => ReadPose(scaled: false),
             16 => ReadPose(scaled: true),
             55 => ReadAppearance(),
@@ -99,10 +100,13 @@ internal static class FragmentParser
             return new Fragment(seq, geometry.Record, primitiveCount, pose.Translation, pose.Rotation, pose.Scale, geometry.Bounds, look);
         }
 
+        // Class 14: [3 f64 t], a translation.
+        private Vector3d ReadTranslation() => new(ReadFinite(), ReadFinite(), ReadFinite());
+
         // Class 15: [3 f64 t][4 f64 q xyzw]; class 16 adds [f64 s].
         private Pose ReadPose(bool scaled)
         {
-            var translation = new Vector3d(ReadFinite(), ReadFinite(), ReadFinite());
+            var translation = ReadTranslation();
             var rotation = new Quaterniond(ReadFinite(), ReadFinite(), ReadFinite(), ReadFinite());
             double scale = scaled ? ReadFinite() : 1.0;
             if (scale == 0)

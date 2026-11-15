@@ -35,6 +35,29 @@ public class PartitionHeaderParserTests
         Assert.Null(doc.FileInfo.LoaderPlugin);
     }
 
+    [Fact]   // the Revit NWC exporter's header: [i64 7][i32 -1][i32 -1][i64 0][i64 0][i32 13]"nwexportrevit" + pad
+    public void Open_NullSourcePathHeader_ReadsLoaderAndUnit()
+    {
+        var doc = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit")])));
+
+        Assert.Null(doc.FileInfo.SourcePath);
+        Assert.Null(doc.FileInfo.SourceTimestampUtc);
+        Assert.Equal("nwexportrevit", doc.FileInfo.LoaderPlugin);
+        Assert.Equal(NwcLengthUnit.Feet, doc.LengthUnit);
+        Assert.True(doc.IsRevitSource);
+    }
+
+    [Fact]   // guard: only -1 is a null path
+    public void Open_SourcePathLengthMinus2_IsNotAHeader()
+    {
+        var header = SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit");
+        header[8] = 0xFE;   // path length -1 -> -2
+
+        var doc = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([header])));
+
+        Assert.Null(doc.FileInfo.LoaderPlugin);
+    }
+
     [Fact]
     public void Save_SourceByteSize_RoundtripsSuccessfully()
     {

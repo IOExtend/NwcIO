@@ -5,10 +5,10 @@ namespace NwcIO.Tests;
 /// <summary>Class 55 [i32 1][new 54: ambient R,G,B, diffuse R,G,B, specular 0,0,0, emissive 0,0,0, Shininess, Transparency] as 14 f32.</summary>
 internal sealed record Look(float R, float G, float B, float Shininess, float Transparency);
 
-/// <summary>One fragment: S 1 writes a class-15 pose, else class 16; a new class 93 with bbox (0,0,0)-(MaxX,MaxY,MaxZ), or a back-reference
+/// <summary>One fragment: TranslationOnly writes a class-14 pose (T only, S ignored), else S 1 a class-15 pose, else class 16; a new class 93 with bbox (0,0,0)-(MaxX,MaxY,MaxZ), or a back-reference
 /// to fragment SharesGeometryOf's. Look writes a new appearance; null back-references fragment SharesLookOf's (fragment 0 writes Look(0,0,0,0,0)).</summary>
 internal sealed record Frag(int Seq, Vector3d T, double S, int A, int B, int Rec = 0, float MaxZ = 0, int SharesGeometryOf = -1,
-                            float MaxX = 1, float MaxY = 1, Look? Look = null, int SharesLookOf = 0);
+                            float MaxX = 1, float MaxY = 1, Look? Look = null, int SharesLookOf = 0, bool TranslationOnly = false);
 
 /// <summary>Writes <c>LcOpNwdFragments</c> streams in the F1 layout (docs/format-notes.md §2.4).</summary>
 internal static class SyntheticFragments
@@ -24,12 +24,15 @@ internal static class SyntheticFragments
             var f = fragments[k];
             w.New(13);
             w.Double(1.0).Int(f.A).Int(f.B).Int(0).Int(f.Seq);
-            w.New(f.S == 1 ? 15 : 16);
+            w.New(f.TranslationOnly ? 14 : f.S == 1 ? 15 : 16);
             w.Double(f.T.X).Double(f.T.Y).Double(f.T.Z);
-            w.Double(0).Double(0).Double(0).Double(1);
-            if (f.S != 1)
+            if (!f.TranslationOnly)
             {
-                w.Double(f.S);
+                w.Double(0).Double(0).Double(0).Double(1);
+                if (f.S != 1)
+                {
+                    w.Double(f.S);
+                }
             }
 
             var look = f.Look ?? (k == 0 ? new Look(0, 0, 0, 0, 0) : null);

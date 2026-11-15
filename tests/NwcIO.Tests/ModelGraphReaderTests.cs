@@ -31,6 +31,19 @@ public class ModelGraphReaderTests
     }
 
     [Fact]
+    public void Open_TranslationOnlyPose_PlacesMeshAtTheTranslation()
+    {
+        byte[] fragments = SyntheticFragments.Build(new Frag(2, new(1, 2, 3), 1, 2, 4, Rec: 1, TranslationOnly: true));
+        var doc = NwcDocument.Open(new MemoryStream(SyntheticNwcFile.Build(FormatVectors.H1, fragments, [FormatVectors.R1], [120])));
+
+        var transform = doc.Meshes.Single().Transform!;
+        Assert.Equal(new Vector3d(1, 2, 3), transform.Translation);
+        Assert.Equal(Quaterniond.Identity, transform.Rotation);
+        Assert.Equal(1.0, transform.Scale);
+        Assert.Equal([new Vector3d(1, 2, 3), new(2, 2, 3), new(1, 3, 3), new(2, 3, 3)], doc.Meshes[0].GetWorldVertices());
+    }
+
+    [Fact]
     public void Open_MixedFile_DecodesLinesNormalsAndCrossingRecords()
     {
         var doc = NwcDocument.Open(new MemoryStream(MixedFile()));

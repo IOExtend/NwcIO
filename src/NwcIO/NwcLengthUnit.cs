@@ -6,7 +6,7 @@ public enum NwcLengthUnit
     /// <summary>The unit is not known; no file names its unit.</summary>
     Unknown = 0,
 
-    /// <summary>International foot, 0.3048 m. Feet when the cache was written by the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c>; no file names its unit.</summary>
+    /// <summary>International foot, 0.3048 m. Feet when the cache was written by the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> or the Revit NWC exporter <c>nwexportrevit</c>; no file names its unit.</summary>
     Feet = 1,
 
     /// <summary>Meter (SI base unit), 1.0 m.</summary>

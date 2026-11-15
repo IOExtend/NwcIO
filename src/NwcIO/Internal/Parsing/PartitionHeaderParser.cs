@@ -7,7 +7,7 @@ namespace NwcIO.Internal.Parsing;
 
 /// <summary>
 /// Parses the partition-0 header stream (kind <see cref="NwcStreamKind.PartitionHeader"/>):
-/// [int64 7][len-prefixed source path][zero pad to 4][int32 -1][zero pad to 8 from the stream start]
+/// [int64 7][len-prefixed source path, -1 for null][zero pad to 4][int32 -1][zero pad to 8 from the stream start]
 /// [int64 timestamp][int64 source size][len-prefixed loader plugin][zero pad to 4]
 /// followed by export options (partially decoded). It stops at the first unexpected field.
 /// </summary>
@@ -19,7 +19,13 @@ public static class PartitionHeaderParser
         var data = stream.Data;
         int pos = 8; // skip int64 marker
 
-        if (!TryReadLengthPrefixedString(data, ref pos, out var path, out bool padded))
+        string? path = null;
+        bool padded = true;
+        if (pos + 4 <= data.Length && BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos)) == -1)
+        {
+            pos += 4;   // a null path, as a null string elsewhere in the format
+        }
+        else if (!TryReadLengthPrefixedString(data, ref pos, out path, out padded))
         {
             return info;
         }

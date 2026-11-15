@@ -37,17 +37,18 @@ Between some streams are framing blocks:
 Once inflated, streams serve dedicated roles identified by their signature prefixes.
 
 ### 2.1 Partition Header (`PartitionHeader`)
-- **Signature**: `[int64 7]` followed by length-prefixed strings.
+- **Signature**: `[int64 7]` followed by length-prefixed strings, or by a null source path `[int32 -1]` and the `-1` marker.
 - **Fields**:
   - `int64`: marker `7`
-  - `int32 len` + UTF-8 string: full path of originating source document (e.g., `C:\Projects\Building_Structural.rvt`), then zero pad to 4
+  - `int32 len` + UTF-8 string: full path of originating source document (e.g., `C:\Projects\Building_Structural.rvt`), then zero pad to 4; a length of `-1` is a null path (no bytes, no pad), as a null string elsewhere in the format
   - `int32 -1`, then zero pad to 8 from the stream start
   - `int64`: modification timestamp as Unix epoch seconds
   - `int64`: source file size in bytes
   - `int32 len` + UTF-8 string: loader plugin ID (e.g., `LcNwcLoaderPlugin:lcldrevit`), then zero pad to 4
   - Subsequent length-prefixed UTF-8 strings: loader export configuration options.
+- The Revit NWC exporter (loader `nwexportrevit`) writes a null path and a timestamp and size of 0: `[int64 7][int32 -1][int32 -1][int64 0][int64 0][int32 13]"nwexportrevit"` plus pad. A timestamp of 0 is outside the accepted range, so the file has no source timestamp. Any other negative path length is not a partition header.
 - The pads are zero; 0.11 skipped them and read the timestamp only when the path length was a multiple of 4 and no 8-byte pad was needed. The parser stops at the first unexpected field (a non-zero pad, an int after the path other than -1).
-- No stream names the length unit. The Revit loader writes coordinates and length values in feet, areas in ft², volumes in ft³.
+- No stream names the length unit. The Revit loader (`LcNwcLoaderPlugin:lcldrevit`, Navisworks reading a `.rvt`) and the Revit NWC exporter (`nwexportrevit`) write coordinates and length values in feet, areas in ft², volumes in ft³.
 
 ### 2.2 Logical Hierarchy (`LcOpNwdLogicalHierarchy`)
 - **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced.
@@ -91,12 +92,13 @@ The roots are the tabs a node uses once (element, parameter, type, material and 
     - `seq`: preorder index of the owning leaf (§2.2).
     - `a`: triangle count Σ(L − 2) over the strip lengths `L` for a triangle record, segment count Σ(L − 1) over the polyline lengths `L` for a line record.
     - `D`, `b`, `c`: not decoded.
+  - `14` pose: `[3 x f64 t]`, a translation (identity rotation, scale 1). The Revit NWC exporter writes it for unrotated poses.
   - `15` pose: `[3 x f64 t][4 x f64 q]`, `q = (x, y, z, w)` a unit quaternion.
   - `16` pose with scale: class 15 plus `[f64 s]`. The scale is a uniform factor and can be negative.
   - `55` appearance: `[i32 flags][ptr 54]`, plus `[ptr 185]` when `flags & 32`.
   - `54` material: 14 `f32`: ambient 0–2, diffuse 3–5, specular 6–8 (always 0), emissive 9–11 (always 0), shininess 12 (Revit Shininess / 128), transparency 13 (Revit Transparency / 100, values below 0.1 stored as 0). Channels are quantised to bytes. `31` (hierarchy) repeats the fields as `f64` and names the material (null for rooms).
   - `93` geometry reference: `[6 x f32 bbox][3 x f64 c][f32][i32 key][i32 rec]`. `rec` is the 1-based index of a geometry record (§2.5). The box equals the bounding box of the record's positions, and `c` is the offset of those positions.
-- **Placement**: the fragment pose is the full world transform of the record's positions: `world = s·R(q)·v + t`, with `s = 1` for class 15. `R(q)` is the usual rotation matrix of the normalised quaternion. No unit conversion is applied.
+- **Placement**: the fragment pose is the full world transform of the record's positions: `world = s·R(q)·v + t`, with `s = 1` for classes 14 and 15 and `R(q)` the identity for class 14. `R(q)` is the usual rotation matrix of the normalised quaternion. No unit conversion is applied.
 - **Mirroring**: a pose with `s < 0` mirrors the geometry, so triangle winding must be reversed to keep faces outward in world space. Local vertices and indices are not changed.
 - **Sharing**: several fragments may reference one geometry record, directly or through back-referenced class 93 objects. The pose is never shared.
 
