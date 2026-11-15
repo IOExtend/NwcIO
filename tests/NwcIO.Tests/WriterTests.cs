@@ -185,6 +185,44 @@ public class WriterTests
     }
 
     [Fact]
+    public void Writer_RejectsExplicitMatrixTransform_WithoutChangingDestination()
+    {
+        var transform = new NwcTransform
+        {
+            Id = 8,
+            Translation = new(10, 20, 30),
+            Matrix = [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 10, 20, 30, 1],
+        };
+        var mesh = new NwcMesh { Id = 4, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2], Transform = transform };
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh], transforms: [transform]), "Transform 8");
+    }
+
+    [Fact]
+    public void Writer_RejectsParsedNonUniformTransform_WithoutChangingDestination()
+    {
+        var w = new LcGraphWriter();
+        w.Int(1).Int(0);
+        w.ImplicitRoot();
+        w.Int(1);
+        void User(string a, string b) { w.New(52); w.Str(a).Str(b); }
+        w.New(53); w.Str("G"); User("G", "LcTestGroup"); w.Int(0).Int(0).Int(0).Int(1);
+        w.New(22); w.Str("L"); User("L", "LcTestLeaf"); w.Int(0).Int(0).Int(1);
+        w.New(39); w.Str("Matrix").Int(0).Int(0);
+        foreach (double x in new double[] { 2, 0, 0, 0, 3, 0, 0, 0, 4, 10, 20, 30 })
+        {
+            w.Double(x);
+        }
+        w.Int(0);
+
+        var nodes = HierarchyParser.Read(w.Int(1).ToArray(), "Model");
+        var transform = nodes[2].Transform!;
+        Assert.NotNull(transform.Matrix);
+
+        var doc = NwcDocument.Create(transforms: [transform]);
+        AssertRejectedWithoutChangingDestination(doc, $"Transform {transform.Id}");
+    }
+
+    [Fact]
     public void Writer_RejectsLineMesh_WithoutChangingDestination()
     {
         var mesh = new NwcMesh { Id = 5, Vertices = [new(0, 0, 0), new(1, 0, 0), new(1, 1, 0)], Indices = [], LineIndices = [0, 1, 1, 2] };

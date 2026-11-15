@@ -79,10 +79,28 @@ internal static class NwcStreamSerializer
             {
                 throw new ArgumentException($"Transform {transform.Id.ToString(CultureInfo.InvariantCulture)} has scale {transform.Scale.ToString(CultureInfo.InvariantCulture)}; the .nwc writer stores only rotation and translation.", nameof(doc));
             }
+
+            if (transform.Matrix is not null)
+            {
+                throw new ArgumentException($"Transform {transform.Id.ToString(CultureInfo.InvariantCulture)} has explicit matrix; the .nwc writer stores only rotation and translation.", nameof(doc));
+            }
         }
 
         foreach (var mesh in doc.Meshes)
         {
+            if (mesh.Transform is { } mt)
+            {
+                if (mt.Scale != 1.0)
+                {
+                    throw new ArgumentException($"Transform {mt.Id.ToString(CultureInfo.InvariantCulture)} has scale {mt.Scale.ToString(CultureInfo.InvariantCulture)}; the .nwc writer stores only rotation and translation.", nameof(doc));
+                }
+
+                if (mt.Matrix is not null)
+                {
+                    throw new ArgumentException($"Transform {mt.Id.ToString(CultureInfo.InvariantCulture)} has explicit matrix; the .nwc writer stores only rotation and translation.", nameof(doc));
+                }
+            }
+
             if (mesh.LineIndices.Count > 0)
             {
                 throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} holds line segments, which the .nwc writer cannot store.", nameof(doc));
