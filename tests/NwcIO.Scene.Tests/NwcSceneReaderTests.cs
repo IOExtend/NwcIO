@@ -102,7 +102,7 @@ public sealed class NwcSceneReaderTests
         Assert.Equal((1, 1, "Level 1", (double?)null), (level.Id, level.ModelId, level.Name, level.Elevation));
         Assert.Equal([null, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, null, null, null], doc.Elements.Select(e => e.LevelId));
         Assert.Equal(4, result.ElementCount);
-        Assert.Empty(result.Diagnostics);
+        AssertSampleDiagnostics(result);
     }
 
     [Theory]   // the second case has a grid, which only a Revit file reads
@@ -113,7 +113,7 @@ public sealed class NwcSceneReaderTests
         var expected = Scene(RevitSample.Build(doorCategoryId: doorCategoryId)).Document;
         var result = Scene(RevitSample.Build("nwexportrevit", doorCategoryId: doorCategoryId));
         var doc = result.Document;
-        Assert.Empty(result.Diagnostics);
+        AssertSampleDiagnostics(result);
         Assert.Equal("nwexportrevit", doc.Models[0].Application);
         Assert.Equal(doorCategoryId == -2000220, doc.Grids.Count > 0);
         expected.Models[0].Application = doc.Models[0].Application;
@@ -464,12 +464,12 @@ public sealed class NwcSceneReaderTests
         var result = Scene(RevitSample.Build("LcNwcLoaderPlugin:mock"));
         Assert.Empty(result.Document.Geometries); Assert.Empty(result.Document.Instances); Assert.Empty(result.Document.Materials);
         Assert.DoesNotContain(result.Document.PropertySets.SelectMany(s => s.Properties), p => p.Name is "Area" or "Volume" or "Angle" or "Width" or "Elevation");
-        Assert.Equal((SceneSeverity.Warning, "unit-unknown"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+        AssertSampleDiagnostics(result, (SceneSeverity.Warning, "unit-unknown"));   // the dimensioned values are `unit-unknown`'s, not counted as skipped
         Assert.Empty(result.Document.Validate());
 
         var converted = Scene(RevitSample.Build("LcNwcLoaderPlugin:mock"), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Feet });
         Assert.Equal(6, converted.InstanceCount);
-        Assert.DoesNotContain(converted.Diagnostics, d => d.Code == "unit-unknown");
+        AssertSampleDiagnostics(converted);
         var texts = converted.Document.PropertySets.SelectMany(s => s.Properties).Select(p => (p.Name, p.Value.Text)).ToList();
         Assert.Contains(("Area", "10 m²"), texts);
         Assert.Contains(("Elevation", "3000 mm"), texts);
@@ -523,7 +523,7 @@ public sealed class NwcSceneReaderTests
     {
         var result = Scene(RevitSample.Build(doorCategoryId: -2000220), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Unknown });
         Assert.Empty(result.Document.Grids);
-        Assert.Equal("unit-unknown", result.Diagnostics.Single().Code);
+        AssertSampleDiagnostics(result, (SceneSeverity.Warning, "unit-unknown"));
     }
 
     [Fact]
@@ -531,7 +531,150 @@ public sealed class NwcSceneReaderTests
     {
         var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));
         Assert.Empty(result.Document.Viewpoints);
-        Assert.Equal((SceneSeverity.Warning, "viewpoints-skipped"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+        AssertSampleDiagnostics(result, (SceneSeverity.Warning, "viewpoints-skipped"));
+    }
+
+    // RevitSample holds two values the adapter leaves out for a reason other than the unit (value types 0 and 5), so every conversion of it
+    // reports them in one `properties-skipped` entry, after the other diagnostics the test expects.
+    private static void AssertSampleDiagnostics(NwcSceneResult result, params (SceneSeverity Severity, string Code)[] others)
+    {
+        Assert.Equal([.. others, (SceneSeverity.Info, "properties-skipped")], result.Diagnostics.Select(d => (d.Severity, d.Code)));
+        Assert.StartsWith("2 property values", result.Diagnostics[^1].Message);
+    }
+
+    // The XRef table of a .nwf-like file with no model segments, as in ModelGraphReaderTests: the document opens with its references and no meshes.
+    private static byte[] XRefOnlyFile(int references) => SyntheticNwcFile.Build(null, null, [], [], extraStreams:
+        [("LcOpXRefTable", System.Text.Encoding.UTF8.GetBytes(
+            "{\"Type\":\"XRefTable\",\"Version\":1,\"SavedFilename\":\"fed.nwf\",\"Table\":["
+            + string.Join(",", Enumerable.Range(0, references).Select(i => $"{{\"OriginalPath\":\"m{i}.nwc\",\"RemappedPath\":\"\"}}")) + "]}"))]);
+
+    [Fact]
+    public void Read_FileWithXRefs_ConvertsItAndReportsTheReferencesInBothOverloads()
+    {
+        byte[] file = XRefOnlyFile(2);
+        Assert.Equal(2, Doc(file).XRefs!.References.Count);
+        using var temp = TempFile(file, "fed.nwf");
+        foreach (var result in new[] { NwcSceneReader.Read(temp.Path), Scene(file, new() { ModelKey = "fed.nwf" }) })
+        {
+            Assert.Empty(result.Document.Instances);
+            var diagnostic = Assert.Single(result.Diagnostics, d => d.Code == "xrefs-skipped");   // the loader names no unit, so `unit-unknown` is there too
+            Assert.Equal(SceneSeverity.Warning, diagnostic.Severity);
+            Assert.Contains("lists 2 external references", diagnostic.Message);
+        }
+    }
+
+    [Fact]
+    public void Read_EmptyXRefTable_ReportsNoXRefs() =>
+        Assert.DoesNotContain(Scene(XRefOnlyFile(0), new() { ModelKey = "k" }).Diagnostics, d => d.Code == "xrefs-skipped");
+
+    // A document whose tree is a root and one group (tag 53: a group never counts as a leaf outside elements), so that a
+    // document without the content under test converts with no diagnostic when the loader names a unit.
+    private static NwcDocument DocumentWith(Action<NwcDocument>? edit = null, IEnumerable<Model.Sets.NwcSetItem>? selectionSets = null,
+        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null, NwcXRefTable? xRefs = null, string loader = "LcNwcLoaderPlugin:lcldrevit",
+        params NwcPropertyTab[] tabs)
+    {
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        var group = new NwcNode { Id = 1, Name = "G", Class = "Group", Tag = 53, Parent = root };
+        group.PropertyTabs.AddRange(tabs); root.Children.Add(group);
+        var document = NwcDocument.Create(new NwcFileInfo { LoaderPlugin = loader }, rootNode: root,
+            selectionSets: selectionSets, timeLiner: timeLiner, xRefs: xRefs);
+        edit?.Invoke(document);
+        return document;
+    }
+
+    private static NwcSceneResult Convert(NwcDocument document) => Valid(NwcSceneReader.Read(document, new() { ModelKey = "k" }));
+
+    [Fact]
+    public void Read_DocumentWithoutSkippedContent_GetsNoneOfTheSkippedCodes()
+    {
+        var emptyTable = new NwcXRefTable("XRefTable", 1, "x.nwf", []);
+        Assert.Empty(Convert(DocumentWith(xRefs: emptyTable, selectionSets: [])).Diagnostics);
+        Assert.DoesNotContain(Scene(RevitSample.Build()).Diagnostics, d => d.Code is "xrefs-skipped" or "selection-sets-skipped" or "timeliner-skipped" or "clash-tests-skipped");
+    }
+
+    [Fact]
+    public void Read_DocumentWithSelectionSets_ReportsThem()
+    {
+        var result = Convert(DocumentWith(selectionSets: [new Model.Sets.NwcSelectionSetFolder("F")]));
+        Assert.Equal((SceneSeverity.Warning, "selection-sets-skipped"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+    }
+
+    [Fact]
+    public void Read_DocumentWithTimeLiner_ReportsIt()
+    {
+        var result = Convert(DocumentWith(timeLiner: new Model.TimeLiner.NwcTimeLinerSchedule("S")));
+        Assert.Equal((SceneSeverity.Warning, "timeliner-skipped"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+    }
+
+    [Fact]
+    public void Read_DocumentWithClashTests_ReportsThem()
+    {
+        var result = Convert(DocumentWith(document => document.ClashTests.Add(new Model.Clash.NwcClashTest())));
+        Assert.Equal((SceneSeverity.Warning, "clash-tests-skipped"), result.Diagnostics.Select(d => (d.Severity, d.Code)).Single());
+    }
+
+    [Fact]
+    public void Read_DocumentWithEveryKindOfSkippedContent_ReportsEachCodeOnce()
+    {
+        var table = new NwcXRefTable("XRefTable", 1, "x.nwf", [new NwcXRef("a.nwc", "")]);
+        var document = DocumentWith(document => document.ClashTests.Add(new Model.Clash.NwcClashTest()),
+            [new Model.Sets.NwcSelectionSetFolder("F")], new Model.TimeLiner.NwcTimeLinerSchedule("S"), table, tabs: Tab(("N", 13, "x")));
+        Assert.Equal(["xrefs-skipped", "selection-sets-skipped", "timeliner-skipped", "clash-tests-skipped", "properties-skipped"],
+            Convert(document).Diagnostics.Select(d => d.Code));
+    }
+
+    private static NwcPropertyTab Tab(params (string Name, int Type, string? Value)[] values) => new()
+    {
+        Name = "T", InternalName = "LcRevitData_Element",
+        Properties = [.. values.Select(v => new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = v.Name, Class = "T", ValueType = v.Type, Value = v.Value })],
+    };
+
+    [Theory]   // every way a value is left out for a reason other than the unit
+    [InlineData(13, "x")]     // unknown value type
+    [InlineData(4, null)]     // no text
+    [InlineData(1, "1,5")]    // numeric text that does not parse
+    [InlineData(6, "NaN")]    // not finite
+    [InlineData(10, "x")]
+    [InlineData(11, "x")]
+    [InlineData(7, "x")]
+    public void Read_ValueLeftOut_ReportsAnAggregatedInfo(int type, string? value)
+    {
+        var result = Convert(DocumentWith(tabs: Tab(("N", type, value), ("Kept", 4, "v"))));
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal((SceneSeverity.Info, "properties-skipped"), (diagnostic.Severity, diagnostic.Code));
+        Assert.StartsWith("1 property values", diagnostic.Message);
+    }
+
+    [Fact]
+    public void Read_ValuesLeftOut_AreCountedOncePerTab()
+    {
+        var shared = Tab(("A", 13, "x"), ("B", 1, "x"), ("Kept", 4, "v"));
+        var other = Tab(("C", 6, "NaN"));
+        var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
+        for (int i = 1; i <= 3; i++)
+        {
+            var group = new NwcNode { Id = i, Name = "G" + i, Class = "Group", Tag = 53, Parent = root };
+            group.PropertyTabs.AddRange([shared, other]);
+            root.Children.Add(group);
+        }
+
+        var result = Convert(NwcDocument.Create(new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root));
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("properties-skipped", diagnostic.Code);
+        Assert.StartsWith("3 property values", diagnostic.Message);
+        Assert.Single(result.Document.PropertySets);   // the tab holding only the NaN has no set, and three nodes share it
+    }
+
+    [Theory]   // a dimensioned value in an unknown unit is `unit-unknown`'s, not `properties-skipped`'s, whatever its text
+    [InlineData(6, "1")]
+    [InlineData(7, "1")]
+    [InlineData(10, "1")]
+    [InlineData(11, "1")]
+    [InlineData(6, "NaN")]
+    public void Read_DimensionedValueInUnknownUnit_IsNotCountedAsSkipped(int type, string text)
+    {
+        var result = Convert(DocumentWith(loader: "LcNwcLoaderPlugin:mock", tabs: Tab(("N", type, text), ("Kept", 4, "v"))));
+        Assert.Equal("unit-unknown", Assert.Single(result.Diagnostics).Code);
     }
 
     private static NwcSceneResult Valid(NwcSceneResult r)

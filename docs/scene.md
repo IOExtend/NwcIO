@@ -60,11 +60,11 @@ A value is written as text under its key by the stored value type:
 | 11 (volume) | Cubic feet converted to cubic metres, suffix ` m³`. |
 | 7 (angle) | Radians converted to degrees (`180 / π`), suffix ` °`. |
 
-A property with no text, a non-finite number, numeric text that does not parse, or an unknown value type is left out. Lengths, areas, volumes and angles are left out too while the unit is not feet. The text a value is written with under a key is frozen with the key: changing it is a breaking release.
+A property with no text, a non-finite number, numeric text that does not parse, or an unknown value type is left out (`properties-skipped`). Lengths, areas, volumes and angles are left out too while the unit is unknown (`unit-unknown`). The text a value is written with under a key is frozen with the key: changing it is a breaking release.
 
 ## Diagnostics
 
-`NwcSceneResult.Diagnostics` lists what the conversion could not carry over.
+`NwcSceneResult.Diagnostics` lists what the conversion left out of the document it was given and could detect; it is empty when it detected nothing. It cannot report what the document already lacked (see the point on reader options under [Limits](#limits)).
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
@@ -74,15 +74,22 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 | `line-colour-mixed` | Warning | Per geometry record: line segments join vertices of different colours and are drawn with the material colour. |
 | `line-colours-capped` | Warning | Per geometry record: the record has more than 64 line colours; segments of the further colours are drawn with the material colour. |
 | `viewpoints-skipped` | Warning | The document has saved viewpoints, or a saved-views entry; they are not written. |
+| `xrefs-skipped` | Warning | The document lists external references (the models a `.nwf` file refers to): they are not loaded, so the scene holds none of their content (one entry with the count). |
+| `selection-sets-skipped` | Warning | The document has selection sets or search sets; they are not converted. |
+| `timeliner-skipped` | Warning | The document has a TimeLiner schedule; it is not converted. |
+| `clash-tests-skipped` | Warning | The document has clash tests; they are not converted. `NwcDocument.Open` reads none, so only a document that a caller gave clash tests has this entry. |
 | `unplaced-mesh` | Warning | Meshes without a node in the scene tree (for example, the file was not read through its DbCache directory) are left out. |
 | `properties-outside-tabs` | Warning | Nodes carry properties that no property tab holds (same cause); they are left out. |
+| `properties-skipped` | Info | Property values are left out for a reason other than the unit: no text, an unknown value type, or numeric text that is not a finite number (one aggregated entry with the count, each property tab counted once). Dimensioned values left out because the unit is unknown are in `unit-unknown`. |
 
 ## Limits
 
 - `.nwd` partition trees and linked Revit models are not supported: `Read` throws `NotSupportedException`.
+- A `.nwf` file is read like a `.nwc`: the models it refers to are not loaded, so the scene holds only the content of the file itself (`xrefs-skipped`), and its `SourceFormat` is still `nwc`.
 - Level elevations are not written, and saved viewpoints are not written (`viewpoints-skipped`): Navisworks stores no stable viewpoint id.
+- Selection sets and search sets, the TimeLiner schedule and clash tests are not converted (`selection-sets-skipped`, `timeliner-skipped`, `clash-tests-skipped`).
 - A Revit file is one read by Navisworks from a `.rvt` (loader `LcNwcLoaderPlugin:lcldrevit`) or written by the Revit NWC exporter (loader `nwexportrevit`); the loader plugin is compared exactly, so any other loader is a non-Revit file. Files from a non-Revit loader name no unit: geometry, grid lines and dimensioned values are left out with a `unit-unknown` warning, and there are no categories or levels. Set `NwcSceneOptions.LengthUnit` to bring the geometry back in metres; the option always wins over the unit of the document.
 - A document not read through the file's DbCache directory has no geometry and no properties in the scene; both are reported (`unplaced-mesh`, `properties-outside-tabs`).
-- A document opened with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off lacks those parts, and nothing says so: the document does not record its options.
+- A document opened with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off lacks those parts before the conversion starts, and `Diagnostics` cannot report it: the document does not record its options.
 - A line geometry carries only the vertices its own segments use, grouped by segment colour, one geometry per colour. Segments joining two colours go to one more group drawn with the material colour, and each geometry record with such segments adds one `line-colour-mixed` warning. A geometry record keeps at most 64 colour groups, because every mesh of the record places one instance per group: segments of further colours join the material-colour group, and the record adds one `line-colours-capped` warning.
 - Materials carry IOScene's default `Roughness` and `Metalness`, as `RvtIO.Scene` does: the file's shininess is not mapped, so the same element looks the same from a `.rvt` and a `.nwc`.
