@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <Description>Turns a Navisworks model read by NwcIO into an IOScene scene document in metres: the selection tree, element GUIDs and IFC GlobalIds, property tabs, geometry with instancing, file colours and Revit levels and grids.</Description>
+    <PackageTags>navisworks;nwc;ioscene;scene;bim</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- IOScene is referenced by a range whose upper bound is a prerelease ([0.N.0, 0.N+1.0-0.0)); NU5104 is expected. -->
     <NoWarn>$(NoWarn);NU5104</NoWarn>
