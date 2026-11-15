@@ -704,6 +704,47 @@ public class GlbExportTests
         Assert.Equal("OPAQUE", AlphaModeOf(root, PrimitiveOf(root, 0, LinesMode)));
     }
 
+    [Theory]
+    [InlineData(1f, 0.5f)]
+    [InlineData(0.5f, 1f)]
+    public void GlbExporter_LineSegmentWithOneTranslucentEndpoint_BlendsTheLine(float startAlpha, float endAlpha)
+    {
+        var start = new RgbaColor(1f, 0f, 0f, startAlpha);
+        var end = new RgbaColor(0f, 0f, 1f, endAlpha);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        Assert.Equal("BLEND", AlphaModeOf(root, line));
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([1f, 0f, 0f, startAlpha], colors[0]);
+        AssertColor([0f, 0f, 1f, endAlpha], colors[1]);
+    }
+
+    [Fact]
+    public void GlbExporter_LaterTranslucentSegment_BlendsTheLine()
+    {
+        var opaque = new RgbaColor(1f, 0f, 0f, 1f);
+        var half = new RgbaColor(0f, 0f, 1f, 0.5f);
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "TwoSegments",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(2, 0, 0), new Vector3d(3, 0, 0)],
+            Indices = [],
+            LineIndices = [0, 1, 2, 3],
+            LineColors = [opaque, opaque, half, half],
+        };
+
+        var glb = ExportGlb([mesh]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        Assert.Equal("BLEND", AlphaModeOf(root, PrimitiveOf(root, 0, LinesMode)));
+    }
+
     [Fact]
     public void GlbExporter_LineMaterials_AreSharedPerSourceMaterialAndKind()
     {
