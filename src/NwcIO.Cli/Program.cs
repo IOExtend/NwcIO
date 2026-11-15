@@ -97,20 +97,10 @@ internal static class Program
         var @out = outWriter ?? Console.Out;
         var @err = errorWriter ?? Console.Error;
 
-        if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+        if (args.Length == 0)
         {
             @out.WriteLine(UsageText);
-            return args.Length == 0 ? 1 : 0;
-        }
-
-        if (args.Contains("--version") || args.Contains("-v"))
-        {
-            var version = typeof(Program).Assembly
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-                ?? typeof(Program).Assembly.GetName().Version?.ToString()
-                ?? "0.1.0";
-            @out.WriteLine($"nwcio {version}");
-            return 0;
+            return 1;
         }
 
         string? inputPath = null;
@@ -146,6 +136,7 @@ internal static class Program
         string? explicitGridsPath = null;
         string? explicitExportGridsPath = null;
         double diffTolerance = 0.005;
+        bool diffToleranceSpecified = false;
         string? clashGroupMode = null;
         double clashRadius = 1.0;
         string? raycastArg = null;
@@ -168,6 +159,18 @@ internal static class Program
             var arg = args[i];
             switch (arg)
             {
+                case "--help":
+                case "-h":
+                    @out.WriteLine(UsageText);
+                    return 0;
+                case "--version":
+                case "-v":
+                    var version = typeof(Program).Assembly
+                        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                        ?? typeof(Program).Assembly.GetName().Version?.ToString()
+                        ?? "0.1.0";
+                    @out.WriteLine($"nwcio {version}");
+                    return 0;
                 case "--catalog":
                     includeCatalog = true;
                     break;
@@ -193,233 +196,137 @@ internal static class Program
                     checkClashes = true;
                     break;
                 case "--raycast":
-                    if (i + 1 >= args.Length)
+                    if (!TryConsumeValue(args, ref i, "--raycast", out raycastArg, @err)) return 1;
+                    var rayParts = raycastArg.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                    if (rayParts.Length != 6 ||
+                        !double.TryParse(rayParts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out _) ||
+                        !double.TryParse(rayParts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out _))
                     {
-                        Console.Error.WriteLine("Error: Missing argument for --raycast.");
+                        @err.WriteLine($"Error: Invalid raycast format '{raycastArg}'. Expected: ox,oy,oz,dx,dy,dz");
                         return 1;
                     }
-                    raycastArg = args[++i];
                     break;
                 case "--nwc":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --nwc.");
-                        return 1;
-                    }
-                    explicitNwcPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--nwc", out explicitNwcPath, @err)) return 1;
                     break;
                 case "--sets-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --sets-xml.");
-                        return 1;
-                    }
-                    explicitSetsXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--sets-xml", out explicitSetsXmlPath, @err)) return 1;
                     break;
                 case "--timeliner-csv":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-csv.");
-                        return 1;
-                    }
-                    explicitTimeLinerCsvPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--timeliner-csv", out explicitTimeLinerCsvPath, @err)) return 1;
                     break;
                 case "--timeliner-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-xml.");
-                        return 1;
-                    }
-                    explicitTimeLinerXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--timeliner-xml", out explicitTimeLinerXmlPath, @err)) return 1;
                     break;
                 case "--timeliner-msproject":
                 case "--timeliner-msp":
                 case "--export-msproject":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-msproject.");
-                        return 1;
-                    }
-                    explicitTimeLinerMsProjectPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, arg, out explicitTimeLinerMsProjectPath, @err)) return 1;
                     break;
                 case "--timeliner-primavera":
                 case "--timeliner-p6":
                 case "--export-primavera":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-primavera.");
-                        return 1;
-                    }
-                    explicitTimeLinerPrimaveraPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, arg, out explicitTimeLinerPrimaveraPath, @err)) return 1;
                     break;
                 case "--link-timeliner":
                     linkTimeLiner = true;
                     break;
                 case "--clash-matrix":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix.");
-                        return 1;
-                    }
-                    explicitClashMatrixJsonPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-matrix", out explicitClashMatrixJsonPath, @err)) return 1;
                     break;
                 case "--clash-matrix-md":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix-md.");
-                        return 1;
-                    }
-                    explicitClashMatrixMdPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-matrix-md", out explicitClashMatrixMdPath, @err)) return 1;
                     break;
                 case "--clash-matrix-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-matrix-bcf.");
-                        return 1;
-                    }
-                    explicitClashMatrixBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-matrix-bcf", out explicitClashMatrixBcfPath, @err)) return 1;
                     break;
                 case "--timeliner-simulate":
-                    if (i + 1 >= args.Length)
+                    if (!TryConsumeValue(args, ref i, "--timeliner-simulate", out simulateDateStr, @err)) return 1;
+                    if (!DateTimeOffset.TryParse(simulateDateStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out _))
                     {
-                        Console.Error.WriteLine("Error: Missing argument for --timeliner-simulate.");
+                        @err.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
                         return 1;
                     }
-                    simulateDateStr = args[++i];
                     break;
                 case "--profiler":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --profiler.");
-                        return 1;
-                    }
-                    explicitProfilerPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--profiler", out explicitProfilerPath, @err)) return 1;
                     break;
                 case "--export-profiler":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --export-profiler.");
-                        return 1;
-                    }
-                    explicitExportProfilerPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--export-profiler", out explicitExportProfilerPath, @err)) return 1;
                     break;
                 case "--clash-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-xml.");
-                        return 1;
-                    }
-                    explicitClashXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-xml", out explicitClashXmlPath, @err)) return 1;
                     break;
                 case "--clash-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-bcf.");
-                        return 1;
-                    }
-                    explicitClashBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-bcf", out explicitClashBcfPath, @err)) return 1;
                     break;
                 case "--clash-group":
-                    if (i + 1 >= args.Length)
+                    if (!TryConsumeValue(args, ref i, "--clash-group", out clashGroupMode, @err)) return 1;
+                    if (clashGroupMode != "proximity" && clashGroupMode != "element" && clashGroupMode != "grid" && clashGroupMode != "layer")
                     {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-group.");
+                        @err.WriteLine($"Error: Invalid clash group mode '{clashGroupMode}'. Supported modes: proximity, element, grid, layer.");
                         return 1;
                     }
-                    clashGroupMode = args[++i];
                     break;
                 case "--clash-radius":
-                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out clashRadius))
+                    if (!TryConsumeValue(args, ref i, "--clash-radius", out string clashRadiusStr, @err) ||
+                        !double.TryParse(clashRadiusStr, NumberStyles.Float, CultureInfo.InvariantCulture, out clashRadius) ||
+                        double.IsNaN(clashRadius) || double.IsInfinity(clashRadius) || clashRadius <= 0)
                     {
-                        Console.Error.WriteLine("Error: Invalid or missing argument for --clash-radius.");
+                        @err.WriteLine($"Error: Invalid value for --clash-radius: '{clashRadiusStr}'. Expected positive number.");
                         return 1;
                     }
                     break;
                 case "--html-viewer":
                 case "--viewer":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --html-viewer.");
-                        return 1;
-                    }
-                    explicitHtmlViewerPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, arg, out explicitHtmlViewerPath, @err)) return 1;
                     break;
                 case "--clash-tolerance":
-                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out clashTolerance))
+                    if (!TryConsumeValue(args, ref i, "--clash-tolerance", out string clashTolStr, @err) ||
+                        !double.TryParse(clashTolStr, NumberStyles.Float, CultureInfo.InvariantCulture, out clashTolerance) ||
+                        double.IsNaN(clashTolerance) || double.IsInfinity(clashTolerance) || clashTolerance < 0)
                     {
-                        Console.Error.WriteLine("Error: Invalid or missing argument for --clash-tolerance.");
+                        @err.WriteLine($"Error: Invalid value for --clash-tolerance: '{clashTolStr}'. Expected non-negative number.");
                         return 1;
                     }
                     break;
                 case "--diff":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --diff.");
-                        return 1;
-                    }
-                    explicitDiffBaseline = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--diff", out explicitDiffBaseline, @err)) return 1;
                     break;
                 case "--diff-json":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --diff-json.");
-                        return 1;
-                    }
-                    explicitDiffJsonPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--diff-json", out explicitDiffJsonPath, @err)) return 1;
                     break;
                 case "--diff-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --diff-bcf.");
-                        return 1;
-                    }
-                    explicitDiffBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--diff-bcf", out explicitDiffBcfPath, @err)) return 1;
                     break;
                 case "--diff-tolerance":
-                    if (i + 1 >= args.Length || !double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out diffTolerance))
+                    diffToleranceSpecified = true;
+                    if (!TryConsumeValue(args, ref i, "--diff-tolerance", out string diffTolStr, @err) ||
+                        !double.TryParse(diffTolStr, NumberStyles.Float, CultureInfo.InvariantCulture, out diffTolerance) ||
+                        double.IsNaN(diffTolerance) || double.IsInfinity(diffTolerance) || diffTolerance < 0)
                     {
-                        Console.Error.WriteLine("Error: Invalid or missing argument for --diff-tolerance.");
+                        @err.WriteLine($"Error: Invalid value for --diff-tolerance: '{diffTolStr}'. Expected non-negative number.");
                         return 1;
                     }
                     break;
                 case "--grids":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --grids.");
-                        return 1;
-                    }
-                    explicitGridsPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--grids", out explicitGridsPath, @err)) return 1;
                     break;
                 case "--export-grids":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --export-grids.");
-                        return 1;
-                    }
-                    explicitExportGridsPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--export-grids", out explicitExportGridsPath, @err)) return 1;
                     break;
                 case "--nwf-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --nwf-xml.");
-                        return 1;
-                    }
-                    explicitNwfXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--nwf-xml", out explicitNwfXmlPath, @err)) return 1;
                     break;
                 case "--ifc":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --ifc.");
-                        return 1;
-                    }
-                    explicitIfcPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--ifc", out explicitIfcPath, @err)) return 1;
                     break;
                 case "--ifc-schema":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --ifc-schema.");
-                        return 1;
-                    }
-                    string schemaStr = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--ifc-schema", out string schemaStr, @err)) return 1;
                     if (schemaStr.Equals("IFC4", StringComparison.OrdinalIgnoreCase))
                     {
                         ifcSchema = NwcIfcSchemaVersion.Ifc4;
@@ -430,7 +337,7 @@ internal static class Program
                     }
                     else
                     {
-                        Console.Error.WriteLine($"Error: Invalid IFC schema '{schemaStr}'. Expected 'IFC2X3' or 'IFC4'.");
+                        @err.WriteLine($"Error: Invalid IFC schema '{schemaStr}'. Expected 'IFC2X3' or 'IFC4'.");
                         return 1;
                     }
                     break;
@@ -438,55 +345,25 @@ internal static class Program
                     exportIfcTypes = false;
                     break;
                 case "--obj":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --obj.");
-                        return 1;
-                    }
-                    explicitObjPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--obj", out explicitObjPath, @err)) return 1;
                     break;
                 case "--glb":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --glb.");
-                        return 1;
-                    }
-                    explicitGlbPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--glb", out explicitGlbPath, @err)) return 1;
                     break;
                 case "--bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --bcf.");
-                        return 1;
-                    }
-                    explicitBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--bcf", out explicitBcfPath, @err)) return 1;
                     break;
                 case "--viewpoints-bcf":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --viewpoints-bcf.");
-                        return 1;
-                    }
-                    explicitViewpointsBcfPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--viewpoints-bcf", out explicitViewpointsBcfPath, @err)) return 1;
                     break;
                 case "--viewpoints-xml":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --viewpoints-xml.");
-                        return 1;
-                    }
-                    explicitViewpointsXmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--viewpoints-xml", out explicitViewpointsXmlPath, @err)) return 1;
                     break;
                 case "--viewpoints":
                     listViewpoints = true;
                     break;
                 case "--clash-html":
-                    if (i + 1 >= args.Length)
-                    {
-                        Console.Error.WriteLine("Error: Missing argument for --clash-html.");
-                        return 1;
-                    }
-                    explicitClashHtmlPath = args[++i];
+                    if (!TryConsumeValue(args, ref i, "--clash-html", out explicitClashHtmlPath, @err)) return 1;
                     break;
                 case "--no-indent":
                     indent = false;
@@ -497,8 +374,8 @@ internal static class Program
                 default:
                     if (arg != "-" && arg.StartsWith('-'))
                     {
-                        Console.Error.WriteLine($"Error: Unrecognized option '{arg}'.");
-                        Console.Error.WriteLine(UsageText);
+                        @err.WriteLine($"Error: Unrecognized option '{arg}'.");
+                        @err.WriteLine(UsageText);
                         return 1;
                     }
 
@@ -512,7 +389,7 @@ internal static class Program
                     }
                     else
                     {
-                        Console.Error.WriteLine($"Error: Unexpected extra argument '{arg}'.");
+                        @err.WriteLine($"Error: Unexpected extra argument '{arg}'.");
                         return 1;
                     }
 
@@ -522,17 +399,37 @@ internal static class Program
 
         if (string.IsNullOrWhiteSpace(inputPath))
         {
-            Console.Error.WriteLine("Error: Missing input file path.");
-            Console.Error.WriteLine(UsageText);
+            @err.WriteLine("Error: Missing input file path.");
+            @err.WriteLine(UsageText);
+            return 1;
+        }
+
+        if (explicitDiffBaseline is null && (explicitDiffJsonPath != null || explicitDiffBcfPath != null || diffToleranceSpecified))
+        {
+            @err.WriteLine("Error: --diff-json, --diff-bcf, and --diff-tolerance require --diff <baseline>.");
             return 1;
         }
 
         bool isDirectory = Directory.Exists(inputPath);
         bool isFile = File.Exists(inputPath);
 
+        if (isDirectory || inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
+        {
+            if (explicitDiffBaseline != null || explicitDiffJsonPath != null || explicitDiffBcfPath != null || diffToleranceSpecified)
+            {
+                @err.WriteLine("Error: --diff, --diff-json, --diff-bcf, and --diff-tolerance are not supported for folder or .nwf assembly inputs.");
+                return 1;
+            }
+            if (!string.IsNullOrEmpty(simulateDateStr))
+            {
+                @err.WriteLine("Error: --timeliner-simulate is not supported for folder or .nwf assembly inputs.");
+                return 1;
+            }
+        }
+
         if (!isDirectory && !isFile)
         {
-            Console.Error.WriteLine($"Error: Input '{inputPath}' does not exist as file or directory.");
+            @err.WriteLine($"Error: Input '{inputPath}' does not exist as file or directory.");
             return 2;
         }
 
@@ -578,7 +475,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
+            @err.WriteLine($"Error: {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
         }
 
@@ -602,12 +499,12 @@ internal static class Program
         }
         catch (InvalidDataException ex)
         {
-            Console.Error.WriteLine($"Error: File '{inputPath}' is not a valid Navisworks container: {ex.Message}");
+            @err.WriteLine($"Error: File '{inputPath}' is not a valid Navisworks container: {ex.Message}");
             return 3;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error reading '{inputPath}': {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
+            @err.WriteLine($"Error reading '{inputPath}': {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return 3;
         }
 
@@ -627,7 +524,7 @@ internal static class Program
         {
             if (!File.Exists(explicitProfilerPath))
             {
-                Console.Error.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
+                @err.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
                 return 2;
             }
 
@@ -637,13 +534,13 @@ internal static class Program
                 int overridden = doc.ApplyAppearanceProfiler(profiler);
                 if (printReport)
                 {
-                    Console.Error.WriteLine($"Appearance profiler applied: {overridden} elements overridden.");
+                    @err.WriteLine($"Appearance profiler applied: {overridden} elements overridden.");
                 }
             }
             catch (Exception ex)
             {
                 // Malformed profiler XML (XmlException) or unknown operators (FormatException).
-                Console.Error.WriteLine($"Error: Invalid appearance profiler file '{explicitProfilerPath}': {ex.Message}");
+                @err.WriteLine($"Error: Invalid appearance profiler file '{explicitProfilerPath}': {ex.Message}");
                 return 3;
             }
         }
@@ -659,7 +556,7 @@ internal static class Program
                     doc.ImportTimeLinerXml(explicitTimeLinerXmlPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
+                        @err.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
                     }
                 }
                 else
@@ -668,7 +565,7 @@ internal static class Program
                     doc.ExportTimeLinerXml(explicitTimeLinerXmlPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+                        @err.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
                     }
                 }
             }
@@ -680,7 +577,7 @@ internal static class Program
                     doc.ImportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                        @err.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
                     }
                 }
                 else
@@ -689,7 +586,7 @@ internal static class Program
                     doc.ExportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                        @err.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
                     }
                 }
             }
@@ -701,7 +598,7 @@ internal static class Program
                     doc.ImportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                        @err.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
                     }
                 }
                 else
@@ -710,7 +607,7 @@ internal static class Program
                     doc.ExportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                        @err.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
                     }
                 }
             }
@@ -856,7 +753,7 @@ internal static class Program
             {
                 if (doc.AppearanceProfiler is null)
                 {
-                    Console.Error.WriteLine("Error: Document has no Appearance Profiler rules to export.");
+                    @err.WriteLine("Error: Document has no Appearance Profiler rules to export.");
                     return 1;
                 }
                 EnsureParentDirectory(explicitExportProfilerPath);
@@ -868,11 +765,11 @@ internal static class Program
                 EnsureParentDirectory(explicitClashXmlPath);
                 var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                 doc.RunClashDetection(test);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
                 doc.ExportClashReportXml(explicitClashXmlPath);
                 if (printReport)
                 {
-                    Console.Error.WriteLine($"Clash detection finished: {test.TotalClashCount} clashes ({test.Groups.Count} groups) exported to '{explicitClashXmlPath}'.");
+                    @err.WriteLine($"Clash detection finished: {test.TotalClashCount} clashes ({test.Groups.Count} groups) exported to '{explicitClashXmlPath}'.");
                 }
             }
 
@@ -883,12 +780,12 @@ internal static class Program
                 {
                     var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                     doc.RunClashDetection(test);
-                    ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
+                    ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
                 }
                 doc.ExportClashBcf(explicitClashBcfPath);
                 if (printReport)
                 {
-                    Console.Error.WriteLine($"Clash BCF 2.1 exported to '{explicitClashBcfPath}'.");
+                    @err.WriteLine($"Clash BCF 2.1 exported to '{explicitClashBcfPath}'.");
                 }
             }
 
@@ -902,7 +799,7 @@ internal static class Program
             {
                 if (!File.Exists(explicitGridsPath))
                 {
-                    Console.Error.WriteLine($"Error: Grids file '{explicitGridsPath}' not found.");
+                    @err.WriteLine($"Error: Grids file '{explicitGridsPath}' not found.");
                     return 2;
                 }
                 var grids = Model.Grids.NwcGridSystem.LoadXml(explicitGridsPath);
@@ -910,7 +807,7 @@ internal static class Program
                 int assigned = doc.AssignGridLocations(grids);
                 if (printReport)
                 {
-                    Console.Error.WriteLine($"Loaded grid system '{grids.Name}' with {grids.Lines.Count} lines. Assigned grid locations to {assigned} clashes.");
+                    @err.WriteLine($"Loaded grid system '{grids.Name}' with {grids.Lines.Count} lines. Assigned grid locations to {assigned} clashes.");
                 }
             }
 
@@ -921,7 +818,7 @@ internal static class Program
                 grids.SaveXml(explicitExportGridsPath);
                 if (printReport)
                 {
-                    Console.Error.WriteLine($"Exported grid system '{grids.Name}' ({grids.Lines.Count} lines) to '{explicitExportGridsPath}'.");
+                    @err.WriteLine($"Exported grid system '{grids.Name}' ({grids.Lines.Count} lines) to '{explicitExportGridsPath}'.");
                 }
             }
 
@@ -929,7 +826,7 @@ internal static class Program
             {
                 if (!File.Exists(explicitDiffBaseline))
                 {
-                    Console.Error.WriteLine($"Error: Baseline file '{explicitDiffBaseline}' not found.");
+                    @err.WriteLine($"Error: Baseline file '{explicitDiffBaseline}' not found.");
                     return 2;
                 }
                 var baseDoc = NwcDocument.Open(explicitDiffBaseline, new NwcReaderOptions { BuildSceneTree = includeTree });
@@ -941,7 +838,7 @@ internal static class Program
                     diffReport.SaveJson(explicitDiffJsonPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"Revision diff exported to JSON: '{explicitDiffJsonPath}'.");
+                        @err.WriteLine($"Revision diff exported to JSON: '{explicitDiffJsonPath}'.");
                     }
                 }
 
@@ -951,7 +848,7 @@ internal static class Program
                     diffReport.SaveBcf(explicitDiffBcfPath);
                     if (printReport)
                     {
-                        Console.Error.WriteLine($"Revision diff exported to BCF 2.1: '{explicitDiffBcfPath}'.");
+                        @err.WriteLine($"Revision diff exported to BCF 2.1: '{explicitDiffBcfPath}'.");
                     }
                 }
 
@@ -1017,6 +914,7 @@ internal static class Program
                 else
                 {
                     @err.WriteLine($"Error: Unable to parse simulation date '{simulateDateStr}'. Expected format 'yyyy-MM-dd'.");
+                    return 1;
                 }
             }
         }
@@ -1153,13 +1051,13 @@ internal static class Program
             if (File.Exists(explicitTimeLinerXmlPath))
             {
                 assembly.ImportTimeLinerXml(explicitTimeLinerXmlPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
             }
             else
             {
                 EnsureParentDirectory(explicitTimeLinerXmlPath);
                 assembly.ExportTimeLinerXml(explicitTimeLinerXmlPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
             }
         }
 
@@ -1168,13 +1066,13 @@ internal static class Program
             if (File.Exists(explicitTimeLinerMsProjectPath))
             {
                 assembly.ImportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
             }
             else
             {
                 EnsureParentDirectory(explicitTimeLinerMsProjectPath);
                 assembly.ExportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
             }
         }
 
@@ -1183,13 +1081,13 @@ internal static class Program
             if (File.Exists(explicitTimeLinerPrimaveraPath))
             {
                 assembly.ImportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
             }
             else
             {
                 EnsureParentDirectory(explicitTimeLinerPrimaveraPath);
                 assembly.ExportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
             }
         }
 
@@ -1203,14 +1101,14 @@ internal static class Program
         {
             if (!File.Exists(explicitProfilerPath))
             {
-                Console.Error.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
+                @err.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
                 return 2;
             }
             var profiler = Model.Appearance.NwcXmlAppearanceProfilerSerializer.Open(explicitProfilerPath);
             int overridden = assembly.ApplyAppearanceProfiler(profiler);
             if (printReport)
             {
-                Console.Error.WriteLine($"Appearance profiler applied to assembly: {overridden} elements overridden.");
+                @err.WriteLine($"Appearance profiler applied to assembly: {overridden} elements overridden.");
             }
         }
 
@@ -1300,7 +1198,7 @@ internal static class Program
         {
             EnsureParentDirectory(explicitClashXmlPath);
             var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -1309,7 +1207,7 @@ internal static class Program
             if (assembly.ClashTests.Count == 0)
             {
                 var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
         }
@@ -1337,7 +1235,7 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitClashMatrixJsonPath);
                 assembly.ExportClashMatrixJson(explicitClashMatrixJsonPath, indent);
-                if (printReport) Console.Error.WriteLine($"Clash matrix exported to JSON: '{explicitClashMatrixJsonPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix exported to JSON: '{explicitClashMatrixJsonPath}'.");
             }
             if (!string.IsNullOrEmpty(explicitClashMatrixMdPath))
             {
@@ -1452,13 +1350,13 @@ internal static class Program
             if (File.Exists(explicitTimeLinerXmlPath))
             {
                 assembly.ImportTimeLinerXml(explicitTimeLinerXmlPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule loaded from XML: '{explicitTimeLinerXmlPath}'.");
             }
             else
             {
                 EnsureParentDirectory(explicitTimeLinerXmlPath);
                 assembly.ExportTimeLinerXml(explicitTimeLinerXmlPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule exported to XML: '{explicitTimeLinerXmlPath}'.");
             }
         }
 
@@ -1467,13 +1365,13 @@ internal static class Program
             if (File.Exists(explicitTimeLinerMsProjectPath))
             {
                 assembly.ImportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule loaded from MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
             }
             else
             {
                 EnsureParentDirectory(explicitTimeLinerMsProjectPath);
                 assembly.ExportTimeLinerMsProject(explicitTimeLinerMsProjectPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule exported to MS Project XML: '{explicitTimeLinerMsProjectPath}'.");
             }
         }
 
@@ -1482,13 +1380,13 @@ internal static class Program
             if (File.Exists(explicitTimeLinerPrimaveraPath))
             {
                 assembly.ImportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule loaded from Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
             }
             else
             {
                 EnsureParentDirectory(explicitTimeLinerPrimaveraPath);
                 assembly.ExportTimeLinerPrimavera(explicitTimeLinerPrimaveraPath);
-                if (printReport) Console.Error.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
+                if (printReport) @err.WriteLine($"TimeLiner schedule exported to Primavera P6 XER: '{explicitTimeLinerPrimaveraPath}'.");
             }
         }
 
@@ -1502,14 +1400,14 @@ internal static class Program
         {
             if (!File.Exists(explicitProfilerPath))
             {
-                Console.Error.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
+                @err.WriteLine($"Error: Appearance profiler file not found: {explicitProfilerPath}");
                 return 2;
             }
             var profiler = Model.Appearance.NwcXmlAppearanceProfilerSerializer.Open(explicitProfilerPath);
             int overridden = assembly.ApplyAppearanceProfiler(profiler);
             if (printReport)
             {
-                Console.Error.WriteLine($"Appearance profiler applied to assembly: {overridden} elements overridden.");
+                @err.WriteLine($"Appearance profiler applied to assembly: {overridden} elements overridden.");
             }
         }
 
@@ -1599,7 +1497,7 @@ internal static class Program
         {
             EnsureParentDirectory(explicitClashXmlPath);
             var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -1608,7 +1506,7 @@ internal static class Program
             if (assembly.ClashTests.Count == 0)
             {
                 var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
         }
@@ -1636,7 +1534,7 @@ internal static class Program
             {
                 EnsureParentDirectory(explicitClashMatrixJsonPath);
                 assembly.ExportClashMatrixJson(explicitClashMatrixJsonPath, indent);
-                if (printReport) Console.Error.WriteLine($"Clash matrix exported to JSON: '{explicitClashMatrixJsonPath}'.");
+                if (printReport) @err.WriteLine($"Clash matrix exported to JSON: '{explicitClashMatrixJsonPath}'.");
             }
             if (!string.IsNullOrEmpty(explicitClashMatrixMdPath))
             {
@@ -1753,8 +1651,9 @@ internal static class Program
         }
     }
 
-    private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport)
+    private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport, TextWriter? errWriter = null)
     {
+        var @err = errWriter ?? Console.Error;
         if (string.IsNullOrEmpty(mode)) return;
         int grps = 0;
         if (mode.Equals("proximity", StringComparison.OrdinalIgnoreCase))
@@ -1775,7 +1674,7 @@ internal static class Program
         }
         if (printReport && grps > 0)
         {
-            Console.Error.WriteLine($"Grouped clashes into {grps} groups using mode '{mode}'.");
+            @err.WriteLine($"Grouped clashes into {grps} groups using mode '{mode}'.");
         }
     }
 
@@ -1802,5 +1701,40 @@ internal static class Program
         }
 
         return count;
+    }
+
+    private static bool TryConsumeValue(string[] args, ref int i, string optionName, out string value, TextWriter? err = null)
+    {
+        if (i + 1 >= args.Length || IsOption(args[i + 1]))
+        {
+            (err ?? Console.Error).WriteLine($"Error: Missing argument for {optionName}.");
+            value = string.Empty;
+            return false;
+        }
+        value = args[++i];
+        return true;
+    }
+
+    private static bool IsOption(string token)
+    {
+        token = token.TrimStart();
+        if (token == "-")
+        {
+            return false;
+        }
+        if (token.StartsWith("--", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        if (token.StartsWith('-'))
+        {
+            // A signed numeric literal or coordinate tuple (e.g. -1, -0.5, -.5, -1,0.25,1,1,0,-1) is a value, not a switch
+            if (token.Length > 1 && (char.IsAsciiDigit(token[1]) || token[1] == '.'))
+            {
+                return false;
+            }
+            return true;
+        }
+        return false;
     }
 }

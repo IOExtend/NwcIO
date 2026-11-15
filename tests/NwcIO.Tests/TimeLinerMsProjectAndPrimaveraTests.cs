@@ -372,19 +372,10 @@ public class TimeLinerMsProjectAndPrimaveraTests
     public void Cli_UsageHelp_DisplaysNewTimeLinerFlags()
     {
         using var sw = new StringWriter();
-        var origOut = Console.Out;
-        try
-        {
-            Console.SetOut(sw);
-            int code = Program.Main(HelpArgs);
-            Assert.Equal(0, code);
-            string output = sw.ToString();
-            Assert.Contains("--timeliner-msproject", output);
-            Assert.Contains("--timeliner-primavera", output);
-        }
-        finally
-        {
-            Console.SetOut(origOut);
-        }
+        int code = Program.Run(HelpArgs, outWriter: sw);
+        Assert.Equal(0, code);
+        string output = sw.ToString();
+        Assert.Contains("--timeliner-msproject", output);
+        Assert.Contains("--timeliner-primavera", output);
     }
 }
