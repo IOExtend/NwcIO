@@ -1,4 +1,5 @@
 using NwcIO.Internal.Parsing;
+using NwcIO.Model;
 using Xunit;
 
 namespace NwcIO.Tests;
@@ -531,5 +532,60 @@ public class HierarchyParserTests
         var w = Begin();
         Leaf(w, 0, _ => { });
         return w;
+    }
+
+    [Fact]
+    public void Read_TransformClass41_DecodesTranslationAndRotation()
+    {
+        double h = Math.Sqrt(0.5);
+        byte[] bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(41);
+            w.Str("Transform");
+            w.Int(0).Int(0); // x, flags
+            w.Double(10).Double(20).Double(30); // tx, ty, tz
+            w.Double(0).Double(0).Double(h).Double(h); // qx, qy, qz, qw
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model");
+        var leaf = nodes[2];
+        Assert.NotNull(leaf.Transform);
+        Assert.Equal(new Vector3d(10, 20, 30), leaf.Transform.Translation);
+        Assert.True(leaf.Transform.Rotation.IsNormalized());
+        Assert.Equal(0, leaf.Transform.Rotation.X, 10);
+        Assert.Equal(0, leaf.Transform.Rotation.Y, 10);
+        Assert.Equal(h, leaf.Transform.Rotation.Z, 10);
+        Assert.Equal(h, leaf.Transform.Rotation.W, 10);
+        Assert.Equal(1.0, leaf.Transform.Scale);
+    }
+
+    [Fact]
+    public void Read_MatrixClass39_DecodesAffineTransformAndScale()
+    {
+        byte[] bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(39);
+            w.Str("Matrix");
+            w.Int(0).Int(0); // x, flags
+            // 3x3 matrix scaled by 2, identity rotation
+            w.Double(2).Double(0).Double(0);
+            w.Double(0).Double(2).Double(0);
+            w.Double(0).Double(0).Double(2);
+            // translation
+            w.Double(100).Double(200).Double(300);
+            // reverses = 1 -> negative scale
+            w.Int(1);
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model");
+        var leaf = nodes[2];
+        Assert.NotNull(leaf.Transform);
+        Assert.Equal(new Vector3d(100, 200, 300), leaf.Transform.Translation);
+        Assert.Equal(-2.0, leaf.Transform.Scale);
+        Assert.True(leaf.Transform.Rotation.IsNormalized());
+        Assert.Equal(0, leaf.Transform.Rotation.X, 10);
+        Assert.Equal(0, leaf.Transform.Rotation.Y, 10);
+        Assert.Equal(0, leaf.Transform.Rotation.Z, 10);
+        Assert.Equal(1, leaf.Transform.Rotation.W, 10);
     }
 }

@@ -138,6 +138,7 @@ internal static class HierarchyParser
                 Tag = node.Tag,
                 Parent = parent,
                 MaterialName = node.MaterialName ?? parent.MaterialName,
+                Transform = node.Transform,
             };
             if (includeProperties)
             {
@@ -193,6 +194,7 @@ internal static class HierarchyParser
         string Class,
         int X,
         string? MaterialName,
+        NwcTransform? Transform,
         List<NwcPropertyTab> Tabs,
         long OwnProperties,
         Node[] Children,
@@ -308,6 +310,7 @@ internal static class HierarchyParser
             var tabs = new List<NwcPropertyTab>();
             long ownProperties = 0;
             string? materialName = null;
+            NwcTransform? transform = null;
             for (int i = 0; i < attributeCount; i++)
             {
                 // A null slot takes the next LcOaPartitionProps root (docs/format-notes.md §2.2.1); a stored node is read once, so a shared one takes its roots once.
@@ -322,12 +325,15 @@ internal static class HierarchyParser
                     case Material material:
                         materialName ??= material.Name ?? "";
                         break;
+                    case NwcTransform xform:
+                        transform ??= xform;
+                        break;
                 }
             }
 
             Node[] children = classId == 53 ? ReadNodes(ChildClasses) : [];
             var (size, propertyReferences, height) = Measure(children, ownProperties);
-            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, materialName, tabs, ownProperties, children, size, propertyReferences, height);
+            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, materialName, transform, tabs, ownProperties, children, size, propertyReferences, height);
         }
 
         // Expanded size, property references and height of a node with these children; children finish before their parent, so theirs are known.
@@ -465,25 +471,76 @@ internal static class HierarchyParser
         }
 
         // Classes 40 and 41: [str name][i32 X][i32 flags] then the translation (and rotation) doubles.
-        private object ReadTransform(int doubles)
+        private NwcTransform ReadTransform(int doubles)
         {
             _reader.ReadString();
             _reader.ReadInt32();
             _reader.ReadInt32();
-            for (int i = 0; i < doubles; i++)
+            double tx = _reader.ReadDouble();
+            double ty = _reader.ReadDouble();
+            double tz = _reader.ReadDouble();
+
+            Quaterniond rotation = Quaterniond.Identity;
+            if (doubles == 7)
             {
-                _reader.ReadDouble();
+                double qx = _reader.ReadDouble();
+                double qy = _reader.ReadDouble();
+                double qz = _reader.ReadDouble();
+                double qw = _reader.ReadDouble();
+                rotation = new Quaterniond(qx, qy, qz, qw).Normalized();
             }
 
-            return Dropped;
+            return new NwcTransform
+            {
+                Id = 0,
+                Translation = new Vector3d(tx, ty, tz),
+                Rotation = rotation,
+                Scale = 1.0,
+            };
         }
 
         // Class 39: the class-40 head, 9 + 3 doubles, then [i32 Y].
-        private object ReadMatrix()
+        private NwcTransform ReadMatrix()
         {
-            ReadTransform(doubles: 12);
+            _reader.ReadString();
             _reader.ReadInt32();
-            return Dropped;
+            _reader.ReadInt32();
+
+            double m00 = _reader.ReadDouble();
+            double m01 = _reader.ReadDouble();
+            double m02 = _reader.ReadDouble();
+            double m10 = _reader.ReadDouble();
+            double m11 = _reader.ReadDouble();
+            double m12 = _reader.ReadDouble();
+            double m20 = _reader.ReadDouble();
+            double m21 = _reader.ReadDouble();
+            double m22 = _reader.ReadDouble();
+
+            double tx = _reader.ReadDouble();
+            double ty = _reader.ReadDouble();
+            double tz = _reader.ReadDouble();
+
+            int reverses = _reader.ReadInt32();
+
+            double scale = Math.Sqrt(m00 * m00 + m10 * m10 + m20 * m20);
+            if (reverses != 0)
+            {
+                scale = -scale;
+            }
+
+            double invScale = Math.Abs(scale) > 1e-9 ? 1.0 / Math.Abs(scale) : 1.0;
+            var rotation = Quaterniond.FromRotationMatrix(
+                m00 * invScale, m01 * invScale, m02 * invScale,
+                m10 * invScale, m11 * invScale, m12 * invScale,
+                m20 * invScale, m21 * invScale, m22 * invScale);
+
+            return new NwcTransform
+            {
+                Id = 0,
+                Translation = new Vector3d(tx, ty, tz),
+                Rotation = rotation,
+                Scale = Math.Abs(scale) > 1e-9 ? scale : 1.0,
+            };
         }
 
         // Class 79: [str][i32][i32][i32 n] n x ([str][str][ptr][i32 pts][3 pts f64]), no trailing int per item.

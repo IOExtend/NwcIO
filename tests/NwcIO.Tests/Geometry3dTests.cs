@@ -188,4 +188,52 @@ public class Geometry3dTests
         double[] m = t.ToMatrix4x4();
         for (int i = 0; i < 16; i++) Assert.Equal(expected[i], m[i], 12);
     }
+
+    [Fact]
+    public void Quaterniond_FromRotationMatrix_RoundtripsIdentityAndAxisRotations()
+    {
+        // Identity matrix -> Identity quaternion
+        var qIdent = Quaterniond.FromRotationMatrix(1, 0, 0, 0, 1, 0, 0, 0, 1);
+        Assert.True(qIdent.IsNormalized());
+        Assert.Equal(0, qIdent.X, 10);
+        Assert.Equal(0, qIdent.Y, 10);
+        Assert.Equal(0, qIdent.Z, 10);
+        Assert.Equal(1, qIdent.W, 10);
+
+        // 90 degrees around Z axis:
+        // cos(45) = sqrt(0.5), sin(45) = sqrt(0.5)
+        // Rz(90):
+        // [ 0 -1  0 ]
+        // [ 1  0  0 ]
+        // [ 0  0  1 ]
+        var qZ = Quaterniond.FromRotationMatrix(0, -1, 0, 1, 0, 0, 0, 0, 1);
+        Assert.True(qZ.IsNormalized());
+        double expectedH = Math.Sqrt(0.5);
+        Assert.Equal(0, qZ.X, 10);
+        Assert.Equal(0, qZ.Y, 10);
+        Assert.Equal(expectedH, Math.Abs(qZ.Z), 10);
+        Assert.Equal(expectedH, Math.Abs(qZ.W), 10);
+
+        // 180 degrees around X axis:
+        // [ 1  0  0 ]
+        // [ 0 -1  0 ]
+        // [ 0  0 -1 ]
+        var qX = Quaterniond.FromRotationMatrix(1, 0, 0, 0, -1, 0, 0, 0, -1);
+        Assert.True(qX.IsNormalized());
+        Assert.Equal(1, Math.Abs(qX.X), 10);
+        Assert.Equal(0, qX.Y, 10);
+        Assert.Equal(0, qX.Z, 10);
+        Assert.Equal(0, qX.W, 10);
+
+        // 180 degrees around Y axis:
+        // [ -1  0  0 ]
+        // [  0  1  0 ]
+        // [  0  0 -1 ]
+        var qY = Quaterniond.FromRotationMatrix(-1, 0, 0, 0, 1, 0, 0, 0, -1);
+        Assert.True(qY.IsNormalized());
+        Assert.Equal(0, qY.X, 10);
+        Assert.Equal(1, Math.Abs(qY.Y), 10);
+        Assert.Equal(0, qY.Z, 10);
+        Assert.Equal(0, qY.W, 10);
+    }
 }

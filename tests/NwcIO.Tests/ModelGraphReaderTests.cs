@@ -26,7 +26,9 @@ public class ModelGraphReaderTests
         Assert.Equal(-1.0, doc.Transforms[1].Scale);
         Assert.Equal(new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)), doc.Transforms[0].BoundingBox);
         Assert.Equal(Enumerable.Range(0, 8), Preorder(doc.RootNode!).Select(n => n.Id));
-        Assert.All(Preorder(doc.RootNode!), n => { Assert.Null(n.Transform); Assert.Null(n.ElementGuid); });
+        Assert.All(Preorder(doc.RootNode!), n => Assert.Null(n.ElementGuid));
+        Assert.Equal([1, 3, 5, 7], Preorder(doc.RootNode!).Where(n => n.Transform != null).Select(n => n.Id));
+        Assert.All(Preorder(doc.RootNode!).Where(n => n.Transform != null), n => Assert.Equal(new Vector3d(1, 2, 3), n.Transform!.Translation));
         Assert.Equal(3, doc.DbCache!.Entries.Count);
     }
 
