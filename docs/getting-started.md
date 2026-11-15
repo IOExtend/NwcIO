@@ -14,6 +14,14 @@ Install the `NwcIO` library package in your .NET project:
 dotnet add package NwcIO
 ```
 
+### Scene Adapter
+
+Install the `NwcIO.Scene` package to turn a Navisworks model into an `IOScene` document for IOViewer and other consumers. It is released on the same tag as `NwcIO` and needs the same `NwcIO` version; see the [scene adapter](scene.md) page for usage and limits:
+
+```bash
+dotnet add package NwcIO.Scene
+```
+
 ### Global CLI Tool
 
 Install the `nwcio` command line tool globally:
@@ -47,6 +55,8 @@ foreach (var node in doc.RootNode.Children)
 
 ### Exporting to IFC4, glTF 2.0 (GLB), and OBJ
 
+This feature is frozen (bug fixes only).
+
 ```csharp
 using NwcIO;
 
@@ -67,6 +77,8 @@ doc.SaveObj("output.obj");
 ```
 
 ### Multi-Discipline Clash Matrix
+
+This feature is frozen (bug fixes only).
 
 ```csharp
 using System.Linq;
@@ -101,6 +113,8 @@ matrix.SaveBcf("CoordinationIssues.bcfzip");
 
 ### 4D TimeLiner & Interactive 3D Viewer
 
+This feature is frozen (bug fixes only).
+
 ```csharp
 using NwcIO;
 using NwcIO.Model.Viewer;
@@ -120,7 +134,7 @@ doc.SaveHtmlViewer("interactive_site.html", new NwcHtmlViewerOptions
 
 ## CLI Usage
 
-Run standard coordination and export tasks from your terminal or CI/CD pipelines:
+Run standard coordination and export tasks from your terminal or CI/CD pipelines. Except `--report`, the commands below use frozen features (bug fixes only):
 
 ```bash
 # Inspect scene graph and metadata (diagnostic report goes to stderr)
