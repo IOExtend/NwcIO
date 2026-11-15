@@ -46,16 +46,20 @@ public class FragmentParserTests
     public void Read_NonFiniteTranslationOnlyPose_Throws(double x, double y, double z)
         => AssertRule("pose value is not finite", SyntheticFragments.Build(new Frag(2, new(x, y, z), 1, 2, 4, Rec: 1, TranslationOnly: true)));
 
-    [Fact]   // after the first, each fragment is 80 bytes: [id][13], D, four ints, a new class-14 pose and two back-references
+    // Fragment 0 ends at byte 220 and fragment 1 (with its f64 pad) at 304; each later one is 80 bytes: [id][13], D, four ints,
+    // a new class-14 pose and two back-references. 150 fragments leave 12,140 bytes after the count: enough for 150 x 80, not 150 x 81.
+    [Fact]
     public void Read_StreamOf80ByteFragments_PassesTheCountBound()
     {
-        var frags = Enumerable.Range(0, 16)
+        var frags = Enumerable.Range(0, 150)
             .Select(k => new Frag(k, new(k, 0, 0), 1, 2, 4, Rec: 1, SharesGeometryOf: k == 0 ? -1 : 0, TranslationOnly: true))
             .ToArray();
+        var bytes = SyntheticFragments.Build(frags);
+        Assert.Equal(304 + (148 * 80), bytes.Length);
 
-        var f = FragmentParser.Read(SyntheticFragments.Build(frags));
+        var f = FragmentParser.Read(bytes);
 
-        Assert.Equal(Enumerable.Range(0, 16).Select(k => new Vector3d(k, 0, 0)), f.Select(x => x.Translation));
+        Assert.Equal(Enumerable.Range(0, 150).Select(k => new Vector3d(k, 0, 0)), f.Select(x => x.Translation));
     }
 
     [Theory]

@@ -1,5 +1,6 @@
 using Xunit;
 using NwcIO.Internal.Container;
+using NwcIO.Internal.Parsing;
 using NwcIO.Model;
 
 namespace NwcIO.Tests;
@@ -61,15 +62,30 @@ public class PartitionHeaderParserTests
         Assert.Equal("nwexportrevit", roundtripped.FileInfo.LoaderPlugin);
     }
 
-    [Fact]   // guard: only -1 is a null path
+    [Fact]
+    public void Save_BuilderWithoutFileInfo_ReopensWithNullSourcePath()
+    {
+        using var ms = new MemoryStream();
+        new NwcDocumentBuilder().Build().Save(ms);
+        ms.Position = 0;
+
+        var roundtripped = NwcDocument.Open(ms);
+        Assert.Null(roundtripped.FileInfo.SourcePath);
+        Assert.Equal("LcOpRevitExport", roundtripped.FileInfo.LoaderPlugin);
+    }
+
+    [Fact]   // guard: only -1 is a null path, in the classifier and in the parser
     public void Open_SourcePathLengthMinus2_IsNotAHeader()
     {
         var header = SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit");
         header[8] = 0xFE;   // path length -1 -> -2
 
         var doc = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([header])));
+        var parsed = PartitionHeaderParser.Parse(new LcRawStream { Index = 0, FileOffset = 0, CompressedLength = 0, GapBefore = 0, Data = header, SectionIndex = 0 });
 
         Assert.Null(doc.FileInfo.LoaderPlugin);
+        Assert.Null(parsed.SourcePath);
+        Assert.Null(parsed.LoaderPlugin);
     }
 
     [Fact]
