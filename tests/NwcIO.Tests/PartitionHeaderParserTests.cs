@@ -88,6 +88,19 @@ public class PartitionHeaderParserTests
         Assert.Null(parsed.LoaderPlugin);
     }
 
+    [Fact]   // guard: a -1 path counts only when the -1 marker follows
+    public void Classify_NullPathWithoutMarker_IsNotAPartitionHeader()
+    {
+        var data = new byte[32];
+        data[0] = 7;                                   // int64 7
+        data[8] = data[9] = data[10] = data[11] = 0xFF; // path length -1
+        // bytes 12..15 stay 0: the marker is missing
+
+        var kind = StreamClassifier.Classify(new LcRawStream { Index = 0, FileOffset = 0, CompressedLength = 0, GapBefore = 0, Data = data, SectionIndex = 0 });
+
+        Assert.NotEqual(NwcStreamKind.PartitionHeader, kind);
+    }
+
     [Fact]
     public void Save_SourceByteSize_RoundtripsSuccessfully()
     {
