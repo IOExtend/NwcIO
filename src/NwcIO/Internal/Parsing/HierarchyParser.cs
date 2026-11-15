@@ -522,13 +522,16 @@ internal static class HierarchyParser
 
             int reverses = _reader.ReadInt32();
 
-            double scale = Math.Sqrt(m00 * m00 + m10 * m10 + m20 * m20);
-            if (reverses != 0)
-            {
-                scale = -scale;
-            }
+            double det = m00 * (m11 * m22 - m12 * m21)
+                       - m01 * (m10 * m22 - m12 * m20)
+                       + m02 * (m10 * m21 - m11 * m20);
 
-            double invScale = Math.Abs(scale) > 1e-9 ? 1.0 / Math.Abs(scale) : 1.0;
+            double mag = Math.Sqrt(m00 * m00 + m10 * m10 + m20 * m20);
+            if (mag < 1e-9) mag = 1.0;
+
+            double scale = (reverses != 0 || det < 0) ? -mag : mag;
+            double invScale = 1.0 / scale;
+
             var rotation = Quaterniond.FromRotationMatrix(
                 m00 * invScale, m01 * invScale, m02 * invScale,
                 m10 * invScale, m11 * invScale, m12 * invScale,
@@ -539,7 +542,7 @@ internal static class HierarchyParser
                 Id = 0,
                 Translation = new Vector3d(tx, ty, tz),
                 Rotation = rotation,
-                Scale = Math.Abs(scale) > 1e-9 ? scale : 1.0,
+                Scale = scale,
             };
         }
 

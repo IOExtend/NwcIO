@@ -105,9 +105,9 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
             double s = Math.Sqrt(trace + 1.0) * 2.0;
             double invS = 1.0 / s;
             return new Quaterniond(
-                (m21 - m12) * invS,
-                (m02 - m20) * invS,
-                (m10 - m01) * invS,
+                (m12 - m21) * invS,
+                (m20 - m02) * invS,
+                (m01 - m10) * invS,
                 0.25 * s).Normalized();
         }
 
@@ -119,7 +119,7 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
                 0.25 * s,
                 (m01 + m10) * invS,
                 (m02 + m20) * invS,
-                (m21 - m12) * invS).Normalized();
+                (m12 - m21) * invS).Normalized();
         }
 
         if (m11 > m22)
@@ -130,7 +130,7 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
                 (m01 + m10) * invS,
                 0.25 * s,
                 (m12 + m21) * invS,
-                (m02 - m20) * invS).Normalized();
+                (m20 - m02) * invS).Normalized();
         }
         else
         {
@@ -140,7 +140,7 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
                 (m02 + m20) * invS,
                 (m12 + m21) * invS,
                 0.25 * s,
-                (m10 - m01) * invS).Normalized();
+                (m01 - m10) * invS).Normalized();
         }
     }
 

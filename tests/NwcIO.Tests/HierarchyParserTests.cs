@@ -567,8 +567,8 @@ public class HierarchyParserTests
             w.New(39);
             w.Str("Matrix");
             w.Int(0).Int(0); // x, flags
-            // 3x3 matrix scaled by 2, identity rotation
-            w.Double(2).Double(0).Double(0);
+            // 3x3 matrix with reflection across X and scaled by 2
+            w.Double(-2).Double(0).Double(0);
             w.Double(0).Double(2).Double(0);
             w.Double(0).Double(0).Double(2);
             // translation
@@ -583,9 +583,23 @@ public class HierarchyParserTests
         Assert.Equal(new Vector3d(100, 200, 300), leaf.Transform.Translation);
         Assert.Equal(-2.0, leaf.Transform.Scale);
         Assert.True(leaf.Transform.Rotation.IsNormalized());
-        Assert.Equal(0, leaf.Transform.Rotation.X, 10);
-        Assert.Equal(0, leaf.Transform.Rotation.Y, 10);
-        Assert.Equal(0, leaf.Transform.Rotation.Z, 10);
-        Assert.Equal(1, leaf.Transform.Rotation.W, 10);
+
+        // Verify roundtrip to 4x4 matrix: ONLY X is reflected (-2), Y (+2) and Z (+2) are NOT inverted!
+        double[] m = leaf.Transform.ToMatrix4x4();
+        Assert.Equal(-2.0, m[0], 6);
+        Assert.Equal(0.0, m[1], 6);
+        Assert.Equal(0.0, m[2], 6);
+
+        Assert.Equal(0.0, m[4], 6);
+        Assert.Equal(2.0, m[5], 6);
+        Assert.Equal(0.0, m[6], 6);
+
+        Assert.Equal(0.0, m[8], 6);
+        Assert.Equal(0.0, m[9], 6);
+        Assert.Equal(2.0, m[10], 6);
+
+        Assert.Equal(100.0, m[12], 6);
+        Assert.Equal(200.0, m[13], 6);
+        Assert.Equal(300.0, m[14], 6);
     }
 }
