@@ -49,7 +49,7 @@ public class PartitionHeaderParserTests
     }
 
     [Fact]
-    public void Save_NullSourcePath_RoundtripsAsNull()
+    public void Save_NullSourcePath_ReopensWithModelRvt()
     {
         var original = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit")])));
 
@@ -58,19 +58,19 @@ public class PartitionHeaderParserTests
         ms.Position = 0;
 
         var roundtripped = NwcDocument.Open(ms);
-        Assert.Null(roundtripped.FileInfo.SourcePath);
+        Assert.Equal("Model.rvt", roundtripped.FileInfo.SourcePath);
         Assert.Equal("nwexportrevit", roundtripped.FileInfo.LoaderPlugin);
     }
 
-    [Fact]
-    public void Save_BuilderWithoutFileInfo_ReopensWithNullSourcePath()
+    [Fact]   // 0.12.0 behaviour: the writer stores a null source path as Model.rvt
+    public void Save_BuilderWithoutFileInfo_ReopensWithModelRvt()
     {
         using var ms = new MemoryStream();
         new NwcDocumentBuilder().Build().Save(ms);
         ms.Position = 0;
 
         var roundtripped = NwcDocument.Open(ms);
-        Assert.Null(roundtripped.FileInfo.SourcePath);
+        Assert.Equal("Model.rvt", roundtripped.FileInfo.SourcePath);
         Assert.Equal("LcOpRevitExport", roundtripped.FileInfo.LoaderPlugin);
     }
 

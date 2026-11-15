@@ -203,19 +203,12 @@ internal static class NwcStreamSerializer
         // Marker [int64 7]
         w.Write(7L);
 
-        // Length-prefixed source path (int32 len, utf8 bytes); a null path is [int32 -1] with no bytes and no pad
-        if (fileInfo.SourcePath is null)
-        {
-            w.Write(-1);
-        }
-        else
-        {
-            string path = !string.IsNullOrWhiteSpace(fileInfo.SourcePath) ? fileInfo.SourcePath : "Model.rvt";
-            byte[] pathBytes = Encoding.UTF8.GetBytes(path);
-            w.Write(pathBytes.Length);
-            w.Write(pathBytes);
-            w.Write(new byte[(4 - (pathBytes.Length % 4)) % 4]);
-        }
+        // Length-prefixed source path (int32 len, utf8 bytes)
+        string path = !string.IsNullOrWhiteSpace(fileInfo.SourcePath) ? fileInfo.SourcePath : "Model.rvt";
+        byte[] pathBytes = Encoding.UTF8.GetBytes(path);
+        w.Write(pathBytes.Length);
+        w.Write(pathBytes);
+        w.Write(new byte[(4 - (pathBytes.Length % 4)) % 4]);
 
         // [int32 -1], then the timestamp aligned to 8 from the stream start
         w.Write(-1);
