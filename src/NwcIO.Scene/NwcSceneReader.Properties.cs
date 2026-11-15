@@ -93,8 +93,8 @@ public static partial class NwcSceneReader
         };
     }
 
-    // A dimensioned value (length, area, volume, angle, the types ValueText converts by unit) that is left out only because the unit
-    // is unknown: `unit-unknown` reports it, so it is not counted as skipped.
+    // A dimensioned value (length, area, volume, angle: the types ValueText converts by unit) with text, in an unknown unit:
+    // `unit-unknown` reports it, so it is not counted as skipped, whatever its text.
     private static bool NeedsUnit(NwcPropertyRecord record, NwcLengthUnit unit) =>
         record.Value is not null && record.ValueType is 6 or 7 or 10 or 11 && unit.GetMetresPerUnit() is null;
 
