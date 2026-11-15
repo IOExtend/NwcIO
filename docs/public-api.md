@@ -4,7 +4,7 @@ title: Public API
 
 # Public API Surface
 
-The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here. The `NwcIO.Internal.*` types (chunk decoders, byte streamers, container reader/writer, JSON/GLB/OBJ/IFC exporters) are also compiled as `public` — the tests and the CLI consume them directly — but they are implementation details: **they are not covered by compatibility guarantees and may change in any release.** Making them `internal` is tracked separately (#103).
+The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here and the `NwcIO.Scene` package. The `NwcIO.Scene` package (`NwcSceneReader`, `NwcSceneOptions`, `NwcSceneResult`) is documented on the [scene adapter](scene.md) page. The `NwcIO.Internal.*` types (chunk decoders, byte streamers, container reader/writer, JSON/GLB/OBJ/IFC exporters) are also compiled as `public` — the tests and the CLI consume them directly — but they are implementation details: **they are not covered by compatibility guarantees and may change in any release.** Making them `internal` is tracked separately (#103).
 
 ## Core Document & Hierarchy (`NwcIO`, `NwcIO.Model`)
 
@@ -26,57 +26,57 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here.
 | `NwcXRef` & `NwcXRefTable` | External references with suffix-based resolution (`TryResolve`, `Exists`) and the parsed XRef table. |
 | `NwcCamera`, `NwcSavedViewpoint`, `NwcCameraProjection` | Camera model (position, unit rotation quaternion, computed direction/up/target) and saved viewpoints. `Id` is null for viewpoints read from a file (none is stored). The camera's field of view of a viewpoint read from a `.nwc`/`.nwd` is the 60° default, not the stored value, and only some real saved-view streams are recognised. |
 | `Vector3d`, `Quaterniond`, `BoundingBox3d`, `RgbaColor` | Double-precision geometry primitives and RGBA colour. |
-| `NwcClash` | Simple pairwise clash check between two meshes. |
+| `NwcClash` | Simple pairwise clash check between two meshes. Frozen: bug fixes only. |
 
 ## Coordination & Clash Detection (`NwcIO.Model.Clash`)
 
 | Type | Description |
 |---|---|
-| `NwcClashDetector` | Broad-phase BVH and narrow-phase 3D triangle-to-triangle collision engine (`Run` over a document or federated assembly, driven by an `NwcClashTest`). |
-| `NwcClashTest`, `NwcClashSelection`, `NwcClashResult`, `NwcClashObject` | Clash test definition (type, tolerance, per-side selections), results, and the involved elements. |
-| `NwcClashBatch`, `NwcClashRule`, `NwcClashComment` | Batch test container, filtering rules (ignore thresholds, custom predicates), and review comments. |
-| `NwcClashGroup` | Grouped clash clusters produced by `NwcClashGrouper`. |
-| `NwcClashGrouper` | Automated clustering of clashes by proximity, element, grid line, or layer. |
-| `NwcClashMatrix`, `NwcClashDiscipline`, `NwcClashMatrixCell` | $N \times M$ multi-discipline coordination matrix with per-cell tolerance/type, automated execution, Markdown generation, and BCF 2.1 export. |
-| `NwcClashBcfExporter` | buildingSMART BCF 2.1 export of clash tests and results. |
-| `NwcXmlClashSerializer` | Roundtrip Navisworks Clash Report XML (`nw-clashreport-11.0.xsd`) reader and writer. |
+| `NwcClashDetector` | Broad-phase BVH and narrow-phase 3D triangle-to-triangle collision engine (`Run` over a document or federated assembly, driven by an `NwcClashTest`). Frozen: bug fixes only. |
+| `NwcClashTest`, `NwcClashSelection`, `NwcClashResult`, `NwcClashObject` | Clash test definition (type, tolerance, per-side selections), results, and the involved elements. Frozen: bug fixes only. |
+| `NwcClashBatch`, `NwcClashRule`, `NwcClashComment` | Batch test container, filtering rules (ignore thresholds, custom predicates), and review comments. Frozen: bug fixes only. |
+| `NwcClashGroup` | Grouped clash clusters produced by `NwcClashGrouper`. Frozen: bug fixes only. |
+| `NwcClashGrouper` | Automated clustering of clashes by proximity, element, grid line, or layer. Frozen: bug fixes only. |
+| `NwcClashMatrix`, `NwcClashDiscipline`, `NwcClashMatrixCell` | $N \times M$ multi-discipline coordination matrix with per-cell tolerance/type, automated execution, Markdown generation, and BCF 2.1 export. Frozen: bug fixes only. |
+| `NwcClashBcfExporter` | buildingSMART BCF 2.1 export of clash tests and results. Frozen: bug fixes only. |
+| `NwcXmlClashSerializer` | Roundtrip Navisworks Clash Report XML (`nw-clashreport-11.0.xsd`) reader and writer. Frozen: bug fixes only. |
 | `NwcNwfManifest` | Federation manifest used by `NwcAssembly` tooling. |
 
 ## 4D TimeLiner, Selection Sets & Appearance (`NwcIO.Model.TimeLiner`, `.Sets`, `.Appearance`)
 
 | Type | Description |
 |---|---|
-| `NwcTimeLinerSchedule` & `NwcTimeLinerTask` | WBS task hierarchy, planned/actual dates, costs, progress, and simulation queries. |
-| `NwcTimeLinerXmlSerializer` | Full roundtrip serialization of Navisworks TimeLiner Exchange XML. |
-| `NwcTimeLinerMsProjectXmlSerializer` | Microsoft Project XML schedule import/export. |
-| `NwcTimeLinerPrimaveraXerSerializer` | Primavera P6 XER schedule import/export. |
-| `NwcTimeLinerCsvSerializer` | CSV schedule export. |
-| `NwcTimeLinerLinker` | Rule-based automated linking of schedule tasks to geometry. |
-| `NwcSelectionSet`, `NwcSearchSet`, `NwcSelectionSetFolder`, `NwcSetItem` | Manual selection sets, dynamic query search sets, and set folders. |
+| `NwcTimeLinerSchedule` & `NwcTimeLinerTask` | WBS task hierarchy, planned/actual dates, costs, progress, and simulation queries. Frozen: bug fixes only. |
+| `NwcTimeLinerXmlSerializer` | Full roundtrip serialization of Navisworks TimeLiner Exchange XML. Frozen: bug fixes only. |
+| `NwcTimeLinerMsProjectXmlSerializer` | Microsoft Project XML schedule import/export. Frozen: bug fixes only. |
+| `NwcTimeLinerPrimaveraXerSerializer` | Primavera P6 XER schedule import/export. Frozen: bug fixes only. |
+| `NwcTimeLinerCsvSerializer` | CSV schedule export. Frozen: bug fixes only. |
+| `NwcTimeLinerLinker` | Rule-based automated linking of schedule tasks to geometry. Frozen: bug fixes only. |
+| `NwcSelectionSet`, `NwcSearchSet`, `NwcSelectionSetFolder`, `NwcSetItem` | Manual selection sets, dynamic query search sets, and set folders. Frozen: bug fixes only. |
 | `NwcSearchCondition` & `NwcSearchOperator` | Search criteria over node built-ins and property records (equals, contains, wildcard, comparisons). |
-| `NwcXmlSetSerializer` | Navisworks selection-set XML exchange. |
+| `NwcXmlSetSerializer` | Navisworks selection-set XML exchange. Frozen: bug fixes only. |
 | `NwcQuickProperties` | Curated quick-properties view over property records. |
-| `NwcAppearanceProfiler`, `NwcAppearanceRule`, `NwcXmlAppearanceProfilerSerializer` | Rule-based colouring by search conditions and its XML exchange format. |
+| `NwcAppearanceProfiler`, `NwcAppearanceRule`, `NwcXmlAppearanceProfilerSerializer` | Rule-based colouring by search conditions and its XML exchange format. Frozen: bug fixes only. |
 
 ## 3D Geometry & Spatial Analysis (`NwcIO.Model.Grids`, `.Measure`, `.Diff`, `.Spatial`, `.Sectioning`, `.Redline`)
 
 | Type | Description |
 |---|---|
-| `NwcGridSystem`, `NwcGridLine`, `NwcGridIntersection` | Building grid lines and axes with 2D/3D intersection calculations and spatial clash labelling. |
-| `NwcMeasureEngine` | Double-precision 3D point-to-point, point-to-mesh and mesh-to-mesh distance, clearance, and area/volume calculations. |
-| `NwcDiffEngine` (with `NwcDiffReport`, `NwcDiffOptions`, `NwcElementDiff`) | Revision comparison and differential geometry/property analysis. |
-| `NwcSpatialIndex` | SAH bounding-volume hierarchy for raycasts and accelerated proximity queries (`RaycastHit`). |
-| `NwcSectionPlane`, `NwcSectionBox`, `NwcSectionAlignment`, `NwcMeshClipper` | Section planes and six-sided section boxes with mesh clipping. |
-| `NwcXmlViewpointSerializer`, `NwcViewpointBcfExporter` | Navisworks viewpoint XML exchange and BCF viewpoint export. |
-| `NwcRedline*` (`NwcRedline`, `Arrow`, `Cloud`, `Ellipse`, `Line`, `Tag`, `Text`, `NwcRedlineStatus`) | Redline annotation records. |
+| `NwcGridSystem`, `NwcGridLine`, `NwcGridIntersection` | Building grid lines and axes with 2D/3D intersection calculations and spatial clash labelling. Frozen: bug fixes only. |
+| `NwcMeasureEngine` | Double-precision 3D point-to-point, point-to-mesh and mesh-to-mesh distance, clearance, and area/volume calculations. Frozen: bug fixes only. |
+| `NwcDiffEngine` (with `NwcDiffReport`, `NwcDiffOptions`, `NwcElementDiff`) | Revision comparison and differential geometry/property analysis. Frozen: bug fixes only. |
+| `NwcSpatialIndex` | SAH bounding-volume hierarchy for raycasts and accelerated proximity queries (`RaycastHit`). Frozen: bug fixes only. |
+| `NwcSectionPlane`, `NwcSectionBox`, `NwcSectionAlignment`, `NwcMeshClipper` | Section planes and six-sided section boxes with mesh clipping. Frozen: bug fixes only. |
+| `NwcXmlViewpointSerializer`, `NwcViewpointBcfExporter` | Navisworks viewpoint XML exchange and BCF viewpoint export. Frozen: bug fixes only. |
+| `NwcRedline*` (`NwcRedline`, `Arrow`, `Cloud`, `Ellipse`, `Line`, `Tag`, `Text`, `NwcRedlineStatus`) | Redline annotation records. Frozen: bug fixes only. |
 
 ## Export (`NwcIO`, `NwcIO.Model.Viewer`)
 
 | Type | Description |
 |---|---|
-| `NwcDocument.SaveIfc` / `NwcAssembly.SaveIfc` | ISO 10303-21 STEP export supporting IFC2x3 Coordination View and modern IFC4 mesh tessellation (`IfcTriangulatedFaceSet`), configured via `NwcIfcExportOptions` (`NwcIfcSchemaVersion`, `NwcIfcLengthUnit`). |
-| `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. |
-| `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). |
+| `NwcDocument.SaveIfc` / `NwcAssembly.SaveIfc` | ISO 10303-21 STEP export supporting IFC2x3 Coordination View and modern IFC4 mesh tessellation (`IfcTriangulatedFaceSet`), configured via `NwcIfcExportOptions` (`NwcIfcSchemaVersion`, `NwcIfcLengthUnit`). Frozen: bug fixes only. |
+| `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. Frozen: bug fixes only. |
+| `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). Frozen: bug fixes only. |
 | `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). |
 | `GlbExporter` & `ObjExporter` (`NwcIO.Internal.Export`) | Low-level public static exporters the `Save*` entry points delegate to; implementation surface, not covered by compatibility guarantees. |
 

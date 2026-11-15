@@ -7,9 +7,15 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ### Added
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 
+### Changed
+- The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
+
 ### Fixed
 - `NwcSceneResult.Diagnostics` and `docs/scene.md` say what the conversion reports: what it left out of the document and could detect, not what a document read with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off already lacked. `docs/scene.md` names `.nwf` under Limits and says that length, area, volume and angle values are left out while the unit is unknown, not while it is not feet.
 - The release workflow runs on tag pushes only and fails before anything is built or pushed unless the tag equals `v<Version>`. It can no longer be started by hand from a branch, and its release step runs `gh release create --verify-tag`, so it never creates a tag and the release tag is always the commit the packages were built from.
+
+### Documentation
+- The README "Scope and frozen features" section states that JSON export of the data the reader parses is core and grows with the reader, and that the spatial index with raycast, section planes and boxes, and the redline types are frozen: bug fixes only. The README and the docs landing page lead with reading, writing `.nwc` and `NwcIO.Scene`; the README, the landing page, the getting started page and the public API page mark the frozen features, and the last three link the scene adapter page.
 
 ## [0.12.1] - 2026-11-15
 
