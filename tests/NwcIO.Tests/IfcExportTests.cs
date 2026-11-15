@@ -35,6 +35,29 @@ public class IfcExportTests
         Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
     }
 
+    [Fact]
+    public void SaveIfc_NodeHyperlinks_ExportsDocumentReferences()
+    {
+        var node = new NwcNode { Id = 1, Name = "Pump 101", Class = "LcRevitData_Element" };
+        node.Hyperlinks.Add(new NwcHyperlink
+        {
+            Name = "Manual",
+            Url = "https://example.com/pump.pdf",
+            Category = "Datasheet"
+        });
+
+        var mesh = TestMeshes.MirroredQuad();
+        mesh.Node = node;
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            ExportProperties = true,
+        });
+
+        Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet',foo".Replace("foo", "$)"), ifc);
+        Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc);
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]

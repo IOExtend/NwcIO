@@ -642,6 +642,17 @@ internal static class IfcExporter
 
         w.Add("IFCRELDEFINESBYPROPERTIES",
             $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
+
+        if (mesh.Node?.Hyperlinks is { Count: > 0 } hyperlinks)
+        {
+            foreach (var link in hyperlinks)
+            {
+                int docRefId = w.Add("IFCDOCUMENTREFERENCE",
+                    $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")},$");
+                w.Add("IFCRELASSOCIATESDOCUMENT",
+                    $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(docRefId)}");
+            }
+        }
     }
 
     private static string ClassifyElement(string name, string? materialName)
