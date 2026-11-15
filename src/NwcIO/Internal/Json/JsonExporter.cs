@@ -331,6 +331,17 @@ public static class JsonExporter
             WriteSafeNumberValue(writer, transform.Rotation.Z);
             WriteSafeNumberValue(writer, transform.Rotation.W);
             writer.WriteEndArray();
+            if (transform.Scale != 1.0)
+            {
+                WriteSafeNumber(writer, "scale", transform.Scale);
+            }
+
+            writer.WriteStartArray("matrix");
+            foreach (double m in transform.ToMatrix4x4())
+            {
+                WriteSafeNumberValue(writer, m);
+            }
+            writer.WriteEndArray();
             writer.WriteEndObject();
         }
 
@@ -345,6 +356,40 @@ public static class JsonExporter
                 if (prop.Value is not null)
                 {
                     writer.WriteString("value", prop.Value);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
+        if (node.Hyperlinks.Count > 0)
+        {
+            writer.WriteStartArray("hyperlinks");
+            foreach (var link in node.Hyperlinks)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", link.Name);
+                writer.WriteString("url", link.Url);
+                if (link.Category is not null)
+                {
+                    writer.WriteString("category", link.Category);
+                }
+
+                if (link.AttachmentPoints.Count > 0)
+                {
+                    writer.WriteStartArray("attachmentPoints");
+                    foreach (var pt in link.AttachmentPoints)
+                    {
+                        writer.WriteStartArray();
+                        WriteSafeNumberValue(writer, pt.X);
+                        WriteSafeNumberValue(writer, pt.Y);
+                        WriteSafeNumberValue(writer, pt.Z);
+                        writer.WriteEndArray();
+                    }
+
+                    writer.WriteEndArray();
                 }
 
                 writer.WriteEndObject();

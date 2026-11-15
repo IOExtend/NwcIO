@@ -90,6 +90,60 @@ public readonly record struct Quaterniond(double X, double Y, double Z, double W
         return new(sx / scaledNorm, sy / scaledNorm, sz / scaledNorm, sw / scaledNorm);
     }
 
+    /// <summary>
+    /// Creates a normalized quaternion from a 3x3 rotation matrix (row-major: m00, m01, m02, m10, m11, m12, m20, m21, m22).
+    /// Uses Shepperd's algorithm matching Autodesk Navisworks <c>LcLMatrix3f::ConvertRotation</c>.
+    /// </summary>
+    public static Quaterniond FromRotationMatrix(
+        double m00, double m01, double m02,
+        double m10, double m11, double m12,
+        double m20, double m21, double m22)
+    {
+        double trace = m00 + m11 + m22;
+        if (trace > 0.0)
+        {
+            double s = Math.Sqrt(trace + 1.0) * 2.0;
+            double invS = 1.0 / s;
+            return new Quaterniond(
+                (m12 - m21) * invS,
+                (m20 - m02) * invS,
+                (m01 - m10) * invS,
+                0.25 * s).Normalized();
+        }
+
+        if (m00 > m11 && m00 > m22)
+        {
+            double s = Math.Sqrt(Math.Max(0.0, 1.0 + m00 - m11 - m22)) * 2.0;
+            double invS = s > 1e-9 ? 1.0 / s : 0.0;
+            return new Quaterniond(
+                0.25 * s,
+                (m01 + m10) * invS,
+                (m02 + m20) * invS,
+                (m12 - m21) * invS).Normalized();
+        }
+
+        if (m11 > m22)
+        {
+            double s = Math.Sqrt(Math.Max(0.0, 1.0 + m11 - m00 - m22)) * 2.0;
+            double invS = s > 1e-9 ? 1.0 / s : 0.0;
+            return new Quaterniond(
+                (m01 + m10) * invS,
+                0.25 * s,
+                (m12 + m21) * invS,
+                (m20 - m02) * invS).Normalized();
+        }
+        else
+        {
+            double s = Math.Sqrt(Math.Max(0.0, 1.0 + m22 - m00 - m11)) * 2.0;
+            double invS = s > 1e-9 ? 1.0 / s : 0.0;
+            return new Quaterniond(
+                (m02 + m20) * invS,
+                (m12 + m21) * invS,
+                0.25 * s,
+                (m01 - m10) * invS).Normalized();
+        }
+    }
+
     public override string ToString() =>
         string.Create(CultureInfo.InvariantCulture, $"({X:F4}, {Y:F4}, {Z:F4}, {W:F4})");
 }

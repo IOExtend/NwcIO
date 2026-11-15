@@ -9,6 +9,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Fixed
 - `NwcSceneResult.Diagnostics` and `docs/scene.md` say what the conversion reports: what it left out of the document and could detect, not what a document read with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off already lacked. `docs/scene.md` names `.nwf` under Limits and says that length, area, volume and angle values are left out while the unit is unknown, not while it is not feet.
+- The release workflow runs on tag pushes only and fails before anything is built or pushed unless the tag equals `v<Version>`. It can no longer be started by hand from a branch, and its release step runs `gh release create --verify-tag`, so it never creates a tag and the release tag is always the commit the packages were built from.
 
 ## [0.12.1] - 2026-11-15
 
