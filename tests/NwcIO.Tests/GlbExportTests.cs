@@ -379,4 +379,97 @@ public class GlbExportTests
             }
         }
     }
+
+    [Fact]
+    public void GlbExporter_LineMesh_ExportsLinesPrimitiveWithMode1()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 5,
+            Name = "LineSegment",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 2, 3)],
+            Indices = [],
+            LineIndices = [0, 1],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var meshes = root.GetProperty("meshes");
+        Assert.Equal(1, meshes.GetArrayLength());
+
+        var primitives = meshes[0].GetProperty("primitives");
+        Assert.Equal(1, primitives.GetArrayLength());
+
+        var prim = primitives[0];
+        Assert.Equal(1, prim.GetProperty("mode").GetInt32()); // 1 = LINES
+        Assert.True(prim.GetProperty("attributes").TryGetProperty("POSITION", out _));
+        Assert.False(prim.GetProperty("attributes").TryGetProperty("NORMAL", out _));
+        Assert.True(prim.TryGetProperty("indices", out var idxAccessor));
+        Assert.True(idxAccessor.GetInt32() >= 0);
+    }
+
+    [Fact]
+    public void GlbExporter_LineMeshWithColors_ExportsColor0Attribute()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 6,
+            Name = "ColoredLine",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(5, 5, 5)],
+            Indices = [],
+            LineIndices = [0, 1],
+            LineColors = [new RgbaColor(1f, 0f, 0f, 1f), new RgbaColor(0f, 1f, 0f, 1f)],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var prim = root.GetProperty("meshes")[0].GetProperty("primitives")[0];
+        Assert.Equal(1, prim.GetProperty("mode").GetInt32());
+        Assert.True(prim.GetProperty("attributes").TryGetProperty("COLOR_0", out var colAccIdx));
+
+        var accessors = root.GetProperty("accessors");
+        var colAcc = accessors[colAccIdx.GetInt32()];
+        Assert.Equal("VEC4", colAcc.GetProperty("type").GetString());
+        Assert.Equal(5126, colAcc.GetProperty("componentType").GetInt32()); // FLOAT
+    }
+
+    [Fact]
+    public void GlbExporter_MixedMesh_ExportsBothTrianglesAndLinesPrimitives()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 7,
+            Name = "MixedMesh",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineIndices = [0, 1],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var primitives = root.GetProperty("meshes")[0].GetProperty("primitives");
+        Assert.Equal(2, primitives.GetArrayLength());
+
+        // First primitive: TRIANGLES (mode 4) with NORMAL
+        var triPrim = primitives[0];
+        Assert.Equal(4, triPrim.GetProperty("mode").GetInt32());
+        Assert.True(triPrim.GetProperty("attributes").TryGetProperty("NORMAL", out _));
+
+        // Second primitive: LINES (mode 1)
+        var linePrim = primitives[1];
+        Assert.Equal(1, linePrim.GetProperty("mode").GetInt32());
+        Assert.False(linePrim.GetProperty("attributes").TryGetProperty("NORMAL", out _));
+    }
 }

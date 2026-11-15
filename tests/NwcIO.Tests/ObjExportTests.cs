@@ -106,4 +106,50 @@ public class ObjExportTests
 
         Assert.Contains("v 105.0000 205.0000 305.0000", obj);
     }
+
+    [Fact]
+    public void Write_LineMesh_ProducesLineElements()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 10,
+            Name = "GridLine",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(10, 0, 0), new Vector3d(10, 10, 0)],
+            Indices = [],
+            LineIndices = [0, 1, 1, 2],
+        };
+
+        using var sw = new StringWriter();
+        ObjExporter.Write([mesh], sw, worldCoordinates: false);
+        string obj = sw.ToString();
+
+        Assert.Contains("o GridLine", obj);
+        Assert.Contains("v 0.0000 0.0000 0.0000", obj);
+        Assert.Contains("v 10.0000 0.0000 0.0000", obj);
+        Assert.Contains("v 10.0000 10.0000 0.0000", obj);
+        Assert.Contains("l 1 2", obj);
+        Assert.Contains("l 2 3", obj);
+        Assert.DoesNotContain("f ", obj);
+    }
+
+    [Fact]
+    public void Write_MixedMesh_ProducesBothFacesAndLines()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 11,
+            Name = "MixedMesh",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineIndices = [0, 1],
+        };
+
+        using var sw = new StringWriter();
+        ObjExporter.Write([mesh], sw, worldCoordinates: false);
+        string obj = sw.ToString();
+
+        Assert.Contains("o MixedMesh", obj);
+        Assert.Contains("f 1 2 3", obj);
+        Assert.Contains("l 1 2", obj);
+    }
 }

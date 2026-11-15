@@ -54,7 +54,7 @@ public static class ObjExporter
         {
             var mesh = meshes[m];
             var vertices = worldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
-            if (vertices.Count == 0 || mesh.Indices.Count == 0)
+            if (vertices.Count == 0 || (mesh.Indices.Count == 0 && mesh.LineIndices.Count == 0))
             {
                 continue;
             }
@@ -70,13 +70,27 @@ public static class ObjExporter
             }
 
             // Triangle faces (1-based global indices)
-            var faces = worldCoordinates ? mesh.GetWorldIndices() : mesh.Indices;
-            for (int i = 0; i <= faces.Count - 3; i += 3)
+            if (mesh.Indices.Count > 0)
             {
-                int i0 = baseVertexIndex + faces[i];
-                int i1 = baseVertexIndex + faces[i + 1];
-                int i2 = baseVertexIndex + faces[i + 2];
-                writer.WriteLine(FormattableString.Invariant($"f {i0} {i1} {i2}"));
+                var faces = worldCoordinates ? mesh.GetWorldIndices() : mesh.Indices;
+                for (int i = 0; i <= faces.Count - 3; i += 3)
+                {
+                    int i0 = baseVertexIndex + faces[i];
+                    int i1 = baseVertexIndex + faces[i + 1];
+                    int i2 = baseVertexIndex + faces[i + 2];
+                    writer.WriteLine(FormattableString.Invariant($"f {i0} {i1} {i2}"));
+                }
+            }
+
+            // Line segments (1-based global indices)
+            if (mesh.LineIndices.Count > 0)
+            {
+                for (int i = 0; i <= mesh.LineIndices.Count - 2; i += 2)
+                {
+                    int i0 = baseVertexIndex + mesh.LineIndices[i];
+                    int i1 = baseVertexIndex + mesh.LineIndices[i + 1];
+                    writer.WriteLine(FormattableString.Invariant($"l {i0} {i1}"));
+                }
             }
 
             baseVertexIndex += vertices.Count;
