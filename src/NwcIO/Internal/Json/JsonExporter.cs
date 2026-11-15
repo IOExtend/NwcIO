@@ -364,6 +364,40 @@ public static class JsonExporter
             writer.WriteEndArray();
         }
 
+        if (node.Hyperlinks.Count > 0)
+        {
+            writer.WriteStartArray("hyperlinks");
+            foreach (var link in node.Hyperlinks)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", link.Name);
+                writer.WriteString("url", link.Url);
+                if (link.Category is not null)
+                {
+                    writer.WriteString("category", link.Category);
+                }
+
+                if (link.AttachmentPoints.Count > 0)
+                {
+                    writer.WriteStartArray("attachmentPoints");
+                    foreach (var pt in link.AttachmentPoints)
+                    {
+                        writer.WriteStartArray();
+                        WriteSafeNumberValue(writer, pt.X);
+                        WriteSafeNumberValue(writer, pt.Y);
+                        WriteSafeNumberValue(writer, pt.Z);
+                        writer.WriteEndArray();
+                    }
+
+                    writer.WriteEndArray();
+                }
+
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
         if (node.Children.Count > 0)
         {
             writer.WriteStartArray("children");
