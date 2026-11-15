@@ -602,4 +602,137 @@ public class HierarchyParserTests
         Assert.Equal(200.0, m[13], 6);
         Assert.Equal(300.0, m[14], 6);
     }
+
+    [Fact]
+    public void Read_MatrixClass39_NonUniformScale_PreservesExactMatrix()
+    {
+        byte[] bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(39);
+            w.Str("Matrix");
+            w.Int(0).Int(0); // x, flags
+            // Non-uniform diagonal scale: sx=2, sy=3, sz=4
+            w.Double(2).Double(0).Double(0);
+            w.Double(0).Double(3).Double(0);
+            w.Double(0).Double(0).Double(4);
+            // translation
+            w.Double(10).Double(20).Double(30);
+            w.Int(0);
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model");
+        var leaf = nodes[2];
+        Assert.NotNull(leaf.Transform);
+        Assert.False(leaf.Transform.IsUniform);
+        Assert.NotNull(leaf.Transform.Matrix);
+
+        double[] m = leaf.Transform.ToMatrix4x4();
+        Assert.Equal(2.0, m[0], 6);
+        Assert.Equal(0.0, m[1], 6);
+        Assert.Equal(0.0, m[2], 6);
+
+        Assert.Equal(0.0, m[4], 6);
+        Assert.Equal(3.0, m[5], 6);
+        Assert.Equal(0.0, m[6], 6);
+
+        Assert.Equal(0.0, m[8], 6);
+        Assert.Equal(0.0, m[9], 6);
+        Assert.Equal(4.0, m[10], 6);
+
+        Assert.Equal(10.0, m[12], 6);
+        Assert.Equal(20.0, m[13], 6);
+        Assert.Equal(30.0, m[14], 6);
+    }
+
+    [Fact]
+    public void Read_MatrixClass39_SmallUniformScale_PreservesScale()
+    {
+        byte[] bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(39);
+            w.Str("Matrix");
+            w.Int(0).Int(0);
+            w.Double(1e-10).Double(0).Double(0);
+            w.Double(0).Double(1e-10).Double(0);
+            w.Double(0).Double(0).Double(1e-10);
+            w.Double(0).Double(0).Double(0);
+            w.Int(0);
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model");
+        var leaf = nodes[2];
+        Assert.NotNull(leaf.Transform);
+        Assert.True(leaf.Transform.IsUniform);
+        Assert.Equal(1e-10, leaf.Transform.Scale, 15);
+
+        double[] m = leaf.Transform.ToMatrix4x4();
+        Assert.Equal(1e-10, m[0], 15);
+        Assert.Equal(1e-10, m[5], 15);
+        Assert.Equal(1e-10, m[10], 15);
+    }
+
+    [Fact]
+    public void Read_MatrixClass39_ZeroScale_PreservesZeroMatrix()
+    {
+        byte[] bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(39);
+            w.Str("Matrix");
+            w.Int(0).Int(0);
+            w.Double(0).Double(0).Double(0);
+            w.Double(0).Double(0).Double(0);
+            w.Double(0).Double(0).Double(0);
+            w.Double(5).Double(6).Double(7);
+            w.Int(0);
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model");
+        var leaf = nodes[2];
+        Assert.NotNull(leaf.Transform);
+        Assert.Equal(0.0, leaf.Transform.Scale);
+
+        double[] m = leaf.Transform.ToMatrix4x4();
+        Assert.Equal(0.0, m[0]);
+        Assert.Equal(0.0, m[5]);
+        Assert.Equal(0.0, m[10]);
+        Assert.Equal(5.0, m[12]);
+        Assert.Equal(6.0, m[13]);
+        Assert.Equal(7.0, m[14]);
+    }
+
+    [Theory]
+    [InlineData("mirror", new double[] { -2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0 }, 1, -2.0, new double[] { -2, 2, 2 })]
+    [InlineData("column-major Z+90", new double[] { 0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0 }, 0, 1.0, new double[] { 0, 0, 1 })]
+    [InlineData("zero scale", new double[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 0, 0.0, new double[] { 0, 0, 0 })]
+    [InlineData("small uniform scale", new double[] { 1e-10, 0, 0, 0, 1e-10, 0, 0, 0, 1e-10, 0, 0, 0 }, 0, 1e-10, new double[] { 1e-10, 1e-10, 1e-10 })]
+    [InlineData("non-uniform scale", new double[] { 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0 }, 0, 1.0, new double[] { 2, 3, 4 })]
+    public void Read_MatrixClass39_ProbesMatrixScenarios(string name, double[] values, int reverses, double expectedScale, double[] expectedDiag)
+    {
+        byte[] bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(39);
+            w.Str("Matrix");
+            w.Int(0).Int(0);
+            foreach (double v in values)
+            {
+                w.Double(v);
+            }
+            w.Int(reverses);
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model");
+        var t = nodes[2].Transform;
+        Assert.NotNull(t);
+        Assert.Equal(expectedScale, t.Scale, 12);
+
+        double[] m = t.ToMatrix4x4();
+        Assert.Equal(expectedDiag[0], m[0], 6);
+        Assert.Equal(expectedDiag[1], m[5], 6);
+        Assert.Equal(expectedDiag[2], m[10], 6);
+
+        if (name == "column-major Z+90")
+        {
+            Assert.True(Math.Abs(m[1] - 1.0) < 1e-12);
+        }
+    }
 }

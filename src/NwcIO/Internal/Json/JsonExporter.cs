@@ -331,6 +331,17 @@ public static class JsonExporter
             WriteSafeNumberValue(writer, transform.Rotation.Z);
             WriteSafeNumberValue(writer, transform.Rotation.W);
             writer.WriteEndArray();
+            if (transform.Scale != 1.0)
+            {
+                WriteSafeNumber(writer, "scale", transform.Scale);
+            }
+
+            writer.WriteStartArray("matrix");
+            foreach (double m in transform.ToMatrix4x4())
+            {
+                WriteSafeNumberValue(writer, m);
+            }
+            writer.WriteEndArray();
             writer.WriteEndObject();
         }
 

@@ -20,12 +20,27 @@ public sealed class NwcTransform
     /// <summary>
     /// Uniform scale applied before the rotation: world = Scale·R(Rotation)·v + Translation.
     /// A negative value mirrors; world-space consumers must reverse triangle winding.
+    /// For non-uniform or general transforms, see <see cref="Matrix"/> and <see cref="ToMatrix4x4"/>.
     /// </summary>
     public double Scale { get; init; } = 1.0;
 
     /// <summary>
-    /// Computes the 4x4 affine transformation matrix in row-major order. The upper 3x3 block is
-    /// <see cref="Scale"/>·R, where R is the rotation matrix of <see cref="Rotation"/> (entries shown as R):
+    /// Explicit 4x4 affine transformation matrix in row-major order (16 doubles).
+    /// Used for general affine transforms that cannot be decomposed into uniform
+    /// <see cref="Scale"/> and <see cref="Rotation"/> (such as non-uniform scale, shear, or singular matrices).
+    /// </summary>
+    public double[]? Matrix { get; init; }
+
+    /// <summary>
+    /// Indicates whether this transformation is uniform (represented purely by
+    /// <see cref="Scale"/>, <see cref="Rotation"/>, and <see cref="Translation"/>).
+    /// </summary>
+    public bool IsUniform => Matrix is null;
+
+    /// <summary>
+    /// Computes or retrieves the 4x4 affine transformation matrix in row-major order. The upper 3x3 block is
+    /// <see cref="Scale"/>·R, where R is the rotation matrix of <see cref="Rotation"/> (entries shown as R),
+    /// or <see cref="Matrix"/> if specified:
     /// <code>
     /// [ R00, R01, R02, 0 ]
     /// [ R10, R11, R12, 0 ]
@@ -35,6 +50,11 @@ public sealed class NwcTransform
     /// </summary>
     public double[] ToMatrix4x4()
     {
+        if (Matrix is { Length: 16 } m)
+        {
+            return (double[])m.Clone();
+        }
+
         // The formulas below assume a unit quaternion; a non-unit Rotation must not
         // scale or shear the result, so normalize first (zero falls back to identity).
         Quaterniond r = Rotation.Normalized();

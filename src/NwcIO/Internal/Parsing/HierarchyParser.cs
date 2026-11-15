@@ -526,23 +526,77 @@ internal static class HierarchyParser
                        - m01 * (m10 * m22 - m12 * m20)
                        + m02 * (m10 * m21 - m11 * m20);
 
-            double mag = Math.Sqrt(m00 * m00 + m10 * m10 + m20 * m20);
-            if (mag < 1e-9) mag = 1.0;
+            double len0 = Math.Sqrt(m00 * m00 + m01 * m01 + m02 * m02);
+            double len1 = Math.Sqrt(m10 * m10 + m11 * m11 + m12 * m12);
+            double len2 = Math.Sqrt(m20 * m20 + m21 * m21 + m22 * m22);
+            double maxLen = Math.Max(len0, Math.Max(len1, len2));
 
-            double scale = (reverses != 0 || det < 0) ? -mag : mag;
-            double invScale = 1.0 / scale;
+            if (maxLen == 0.0)
+            {
+                return new NwcTransform
+                {
+                    Id = 0,
+                    Translation = new Vector3d(tx, ty, tz),
+                    Rotation = Quaterniond.Identity,
+                    Scale = 0.0,
+                    Matrix =
+                    [
+                        0.0, 0.0, 0.0, 0.0,
+                        0.0, 0.0, 0.0, 0.0,
+                        0.0, 0.0, 0.0, 0.0,
+                        tx,  ty,  tz,  1.0,
+                    ],
+                };
+            }
 
-            var rotation = Quaterniond.FromRotationMatrix(
-                m00 * invScale, m01 * invScale, m02 * invScale,
-                m10 * invScale, m11 * invScale, m12 * invScale,
-                m20 * invScale, m21 * invScale, m22 * invScale);
+            double minLen = Math.Min(len0, Math.Min(len1, len2));
+            bool uniformLengths = (maxLen - minLen) <= 1e-6 * maxLen;
+
+            double dot01 = m00 * m10 + m01 * m11 + m02 * m12;
+            double dot02 = m00 * m20 + m01 * m21 + m02 * m22;
+            double dot12 = m10 * m20 + m11 * m21 + m12 * m22;
+            double maxDot = Math.Max(Math.Abs(dot01), Math.Max(Math.Abs(dot02), Math.Abs(dot12)));
+            bool orthogonal = maxDot <= 1e-5 * maxLen * maxLen;
+
+            bool nonZeroDet = Math.Abs(det) > 0.0;
+
+            if (uniformLengths && orthogonal && nonZeroDet)
+            {
+                double mag = (len0 + len1 + len2) / 3.0;
+                double scale = (reverses != 0 || det < 0) ? -mag : mag;
+                double invScale = 1.0 / scale;
+
+                var rotation = Quaterniond.FromRotationMatrix(
+                    m00 * invScale, m01 * invScale, m02 * invScale,
+                    m10 * invScale, m11 * invScale, m12 * invScale,
+                    m20 * invScale, m21 * invScale, m22 * invScale);
+
+                return new NwcTransform
+                {
+                    Id = 0,
+                    Translation = new Vector3d(tx, ty, tz),
+                    Rotation = rotation,
+                    Scale = scale,
+                };
+            }
+
+            // General affine matrix (non-uniform scale, shear, or singular) that cannot be represented
+            // by a uniform Scale + unit Quaternion. Store the exact 4x4 matrix.
+            double[] fullMatrix =
+            [
+                m00, m01, m02, 0.0,
+                m10, m11, m12, 0.0,
+                m20, m21, m22, 0.0,
+                tx,  ty,  tz,  1.0,
+            ];
 
             return new NwcTransform
             {
                 Id = 0,
                 Translation = new Vector3d(tx, ty, tz),
-                Rotation = rotation,
-                Scale = scale,
+                Rotation = Quaterniond.Identity,
+                Scale = (reverses != 0 || det < 0) ? -1.0 : 1.0,
+                Matrix = fullMatrix,
             };
         }
 
