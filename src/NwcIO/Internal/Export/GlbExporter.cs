@@ -68,6 +68,7 @@ public static class GlbExporter
 
         var materialsWithBlend = new HashSet<int>();
         int? defaultLineBlendMatIdx = null;
+        var materialToBlendLineMap = new Dictionary<int, int>();
 
         for (int m = 0; m < meshes.Count; m++)
         {
@@ -350,6 +351,26 @@ public static class GlbExporter
                 {
                     materialsWithBlend.Add(matIdx.Value);
                     lineMatIdx = matIdx.Value;
+                }
+                else if (matIdx.HasValue)
+                {
+                    if (!materialToBlendLineMap.TryGetValue(matIdx.Value, out int blendIdx))
+                    {
+                        var clonedMat = new NwcMaterial
+                        {
+                            Id = -materialTable.Count - 1,
+                            Name = (mesh.Material!.Name ?? "Material") + "_LineBlend",
+                            Color = mesh.Material.Color,
+                            DoubleSided = mesh.Material.DoubleSided,
+                            Metallic = mesh.Material.Metallic,
+                            Roughness = mesh.Material.Roughness
+                        };
+                        blendIdx = materialTable.Count;
+                        materialTable.Add(clonedMat);
+                        materialsWithBlend.Add(blendIdx);
+                        materialToBlendLineMap[matIdx.Value] = blendIdx;
+                    }
+                    lineMatIdx = blendIdx;
                 }
                 else
                 {

@@ -528,4 +528,50 @@ public class GlbExportTests
         var mat = materials[0];
         Assert.Equal("BLEND", mat.GetProperty("alphaMode").GetString());
     }
+
+    [Fact]
+    public void GlbExporter_MixedMesh_TransparentLineColors_RetainsSourceMaterialColor()
+    {
+        var tintedMat = new NwcMaterial
+        {
+            Id = 1,
+            Name = "Tint",
+            Color = new RgbaColor(0.2f, 0.4f, 0.6f, 1.0f),
+        };
+
+        var mixedMesh = new NwcMesh
+        {
+            Id = 10,
+            Name = "MixedTinted",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineIndices = [0, 1],
+            LineColors = [new RgbaColor(1f, 1f, 1f, 0.25f), new RgbaColor(1f, 1f, 1f, 0.25f)],
+            Material = tintedMat,
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mixedMesh], [tintedMat], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var primitives = root.GetProperty("meshes")[0].GetProperty("primitives");
+        var triPrim = primitives[0];
+        var linePrim = primitives[1];
+
+        var materials = root.GetProperty("materials");
+
+        // Triangle material is opaque
+        var triMat = materials[triPrim.GetProperty("material").GetInt32()];
+        Assert.False(triMat.TryGetProperty("alphaMode", out var triAlpha) && triAlpha.GetString() == "BLEND");
+
+        // Line material is BLEND, but preserves baseColorFactor (0.2, 0.4, 0.6)
+        var lineMat = materials[linePrim.GetProperty("material").GetInt32()];
+        Assert.Equal("BLEND", lineMat.GetProperty("alphaMode").GetString());
+        var baseColor = lineMat.GetProperty("pbrMetallicRoughness").GetProperty("baseColorFactor");
+        Assert.Equal(0.2f, baseColor[0].GetSingle(), 3);
+        Assert.Equal(0.4f, baseColor[1].GetSingle(), 3);
+        Assert.Equal(0.6f, baseColor[2].GetSingle(), 3);
+    }
 }
