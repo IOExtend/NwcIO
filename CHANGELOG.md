@@ -9,7 +9,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Fixed
 - `.nwc` files written by the Revit NWC exporter (loader `nwexportrevit`) read in feet (`LengthUnit`, `MetresPerUnit`).
-- A partition header with a null source path (length -1) is read: `SourcePath` is null and the timestamp, size and loader plugin are read as before.
+- A partition header with a null source path (length -1) is read: `SourcePath` is null and the timestamp, size and loader plugin are read as before. `NwcWriter` writes a null `SourcePath` the same way, so it stays null on a save and reopen (0.12.0 wrote `Model.rvt`; a blank path still does).
 - Translation-only fragment poses (class 14, `[3 x f64 t]`) are read instead of failing the file.
 
 ## [0.12.0] - 2026-11-14

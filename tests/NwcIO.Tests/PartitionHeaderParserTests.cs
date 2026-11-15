@@ -47,6 +47,20 @@ public class PartitionHeaderParserTests
         Assert.True(doc.IsRevitSource);
     }
 
+    [Fact]
+    public void Save_NullSourcePath_RoundtripsAsNull()
+    {
+        var original = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit")])));
+
+        using var ms = new MemoryStream();
+        original.Save(ms);
+        ms.Position = 0;
+
+        var roundtripped = NwcDocument.Open(ms);
+        Assert.Null(roundtripped.FileInfo.SourcePath);
+        Assert.Equal("nwexportrevit", roundtripped.FileInfo.LoaderPlugin);
+    }
+
     [Fact]   // guard: only -1 is a null path
     public void Open_SourcePathLengthMinus2_IsNotAHeader()
     {
