@@ -8,9 +8,10 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - `NwcDocument.IsRevitSource`: true for the Revit loader (`LcNwcLoaderPlugin:lcldrevit`) and the Revit NWC exporter (`nwexportrevit`), compared exactly.
 
 ### Changed
-- **Breaking:** `NwcWriter` saves a document without a source path (`NwcFileInfo.SourcePath` null, as `NwcDocumentBuilder` leaves it without `SetFileInfo`) with a null path (length -1) instead of `Model.rvt`, so it reopens with `SourcePath` null; NwcIO 0.12.0 and earlier read no timestamp, loader plugin or export options (`NwcFileInfo.Options`) from such a file. A blank path still saves as `Model.rvt`.
+- **Breaking:** `NwcWriter` saves a document without a source path (`NwcFileInfo.SourcePath` null, as `NwcDocumentBuilder` leaves it without `SetFileInfo`) with a null path (length -1) instead of `Model.rvt`, so it reopens with `SourcePath` null; NwcIO 0.12.0 and earlier read no timestamp, loader plugin or export options (`NwcFileInfo.Options`) from such a file. A document saved with a null source path and reopened with `NwcDocument.Open(path)` names its root node after the file name instead of `Model`. A blank path still saves as `Model.rvt`.
 
 ### Fixed
+- NwcIO.Scene treats `.nwc` files from the Revit NWC exporter as Revit files (levels, categories, types, grids, metres).
 - `.nwc` files written by the Revit NWC exporter (loader `nwexportrevit`) read in feet (`LengthUnit`, `MetresPerUnit`).
 - A partition header with a null source path (length -1) is read: `SourcePath` is null and the timestamp, size and loader plugin are read as before.
 - Translation-only fragment poses (class 14, `[3 x f64 t]`) are read instead of failing the file.

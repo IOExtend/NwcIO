@@ -106,6 +106,25 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_RevitExporterLoader_IsARevitFile()
+    {
+        var expected = Scene(RevitSample.Build()).Document;
+        var result = Scene(RevitSample.Build("nwexportrevit"));
+        var doc = result.Document;
+        Assert.Equal("nwexportrevit", doc.Models[0].Application);
+        Assert.Equal("ft", doc.Models[0].SourceLengthUnit);
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(expected.Elements.Select(e => (e.Id, e.ParentId, e.Kind, e.Name, e.Category, e.TypeName, e.LevelId, e.SourceId, e.IfcGuid)),
+                     doc.Elements.Select(e => (e.Id, e.ParentId, e.Kind, e.Name, e.Category, e.TypeName, e.LevelId, e.SourceId, e.IfcGuid)));
+        Assert.Equal(expected.Levels.Select(l => (l.Id, l.Name)), doc.Levels.Select(l => (l.Id, l.Name)));
+        Assert.Equal(expected.PropertySets.Select(Flat), doc.PropertySets.Select(Flat));
+        Assert.Equal(expected.Geometries.Select(g => (g.Topology, string.Join(",", g.Vertices), string.Join(",", g.Indices))), doc.Geometries.Select(g => (g.Topology, string.Join(",", g.Vertices), string.Join(",", g.Indices))));
+        Assert.Equal(expected.Instances.Select(i => (i.ElementId, i.GeometryId)), doc.Instances.Select(i => (i.ElementId, i.GeometryId)));
+    }
+
+    private static string Flat(ScenePropertySet s) => s.Key + "|" + string.Join(";", s.Properties.Select(p => $"{p.Key}={p.Name}={p.Value.Text}"));
+
+    [Fact]
     public void Read_OtherLoader_HasNoCategoriesOrLevels()
     {
         var doc = Scene(RevitSample.Build("LcNwcLoaderPlugin:mock")).Document;
