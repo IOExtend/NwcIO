@@ -66,9 +66,9 @@ public static class GlbExporter
             matIndexMap[materialTable[i]] = i;
         }
 
+        // Copies of a source material made for line primitives that export COLOR_0, one per source material and blend flag.
         var materialsWithBlend = new HashSet<int>();
-        int? defaultLineBlendMatIdx = null;
-        var materialToBlendLineMap = new Dictionary<int, int>();
+        var lineMaterialMap = new Dictionary<(int? Source, bool Blend), int>();
 
         for (int m = 0; m < meshes.Count; m++)
         {
@@ -203,8 +203,11 @@ public static class GlbExporter
             }
 
             // C. Line Colors (if line colors exist and match vertex count)
+            var lineColors = lineIndices.Count > 0 && mesh.LineColors is { Count: > 0 } storedColors && storedColors.Count == vCount
+                ? storedColors
+                : null;
             int? colAccessorIdx = null;
-            if (lineIndices.Count > 0 && mesh.LineColors is { Count: > 0 } lineColors && lineColors.Count == vCount)
+            if (lineColors is not null)
             {
                 AlignStream(binMs, 4);
                 int colOffset = (int)binMs.Position;
@@ -329,67 +332,39 @@ public static class GlbExporter
                 }
 
                 matIdx = foundIdx;
-                if (mesh.Material.Color.A < 1.0f)
-                {
-                    materialsWithBlend.Add(foundIdx);
-                }
             }
 
-            bool hasTransparentLineColors = lineIndices.Count > 0 &&
-                mesh.LineColors is { Count: > 0 } lc &&
-                lc.Any(c => c.A < 1.0f);
-
+            // glTF multiplies COLOR_0 by baseColorFactor, but a stored line colour replaces the material colour, so a line
+            // that exports COLOR_0 gets a white copy of its source material and shows only its own colours. The copy is BLEND
+            // only when a segment colour is translucent. The source material, shared with the triangles and the lines
+            // without COLOR_0, keeps its own colour and alphaMode.
             int? lineMatIdx = matIdx;
-            if (hasTransparentLineColors)
+            if (lineColors is not null)
             {
-                if (indices.Count == 0 && matIdx.HasValue)
+                bool blend = lineIndices.Any(i => lineColors[i].A < 1.0f);
+                if (matIdx.HasValue || blend)
                 {
-                    materialsWithBlend.Add(matIdx.Value);
-                    lineMatIdx = matIdx.Value;
-                }
-                else if (matIdx.HasValue && mesh.Material!.Color.A < 1.0f)
-                {
-                    materialsWithBlend.Add(matIdx.Value);
-                    lineMatIdx = matIdx.Value;
-                }
-                else if (matIdx.HasValue)
-                {
-                    if (!materialToBlendLineMap.TryGetValue(matIdx.Value, out int blendIdx))
+                    if (!lineMaterialMap.TryGetValue((matIdx, blend), out int lineMaterialIdx))
                     {
-                        var clonedMat = new NwcMaterial
+                        var source = mesh.Material;
+                        lineMaterialIdx = materialTable.Count;
+                        materialTable.Add(new NwcMaterial
                         {
                             Id = -materialTable.Count - 1,
-                            Name = (mesh.Material!.Name ?? "Material") + "_LineBlend",
-                            Color = mesh.Material.Color,
-                            DoubleSided = mesh.Material.DoubleSided,
-                            Metallic = mesh.Material.Metallic,
-                            Roughness = mesh.Material.Roughness
-                        };
-                        blendIdx = materialTable.Count;
-                        materialTable.Add(clonedMat);
-                        materialsWithBlend.Add(blendIdx);
-                        materialToBlendLineMap[matIdx.Value] = blendIdx;
-                    }
-                    lineMatIdx = blendIdx;
-                }
-                else
-                {
-                    if (!defaultLineBlendMatIdx.HasValue)
-                    {
-                        var lineMat = new NwcMaterial
-                        {
-                            Id = -materialTable.Count - 1,
-                            Name = "LineColors_Blend",
+                            Name = source is null ? "LineColors_Blend" : source.Name + (blend ? "_LineBlend" : "_Line"),
                             Color = RgbaColor.White,
-                            DoubleSided = true,
-                            Metallic = 0f,
-                            Roughness = 1f
-                        };
-                        defaultLineBlendMatIdx = materialTable.Count;
-                        materialTable.Add(lineMat);
-                        materialsWithBlend.Add(defaultLineBlendMatIdx.Value);
+                            DoubleSided = source?.DoubleSided ?? true,
+                            Metallic = source?.Metallic ?? 0f,
+                            Roughness = source?.Roughness ?? 1f
+                        });
+                        lineMaterialMap[(matIdx, blend)] = lineMaterialIdx;
+                        if (blend)
+                        {
+                            materialsWithBlend.Add(lineMaterialIdx);
+                        }
                     }
-                    lineMatIdx = defaultLineBlendMatIdx.Value;
+
+                    lineMatIdx = lineMaterialIdx;
                 }
             }
 
