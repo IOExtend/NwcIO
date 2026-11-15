@@ -8,7 +8,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
 
 ### Documentation
-- The README "Scope and frozen features" section gives the status of JSON export, the spatial index with raycast, section planes and boxes, and the redline types: frozen, bug fixes only. The README and the docs landing page lead with reading, writing `.nwc` and `NwcIO.Scene`; the README, the landing page, the getting started page and the public API page mark the frozen features, and the last three link the scene adapter page.
+- The README "Scope and frozen features" section states that JSON export of the data the reader parses is core and grows with the reader, and that the spatial index with raycast, section planes and boxes, and the redline types are frozen: bug fixes only. The README and the docs landing page lead with reading, writing `.nwc` and `NwcIO.Scene`; the README, the landing page, the getting started page and the public API page mark the frozen features, and the last three link the scene adapter page.
 
 ## [0.12.1] - 2026-11-15
 

@@ -77,7 +77,7 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 | `NwcDocument.SaveIfc` / `NwcAssembly.SaveIfc` | ISO 10303-21 STEP export supporting IFC2x3 Coordination View and modern IFC4 mesh tessellation (`IfcTriangulatedFaceSet`), configured via `NwcIfcExportOptions` (`NwcIfcSchemaVersion`, `NwcIfcLengthUnit`). Frozen: bug fixes only. |
 | `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. Frozen: bug fixes only. |
 | `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). Frozen: bug fixes only. |
-| `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). Frozen: bug fixes only. |
+| `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). |
 | `GlbExporter` & `ObjExporter` (`NwcIO.Internal.Export`) | Low-level public static exporters the `Save*` entry points delegate to; implementation surface, not covered by compatibility guarantees. |
 
 ## Container & Parsing (`NwcIO.Internal.*` — public but unsupported)

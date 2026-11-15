@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 
-NwcIO is a fast, 100% managed .NET library and command line tool that reads Autodesk Navisworks cache and document files (`.nwc`, `.nwd`, `.nwf`) directly from disk without Navisworks or the Navisworks API, writes `.nwc` files, and converts models into `IOScene` scene documents through the `NwcIO.Scene` adapter. Its export, coordination, and viewer extras (IFC, glTF, OBJ, JSON, clash, HTML viewer) are frozen: bug fixes only.
+NwcIO is a fast, 100% managed .NET library and command line tool that reads Autodesk Navisworks cache and document files (`.nwc`, `.nwd`, `.nwf`) directly from disk without Navisworks or the Navisworks API, writes `.nwc` files, exports the data it parses to JSON, and converts models into `IOScene` scene documents through the `NwcIO.Scene` adapter. Its export, coordination, and viewer extras (IFC, glTF, OBJ, clash, HTML viewer) are frozen: bug fixes only.
 
 Built clean-room under the [IOExtend](https://github.com/IOExtend) organization alongside [RvtIO](https://github.com/IOExtend/RvtIO) and [IfcIO](https://github.com/IOExtend/IfcIO).
 
@@ -19,10 +19,11 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization 
 - Reads scene hierarchy, geometry meshes, transforms, GUID tables, and property categories. Materials are decoded from the file on the strict path (name, colour, alpha) and assigned by heuristics only for files not read through their DbCache directory. Element nodes of model files carry the element's export GUID and IFC GlobalId.
 - Writes native `.nwc` files from code (`NwcWriter`, `NwcDocumentBuilder`).
 - Converts Navisworks models into `IOScene` scene documents for IOViewer and other consumers through the `NwcIO.Scene` adapter, a separate package.
+- Exports the data the reader parses to structured JSON (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`). The JSON export is core: it grows with the reader.
 
 Frozen extras (bug fixes only, see [Scope and frozen features](https://github.com/IOExtend/NwcIO#scope-and-frozen-features)):
 
-- Exports to standard Industry Foundation Classes (IFC2X3 & compact IFC4), binary glTF 2.0 (`.glb`), Wavefront OBJ, and structured JSON.
+- Exports to standard Industry Foundation Classes (IFC2X3 & compact IFC4), binary glTF 2.0 (`.glb`), and Wavefront OBJ.
 - Coordinates multi-model federated assemblies with 3D geometric clash detection, proximity clustering, and clash matrix execution.
 - Exchanges section planes, redlines, selection sets, and search sets, and exports saved viewpoints, with Navisworks XML and buildingSMART BCF 2.1.
 - Supports 4D TimeLiner construction simulation with Microsoft Project XML (`.xml`) and Primavera P6 (`.xer`) exchange, appearance profiling, spatial grids, 3D measurement, and revision comparison.
@@ -168,11 +169,13 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 
 NwcIO reads and writes its own format. These extras are frozen: they receive bug fixes only, with no new features or options.
 
-- HTML viewer, and GLB, OBJ, IFC, and JSON export (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`).
+- HTML viewer, GLB and OBJ export, and IFC export.
 - Clash detection (triangle-level and bounding-box engines), clash grouping, clash matrix, and the HTML clash report.
 - Measure, grids, revision diff, and BCF.
 - TimeLiner schedule import and export, selection and search sets, appearance profiler, mesh clipper, and Navisworks XML exchange. These stay in NwcIO.
 - The BVH spatial index (`NwcSpatialIndex`, `NwcDocument.SpatialIndex`) with raycast (`nwcio --raycast`), section planes and boxes (`NwcSectionPlane`, `NwcSectionBox`), and the redline types (`NwcRedline` and its subtypes).
+
+JSON export of the data the reader parses (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`) is not frozen: it is core and grows with the reader.
 
 Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through the `NwcIO.Scene` adapter over the shared `IOScene` model. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. `IOCoord` and `IOScene.Formats` are not published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
 
