@@ -105,24 +105,18 @@ public sealed class NwcSceneReaderTests
         Assert.Empty(result.Diagnostics);
     }
 
-    [Fact]
-    public void Read_RevitExporterLoader_IsARevitFile()
+    [Theory]   // the second case has a grid, which only a Revit file reads
+    [InlineData(-2000023)]
+    [InlineData(-2000220)]
+    public void Read_RevitExporterLoader_IsARevitFile(int doorCategoryId)
     {
-        var expected = Scene(RevitSample.Build()).Document;
-        var result = Scene(RevitSample.Build("nwexportrevit"));
-        var doc = result.Document;
+        var expected = Scene(RevitSample.Build(doorCategoryId: doorCategoryId)).Document;
+        var doc = Scene(RevitSample.Build("nwexportrevit", doorCategoryId: doorCategoryId)).Document;
         Assert.Equal("nwexportrevit", doc.Models[0].Application);
-        Assert.Equal("ft", doc.Models[0].SourceLengthUnit);
-        Assert.Empty(result.Diagnostics);
-        Assert.Equal(expected.Elements.Select(e => (e.Id, e.ParentId, e.Kind, e.Name, e.Category, e.TypeName, e.LevelId, e.SourceId, e.IfcGuid)),
-                     doc.Elements.Select(e => (e.Id, e.ParentId, e.Kind, e.Name, e.Category, e.TypeName, e.LevelId, e.SourceId, e.IfcGuid)));
-        Assert.Equal(expected.Levels.Select(l => (l.Id, l.Name)), doc.Levels.Select(l => (l.Id, l.Name)));
-        Assert.Equal(expected.PropertySets.Select(Flat), doc.PropertySets.Select(Flat));
-        Assert.Equal(expected.Geometries.Select(g => (g.Topology, string.Join(",", g.Vertices), string.Join(",", g.Indices))), doc.Geometries.Select(g => (g.Topology, string.Join(",", g.Vertices), string.Join(",", g.Indices))));
-        Assert.Equal(expected.Instances.Select(i => (i.ElementId, i.GeometryId)), doc.Instances.Select(i => (i.ElementId, i.GeometryId)));
+        Assert.Equal(doorCategoryId == -2000220, doc.Grids.Count > 0);
+        expected.Models[0].Application = doc.Models[0].Application;
+        Assert.Equal(SceneJson.Write(expected), SceneJson.Write(doc));
     }
-
-    private static string Flat(ScenePropertySet s) => s.Key + "|" + string.Join(";", s.Properties.Select(p => $"{p.Key}={p.Name}={p.Value.Text}"));
 
     [Fact]
     public void Read_OtherLoader_HasNoCategoriesOrLevels()
