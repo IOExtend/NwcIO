@@ -29,7 +29,10 @@ Tests requiring real Navisworks files are skipped automatically unless the envir
 
 ## Releases & NuGet Publishing
 
-Push a tag matching the package version, such as `v0.1.0`, to trigger the `release.yml` workflow.
+The `release.yml` workflow runs only when a tag matching `v*` is pushed; it cannot be started by hand, so a release always builds the commit that the tag points at.
+Set `Version` in `Directory.Build.props`, add a `## [X.Y.Z]` section to `CHANGELOG.md`, then push the tag `vX.Y.Z` on that commit, such as `v0.1.0`.
+The tag must equal `v` plus the package version: the workflow's version check fails the run before anything is built or pushed when it does not, and the release step never creates a tag.
+To retry a run that failed after the NuGet push, use *Re-run jobs* on that run: it builds the same tag, and packages already on NuGet.org are skipped.
 The workflow builds and tests the solution, packs release packages and symbols, generates archives with checksums, publishes the GitHub Release, and publishes packages to NuGet.org via Trusted Publishing (GitHub Actions OIDC).
 The NuGet policy on NuGet.org must name this repository (`IOExtend/NwcIO`), workflow `release.yml`, publisher `GitHubActions`, package pattern `NwcIO*`, and owner `mahach`.
 
