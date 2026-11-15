@@ -147,6 +147,11 @@ internal static class HierarchyParser
                 {
                     occurrence.Properties.AddRange(tab.Properties);
                 }
+
+                if (node.Hyperlinks.Count > 0)
+                {
+                    occurrence.Hyperlinks.AddRange(node.Hyperlinks);
+                }
             }
 
             // X > 0 marks an element node (docs/format-notes.md §2.2). The exporter writes some elements as two sibling nodes with one X;
@@ -194,6 +199,7 @@ internal static class HierarchyParser
         int X,
         string? MaterialName,
         List<NwcPropertyTab> Tabs,
+        List<NwcHyperlink> Hyperlinks,
         long OwnProperties,
         Node[] Children,
         long Size,
@@ -306,6 +312,7 @@ internal static class HierarchyParser
 
             int attributeCount = _reader.ReadCount(4);
             var tabs = new List<NwcPropertyTab>();
+            var hyperlinks = new List<NwcHyperlink>();
             long ownProperties = 0;
             string? materialName = null;
             for (int i = 0; i < attributeCount; i++)
@@ -322,12 +329,15 @@ internal static class HierarchyParser
                     case Material material:
                         materialName ??= material.Name ?? "";
                         break;
+                    case List<NwcHyperlink> links:
+                        hyperlinks.AddRange(links);
+                        break;
                 }
             }
 
             Node[] children = classId == 53 ? ReadNodes(ChildClasses) : [];
             var (size, propertyReferences, height) = Measure(children, ownProperties);
-            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, materialName, tabs, ownProperties, children, size, propertyReferences, height);
+            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, materialName, tabs, hyperlinks, ownProperties, children, size, propertyReferences, height);
         }
 
         // Expanded size, property references and height of a node with these children; children finish before their parent, so theirs are known.
@@ -487,28 +497,45 @@ internal static class HierarchyParser
         }
 
         // Class 79: [str][i32][i32][i32 n] n x ([str][str][ptr][i32 pts][3 pts f64]), no trailing int per item.
-        private object ReadHyperlinks()
+        private List<NwcHyperlink> ReadHyperlinks()
         {
             _reader.ReadString();
             _reader.ReadInt32();
             _reader.ReadInt32();
             int count = _reader.ReadCount(16);
+            var list = new List<NwcHyperlink>(count);
             for (int i = 0; i < count; i++)
             {
-                _reader.ReadString();
-                _reader.ReadString();
+                string name = _reader.ReadString() ?? string.Empty;
+                string url = _reader.ReadString() ?? string.Empty;
 
                 // In a LcOaPartitionProps root the item is class 52, so no node can start there (docs/format-notes.md §2.2.1). In the
                 // hierarchy the item pointer's class family was not measured, so any class this parser knows, or null, is accepted.
-                _reader.ReadPointer(_partitionProps is null ? UsernameClasses : KnownClasses, _readBody);
-                int points = _reader.ReadCount(24);
-                for (int p = 0; p < 3 * points; p++)
+                object? catObj = _reader.ReadPointer(_partitionProps is null ? UsernameClasses : KnownClasses, _readBody);
+                string? category = catObj switch
                 {
-                    _reader.ReadDouble();
+                    Username u => !string.IsNullOrEmpty(u.Display) ? u.Display : u.Internal,
+                    _ => null,
+                };
+                int points = _reader.ReadCount(24);
+                var link = new NwcHyperlink
+                {
+                    Name = name,
+                    Url = url,
+                    Category = category,
+                };
+                for (int p = 0; p < points; p++)
+                {
+                    double x = _reader.ReadDouble();
+                    double y = _reader.ReadDouble();
+                    double z = _reader.ReadDouble();
+                    link.AttachmentPoints.Add(new Vector3d(x, y, z));
                 }
+
+                list.Add(link);
             }
 
-            return Dropped;
+            return list;
         }
 
         // Class 200: [str name][i32 X][i32 Y][ptr extra], the extra a class 185 in every file that has class 200.

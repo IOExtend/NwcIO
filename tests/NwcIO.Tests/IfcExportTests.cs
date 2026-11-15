@@ -35,6 +35,39 @@ public class IfcExportTests
         Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
     }
 
+    [Fact]
+    public void SaveIfc_NodeHyperlinks_ExportsDocumentReferences()
+    {
+        var node = new NwcNode { Id = 1, Name = "Pump 101", Class = "LcRevitData_Element" };
+        node.Hyperlinks.Add(new NwcHyperlink
+        {
+            Name = "Manual",
+            Url = "https://example.com/pump.pdf",
+            Category = "Datasheet"
+        });
+
+        var mesh = TestMeshes.MirroredQuad();
+        mesh.Node = node;
+
+        // IFC2X3: exactly 3 arguments (Location, ItemReference, Name)
+        string ifc2x3 = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = NwcIfcSchemaVersion.Ifc2x3,
+            ExportProperties = true,
+        });
+        Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet');", ifc2x3);
+        Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc2x3);
+
+        // IFC4: exactly 5 arguments (Location, Identification, Name, Description, ReferencedDocument)
+        string ifc4 = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = NwcIfcSchemaVersion.Ifc4,
+            ExportProperties = true,
+        });
+        Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet',$,$);", ifc4);
+        Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]

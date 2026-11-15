@@ -203,6 +203,60 @@ public class HierarchyParserTests
         Assert.Contains("exceeds 256 levels", Assert.Throws<InvalidDataException>(() => HierarchyParser.Read(bytes, "Model")).Message);
     }
 
+    [Fact]
+    public void Read_Hyperlinks_PopulatesNodeHyperlinks()
+    {
+        var bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(79);
+            w.Str("h").Int(0).Int(0).Int(2);
+            // Item 1: Name "Site Plan", Url "https://example.com/plan", Category "Documentation", 2 attachment points
+            w.Str("Site Plan").Str("https://example.com/plan");
+            Username(w, "Documentation", "LcDocumentation");
+            w.Int(2);
+            w.Double(10.0).Double(20.0).Double(30.0);
+            w.Double(40.0).Double(50.0).Double(60.0);
+
+            // Item 2: Name "Specs", Url "file://specs.pdf", null category, 0 attachment points
+            w.Str("Specs").Str("file://specs.pdf").Null().Int(0);
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model");
+        var leaf = Assert.Single(nodes[1].Children);
+        Assert.Equal(2, leaf.Hyperlinks.Count);
+
+        var link1 = leaf.Hyperlinks[0];
+        Assert.Equal("Site Plan", link1.Name);
+        Assert.Equal("https://example.com/plan", link1.Url);
+        Assert.Equal("Documentation", link1.Category);
+        Assert.Equal(2, link1.AttachmentPoints.Count);
+        Assert.Equal(new NwcIO.Model.Vector3d(10.0, 20.0, 30.0), link1.AttachmentPoints[0]);
+        Assert.Equal(new NwcIO.Model.Vector3d(40.0, 50.0, 60.0), link1.AttachmentPoints[1]);
+        Assert.Equal("Site Plan: https://example.com/plan", link1.ToString());
+
+        var link2 = leaf.Hyperlinks[1];
+        Assert.Equal("Specs", link2.Name);
+        Assert.Equal("file://specs.pdf", link2.Url);
+        Assert.Null(link2.Category);
+        Assert.Empty(link2.AttachmentPoints);
+        Assert.Equal("Specs: file://specs.pdf", link2.ToString());
+    }
+
+    [Fact]
+    public void Read_Hyperlinks_IgnoredWhenIncludePropertiesFalse()
+    {
+        var bytes = GroupWithLeaf(1, w =>
+        {
+            w.New(79);
+            w.Str("h").Int(0).Int(0).Int(1);
+            w.Str("Link").Str("https://example.com").Null().Int(0);
+        });
+
+        var nodes = HierarchyParser.Read(bytes, "Model", includeProperties: false);
+        var leaf = Assert.Single(nodes[1].Children);
+        Assert.Empty(leaf.Hyperlinks);
+    }
+
     // H1 byte edits (offsets from the H1 layout in FormatVectors)
     [Theory]
     [InlineData(260, 107, "back-reference to unfinished object 107")]                     // B's child -> B itself (unfinished)
