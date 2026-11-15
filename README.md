@@ -168,11 +168,11 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 
 NwcIO reads and writes its own format. These extras are frozen: they receive bug fixes only, with no new features or options.
 
-- HTML viewer, and GLB, OBJ, IFC, and JSON export (`NwcDocument.SaveJson`, `nwcio model.json`).
+- HTML viewer, and GLB, OBJ, IFC, and JSON export (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`).
 - Clash detection (triangle-level and bounding-box engines), clash grouping, clash matrix, and the HTML clash report.
 - Measure, grids, revision diff, and BCF.
 - TimeLiner schedule import and export, selection and search sets, appearance profiler, mesh clipper, and Navisworks XML exchange. These stay in NwcIO.
-- The BVH spatial index (`NwcSpatialIndex`, `NwcDocument.SpatialIndex`) with raycast (`nwcio --raycast`), section planes and boxes (`NwcSectionPlane`, `NwcSectionBox`), and the redline types (`NwcRedline` and its subtypes). These stay in NwcIO.
+- The BVH spatial index (`NwcSpatialIndex`, `NwcDocument.SpatialIndex`) with raycast (`nwcio --raycast`), section planes and boxes (`NwcSectionPlane`, `NwcSectionBox`), and the redline types (`NwcRedline` and its subtypes).
 
 Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through the `NwcIO.Scene` adapter over the shared `IOScene` model. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. `IOCoord` and `IOScene.Formats` are not published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
 
