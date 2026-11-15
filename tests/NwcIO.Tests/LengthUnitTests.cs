@@ -7,13 +7,17 @@ namespace NwcIO.Tests;
 public class LengthUnitTests
 {
     [Theory]
-    [InlineData("LcNwcLoaderPlugin:lcldrevit", NwcLengthUnit.Feet, 0.3048)]
-    [InlineData("LcNwcLoaderPlugin:mock", NwcLengthUnit.Unknown, null)]
-    public void Open_LoaderPlugin_DecidesTheUnit(string plugin, NwcLengthUnit unit, double? metres)
+    [InlineData("LcNwcLoaderPlugin:lcldrevit", NwcLengthUnit.Feet, 0.3048, true)]
+    [InlineData("LcNwcLoaderPlugin:mock", NwcLengthUnit.Unknown, null, false)]
+    [InlineData("nwexportrevit", NwcLengthUnit.Feet, 0.3048, true)]
+    [InlineData("NWEXPORTREVIT", NwcLengthUnit.Unknown, null, false)]
+    [InlineData("nwexportrevit2", NwcLengthUnit.Unknown, null, false)]
+    public void Open_LoaderPlugin_DecidesTheUnit(string plugin, NwcLengthUnit unit, double? metres, bool revit)
     {
         var doc = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([SyntheticNwcFile.PartitionHeader("a.rvt", 1, plugin)])));
         Assert.Equal(unit, doc.LengthUnit);
         Assert.Equal(metres, doc.MetresPerUnit);
+        Assert.Equal(revit, doc.IsRevitSource);
     }
 
     [Fact]

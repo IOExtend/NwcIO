@@ -4,6 +4,17 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-15
+
+### Added
+- `NwcDocument.IsRevitSource`: true for the Revit loader (`LcNwcLoaderPlugin:lcldrevit`) and the Revit NWC exporter (`nwexportrevit`), compared exactly.
+
+### Fixed
+- NwcIO.Scene treats `.nwc` files from the Revit NWC exporter as Revit files (levels, categories, types, grids, metres).
+- `.nwc` files written by the Revit NWC exporter (loader `nwexportrevit`) read in feet (`LengthUnit`, `MetresPerUnit`).
+- A partition header with a null source path (length -1) is read: `SourcePath` is null and the timestamp, size and loader plugin are read as for a header with a path.
+- Translation-only fragment poses (class 14, `[3 x f64 t]`) are read instead of failing the file.
+
 ## [0.12.0] - 2026-11-14
 
 ### Added

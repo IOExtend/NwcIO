@@ -1,5 +1,6 @@
 using Xunit;
 using NwcIO.Internal.Container;
+using NwcIO.Internal.Parsing;
 using NwcIO.Model;
 
 namespace NwcIO.Tests;
@@ -33,6 +34,71 @@ public class PartitionHeaderParserTests
         Assert.Null(doc.FileInfo.SourceTimestampUtc);
         Assert.Null(doc.FileInfo.SourceByteSize);
         Assert.Null(doc.FileInfo.LoaderPlugin);
+    }
+
+    [Fact]   // the Revit NWC exporter's header: [i64 7][i32 -1][i32 -1][i64 0][i64 0][i32 13]"nwexportrevit" + pad
+    public void Open_NullSourcePathHeader_ReadsLoaderAndUnit()
+    {
+        var doc = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit")])));
+
+        Assert.Null(doc.FileInfo.SourcePath);
+        Assert.Null(doc.FileInfo.SourceTimestampUtc);
+        Assert.Equal("nwexportrevit", doc.FileInfo.LoaderPlugin);
+        Assert.Equal(NwcLengthUnit.Feet, doc.LengthUnit);
+        Assert.True(doc.IsRevitSource);
+    }
+
+    [Fact]
+    public void Save_NullSourcePath_ReopensWithModelRvt()
+    {
+        var original = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit")])));
+
+        using var ms = new MemoryStream();
+        original.Save(ms);
+        ms.Position = 0;
+
+        var roundtripped = NwcDocument.Open(ms);
+        Assert.Equal("Model.rvt", roundtripped.FileInfo.SourcePath);
+        Assert.Equal("nwexportrevit", roundtripped.FileInfo.LoaderPlugin);
+    }
+
+    [Fact]   // 0.12.0 behaviour: the writer stores a null source path as Model.rvt
+    public void Save_BuilderWithoutFileInfo_ReopensWithModelRvt()
+    {
+        using var ms = new MemoryStream();
+        new NwcDocumentBuilder().Build().Save(ms);
+        ms.Position = 0;
+
+        var roundtripped = NwcDocument.Open(ms);
+        Assert.Equal("Model.rvt", roundtripped.FileInfo.SourcePath);
+        Assert.Equal("LcOpRevitExport", roundtripped.FileInfo.LoaderPlugin);
+    }
+
+    [Fact]   // guard: only -1 is a null path, in the classifier and in the parser
+    public void Open_SourcePathLengthMinus2_IsNotAHeader()
+    {
+        var header = SyntheticNwcFile.PartitionHeader(null, 0, "nwexportrevit");
+        header[8] = 0xFE;   // path length -1 -> -2
+
+        var doc = NwcDocument.Open(new MemoryStream(NwcContainerWriter.Write([header])));
+        var parsed = PartitionHeaderParser.Parse(new LcRawStream { Index = 0, FileOffset = 0, CompressedLength = 0, GapBefore = 0, Data = header, SectionIndex = 0 });
+
+        Assert.Null(doc.FileInfo.LoaderPlugin);
+        Assert.Null(parsed.SourcePath);
+        Assert.Null(parsed.LoaderPlugin);
+    }
+
+    [Fact]   // guard: a -1 path counts only when the -1 marker follows
+    public void Classify_NullPathWithoutMarker_IsNotAPartitionHeader()
+    {
+        var data = new byte[32];
+        data[0] = 7;                                   // int64 7
+        data[8] = data[9] = data[10] = data[11] = 0xFF; // path length -1
+        // bytes 12..15 stay 0: the marker is missing
+
+        var kind = StreamClassifier.Classify(new LcRawStream { Index = 0, FileOffset = 0, CompressedLength = 0, GapBefore = 0, Data = data, SectionIndex = 0 });
+
+        Assert.NotEqual(NwcStreamKind.PartitionHeader, kind);
     }
 
     [Fact]

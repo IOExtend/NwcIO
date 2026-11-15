@@ -12,7 +12,7 @@ namespace NwcIO.Scene;
 /// <remarks>
 /// The scene has one <see cref="SceneModel"/>: <c>Key</c> and <c>Name</c> are <see cref="NwcSceneOptions.ModelKey"/>, else the file
 /// name; <c>SourceFormat</c> is <c>nwc</c>; <c>Application</c> is the loader plugin after its last <c>:</c> (for example
-/// <c>lcldrevit</c>); <c>CreatedAt</c> is the source timestamp in UTC; <c>SourceLengthUnit</c> is <c>ft</c> when the unit used is feet.
+/// <c>lcldrevit</c>, or <c>nwexportrevit</c> for the Revit NWC exporter); <c>CreatedAt</c> is the source timestamp in UTC; <c>SourceLengthUnit</c> is <c>ft</c> when the unit used is feet.
 /// </remarks>
 public static partial class NwcSceneReader
 {
@@ -128,7 +128,7 @@ public static partial class NwcSceneReader
                 $"The length unit is unknown (loader {loader ?? "none"}): geometry, grid lines and length, area, volume and angle values are left out. Set NwcSceneOptions.LengthUnit to convert them."));
         }
 
-        bool revit = loader == "LcNwcLoaderPlugin:lcldrevit";
+        bool revit = document.IsRevitSource;
         var levelElementIds = revit ? LevelElementIds(root) : [];
         int elementCount = 0;
         int leavesOutsideElements = 0;

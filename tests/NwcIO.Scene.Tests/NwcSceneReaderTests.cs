@@ -105,6 +105,21 @@ public sealed class NwcSceneReaderTests
         Assert.Empty(result.Diagnostics);
     }
 
+    [Theory]   // the second case has a grid, which only a Revit file reads
+    [InlineData(-2000023)]
+    [InlineData(-2000220)]
+    public void Read_RevitExporterLoader_IsARevitFile(int doorCategoryId)
+    {
+        var expected = Scene(RevitSample.Build(doorCategoryId: doorCategoryId)).Document;
+        var result = Scene(RevitSample.Build("nwexportrevit", doorCategoryId: doorCategoryId));
+        var doc = result.Document;
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal("nwexportrevit", doc.Models[0].Application);
+        Assert.Equal(doorCategoryId == -2000220, doc.Grids.Count > 0);
+        expected.Models[0].Application = doc.Models[0].Application;
+        Assert.Equal(SceneJson.Write(expected), SceneJson.Write(doc));
+    }
+
     [Fact]
     public void Read_OtherLoader_HasNoCategoriesOrLevels()
     {
