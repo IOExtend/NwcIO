@@ -17,6 +17,8 @@ Report security vulnerabilities privately through the **Security** tab.
 
 - **Clean-Room Development**: All code must be independently authored without decompiled proprietary source code, proprietary headers, or vendor SDKs.
 - Do not commit proprietary Navisworks models (`.nwc`, `.nwd`, `.nwf`), customer project data, or third-party binaries to the repository.
+- Do not add names, paths, sizes, GUIDs or other details of private sample files to code, tests, comments or documentation.
+- Do not put personal data in code, documentation, test data or commit metadata. Use your GitHub noreply address as the commit email.
 - Keep nullable reference types enabled (`<Nullable>enable</Nullable>`).
 - Warnings are treated as errors (`<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`).
 - Zero native or third-party library dependencies for core reading and exporting functionality.

@@ -17,3 +17,15 @@ __pycache__/
 # Documentation site (DocFX output and generated API pages)
 _site/
 docs/api/
+
+# Private test fixtures, customer models and vendor files never go into the repository
+test_files/
+*.nwc
+*.nwd
+*.nwf
+*.rvt
+*.ifc
+*.ifczip
+
+# Local secrets
+.env
