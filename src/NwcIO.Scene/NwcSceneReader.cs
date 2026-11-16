@@ -440,14 +440,15 @@ public static partial class NwcSceneReader
                     {
                         id = value;
                     }
-                    else if (property.Name == "Elevation" &&
+                    else if (property.InternalName == "lcldrevit_parameter_-1007102" &&
+                             property.ValueType == 6 &&
                              double.TryParse(property.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
                     {
                         elevation = parsed;
                     }
                 }
 
-                if (id is not null && elevation is double e)
+                if (id is not null && elevation is double e && double.IsFinite(e * metres))
                 {
                     result[id] = e * metres;
                 }
@@ -463,7 +464,8 @@ public static partial class NwcSceneReader
 
     // A grid is a line only when it has one line mesh of one segment that is horizontal within 1e-6 m; otherwise it stays an element.
     private static SceneGridLine? GridLine(NwcNode node, List<NwcMesh> meshes, double metresPerUnit)
-    {        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
+    {
+        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
         {
             return null;
         }

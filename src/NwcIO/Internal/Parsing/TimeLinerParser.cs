@@ -32,7 +32,7 @@ internal static class TimeLinerParser
             using var ms = new MemoryStream(data, writable: false);
             return ReadPayload(ms);
         }
-        catch
+        catch (Exception ex) when (ex is InvalidDataException or FormatException or System.Xml.XmlException or IOException)
         {
             return null;
         }

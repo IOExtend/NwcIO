@@ -84,6 +84,32 @@ public class ClashMatrixTests
         Assert.Equal(1, matrix.TotalClashesCount);
     }
 
+    [Theory]
+    [InlineData(0.0, 0.001, NwcClashTestType.Hard, 0)] // touching boxes are not a Hard clash with a positive tolerance
+    [InlineData(0.0, 0.0, NwcClashTestType.Hard, 1)]
+    [InlineData(0.0005, 0.001, NwcClashTestType.Clearance, 1)]
+    [InlineData(0.002, 0.001, NwcClashTestType.Clearance, 0)]
+    public void Matrix_Tolerance_AppliesToTestType(double gap, double tolerance, NwcClashTestType type, int expected)
+    {
+        var docStr = CreateTestDoc("Structural_Model", 100, new Vector3d(0, 0, 0), "Structural Columns");
+        var docMep = CreateTestDoc("MEP_Model", 200, new Vector3d(2 + gap, 0, 0), "HVAC Ducts");
+        var assembly = NwcAssembly.Create("Assembly", docStr, docMep);
+
+        var matrix = new NwcClashMatrix("Tolerance");
+        matrix.AddDiscipline("Structure", "Structural");
+        matrix.AddDiscipline("MEP", "MEP");
+        matrix.Cells.Add(new NwcClashMatrixCell("Structure", "MEP", tolerance, type));
+
+        matrix.Execute(assembly);
+
+        var cell = matrix.Cells[0];
+        Assert.Equal(expected, cell.ClashCount);
+        if (type == NwcClashTestType.Clearance && expected == 1)
+        {
+            Assert.Equal(gap, cell.Clashes[0].Distance, 6); // positive for clearance
+        }
+    }
+
     [Fact]
     public void Matrix_JsonSerialization_ExportsValidFormat()
     {
@@ -155,5 +181,29 @@ public class ClashMatrixTests
         matrix.Run(NwcAssembly.Create("Model", doc));
 
         Assert.Equal(new[] { (0, 2), (1, 2) }, matrix.Cells[0].Clashes.Select(c => (c.Item1.Mesh!.Id, c.Item2.Mesh!.Id)));
+    }
+
+    [Fact]
+    public void ClashMatrix_SameSourcePathAndMeshId_UsesDistinctGlobalIds()
+    {
+        static NwcDocument Model(double x) => NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" },
+            meshes:
+            [
+                new NwcMesh
+                {
+                    Id = 1,
+                    Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+                    Indices = [0, 1, 2],
+                },
+            ]);
+
+        var matrix = new NwcClashMatrix();
+        matrix.AddDiscipline("All");
+        matrix.Cells.Add(new NwcClashMatrixCell("All", "All", tolerance: 0));
+        matrix.Run(NwcAssembly.Create("fed", Model(0), Model(0.5)));
+
+        var clash = Assert.Single(matrix.Cells[0].Clashes);
+        Assert.NotEqual(clash.Item1.IfcGuid, clash.Item2.IfcGuid);
     }
 }

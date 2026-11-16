@@ -157,8 +157,84 @@ public class ViewpointTests
         Assert.Equal(34.5, vp.Camera.Position.Y);
         Assert.Equal(56.5, vp.Camera.Position.Z);
         Assert.Equal(50.0, vp.Camera.FocalDistance);
+        Assert.Equal(60.0, vp.Camera.FieldOfView); // the +84 slot (10.0 here) is not a field of view in degrees
         Assert.InRange(vp.Camera.AspectRatio, 1.77, 1.78);
         Assert.Equal(new Vector3d(0, 0, -1), vp.Camera.Direction);
+    }
+
+    [Theory]
+    [InlineData("Общий вид")]
+    [InlineData("общий вид")]
+    [InlineData("Navisworks коллизии")]
+    [InlineData("План 1 этаж")]
+    [InlineData("Разрез А-А")]
+    [InlineData("УЗЕЛ 1")]
+    [InlineData("ХВС")]
+    [InlineData("ШУМ 1")]
+    [InlineData("ДУ")]
+    [InlineData("ВЕНТИЛЯЦИЯ")]
+    [InlineData("шахты")]
+    [InlineData("тур")]
+    [InlineData("шум")]
+    [InlineData("ЦЕХ")]
+    [InlineData("Узел №1")]
+    [InlineData("Вид 45°")]
+    [InlineData("Plan A1")]
+    public void ViewpointParser_DecodesLegacyCyrillicNamesInBothCodePages(string name)
+    {
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+
+        foreach (int codePage in new[] { 866, 1251 })
+        {
+            byte[] bytes = System.Text.Encoding.GetEncoding(codePage).GetBytes(name);
+            Assert.Equal(name, ParseViewpoint(bytes).Name);
+        }
+    }
+
+    private static NwcSavedViewpoint ParseViewpoint(byte[] nameBytes)
+    {
+        using var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+        bw.Write(nameBytes.Length);
+        bw.Write(nameBytes);
+        while (ms.Position % 4 != 0)
+        {
+            bw.Write((byte)0);
+        }
+
+        bw.Write(517);
+        bw.Write(1);
+        bw.Write(0);
+        bw.Write(12.5);
+        bw.Write(34.5);
+        bw.Write(56.5);
+        bw.Write(0.0);
+        bw.Write(0.0);
+        bw.Write(0.0);
+        bw.Write(1.0);
+        bw.Write(1.777);
+        bw.Write(50.0);
+        bw.Write(10.0);
+        bw.Write(0.1);
+
+        var data = ms.ToArray();
+        if (data.Length < 120)
+        {
+            Array.Resize(ref data, 120);
+        }
+
+        var rawStream = new LcRawStream
+        {
+            Index = 1,
+            FileOffset = 0,
+            CompressedLength = data.Length,
+            GapBefore = 0,
+            SectionIndex = 0,
+            Kind = NwcStreamKind.SavedViews,
+            Data = data,
+        };
+
+        return Assert.Single(ViewpointParser.Parse(rawStream));
     }
 
     [Fact]
