@@ -28,6 +28,8 @@ internal static class Program
 
         Options:
           --nwc <file.nwc>   Save or convert to a .nwc file (NwcIO layout)
+          --scene <file.json> Export an IOScene scene document (.json)
+          --scene-length-unit <unit> Scene length unit: ft, m, cm or mm
           -i, --input <path> Add an input model; repeat to build a federation
           -o, --output <path> Explicit output path (required with multiple -i inputs)
           --recursive        Search subfolders for folder input
@@ -140,6 +142,8 @@ internal static class Program
         string? explicitClashXmlPath = null;
         string? explicitClashBcfPath = null;
         string? explicitNwfXmlPath = null;
+        string? explicitScenePath = null;
+        NwcLengthUnit? sceneLengthUnit = null;
         double clashTolerance = 0.001;
         string? explicitBcfPath = null;
         string? explicitViewpointsBcfPath = null;
@@ -243,6 +247,18 @@ internal static class Program
                     break;
                 case "--nwc":
                     if (!TryConsumeValue(args, ref i, "--nwc", out explicitNwcPath, @err)) return 1;
+                    break;
+                case "--scene":
+                    if (!TryConsumeValue(args, ref i, "--scene", out explicitScenePath, @err)) return 1;
+                    break;
+                case "--scene-length-unit":
+                    if (!TryConsumeValue(args, ref i, "--scene-length-unit", out string sceneUnitStr, @err)) return 1;
+                    if (!TryParseSceneLengthUnit(sceneUnitStr, out var parsedSceneUnit))
+                    {
+                        @err.WriteLine($"Error: Invalid scene length unit '{sceneUnitStr}'. Use ft, m, cm or mm.");
+                        return 1;
+                    }
+                    sceneLengthUnit = parsedSceneUnit;
                     break;
                 case "--sets-xml":
                     if (!TryConsumeValue(args, ref i, "--sets-xml", out explicitSetsXmlPath, @err)) return 1;
@@ -472,6 +488,20 @@ internal static class Program
         bool isNwf = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
         bool isManifest = inputPath.EndsWith(".nwf.xml", StringComparison.OrdinalIgnoreCase);
 
+        if (!string.IsNullOrEmpty(explicitScenePath))
+        {
+            if (isDirectory || isNwf || isManifest || multipleInputs)
+            {
+                @err.WriteLine("Error: --scene is only supported for a single .nwc or .nwd document.");
+                return 1;
+            }
+            if (!readMeshes || !readMaterials || !includeTransforms || !includeTree)
+            {
+                @err.WriteLine("Error: --scene cannot be combined with --no-meshes, --no-materials, --no-transforms or --no-tree.");
+                return 1;
+            }
+        }
+
         if ((recursiveFolders || folderPattern is not null) && !isDirectory)
         {
             @err.WriteLine("Error: --recursive and --pattern are only supported for folder input.");
@@ -678,6 +708,30 @@ internal static class Program
         {
             @err.WriteLine($"Error reading '{inputPath}': {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return 3;
+        }
+
+        if (!string.IsNullOrEmpty(explicitScenePath))
+        {
+            NwcIO.Scene.NwcSceneResult sceneResult;
+            try
+            {
+                EnsureParentDirectory(explicitScenePath);
+                sceneResult = NwcIO.Scene.NwcSceneReader.Read(doc, new NwcIO.Scene.NwcSceneOptions
+                {
+                    ModelKey = Path.GetFileName(inputPath),
+                    LengthUnit = sceneLengthUnit,
+                });
+                IOScene.SceneJson.Save(sceneResult.Document, explicitScenePath);
+            }
+            catch (Exception ex)
+            {
+                @err.WriteLine($"Error writing scene '{explicitScenePath}': {ex.Message}");
+                return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
+            }
+            foreach (var diagnostic in sceneResult.Diagnostics)
+            {
+                @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
+            }
         }
 
         bool outputIsIfc = outputPath.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase);
@@ -1905,6 +1959,41 @@ internal static class Program
         }
 
         return count;
+    }
+
+    private static bool TryParseSceneLengthUnit(string value, out NwcLengthUnit unit)
+    {
+        switch (value.ToLowerInvariant())
+        {
+            case "ft":
+            case "feet":
+                unit = NwcLengthUnit.Feet;
+                return true;
+            case "m":
+            case "meter":
+            case "meters":
+            case "metre":
+            case "metres":
+                unit = NwcLengthUnit.Meters;
+                return true;
+            case "cm":
+            case "centimeter":
+            case "centimeters":
+            case "centimetre":
+            case "centimetres":
+                unit = NwcLengthUnit.Centimeters;
+                return true;
+            case "mm":
+            case "millimeter":
+            case "millimeters":
+            case "millimetre":
+            case "millimetres":
+                unit = NwcLengthUnit.Millimeters;
+                return true;
+            default:
+                unit = NwcLengthUnit.Unknown;
+                return false;
+        }
     }
 
     private static bool TryConsumeValue(string[] args, ref int i, string optionName, out string value, TextWriter? err = null)
