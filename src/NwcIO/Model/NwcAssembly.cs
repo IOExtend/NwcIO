@@ -12,9 +12,23 @@ namespace NwcIO.Model;
 public sealed class NwcAssembly
 {
     private NwcSpatialIndex? _spatialIndex;
+    private readonly Dictionary<NwcMesh, int> _meshModelIndexes;
 
     public string Name { get; }
     public IReadOnlyList<NwcDocument> Models { get; }
+
+    /// <summary>True when the contributing models report different length units; the assembly does not rescale them.</summary>
+    public bool HasMixedLengthUnits =>
+        Models.Select(model => model.LengthUnit)
+            .Where(unit => unit != NwcLengthUnit.Unknown)
+            .Distinct()
+            .Skip(1)
+            .Any();
+
+    /// <summary>
+    /// Synthetic assembly root. Its id is negative so it cannot collide with the
+    /// document roots (id 0); node ids are otherwise unique only within a document.
+    /// </summary>
     public NwcNode RootNode { get; }
     public IReadOnlyList<NwcMesh> AllMeshes { get; }
     public IReadOnlyList<NwcMaterial> AllMaterials { get; }
@@ -62,7 +76,8 @@ public sealed class NwcAssembly
         IReadOnlyList<NwcMesh> allMeshes,
         IReadOnlyList<NwcMaterial> allMaterials,
         BoundingBox3d boundingBox,
-        IReadOnlyList<NwcSavedViewpoint> savedViewpoints)
+        IReadOnlyList<NwcSavedViewpoint> savedViewpoints,
+        Dictionary<NwcMesh, int> meshModelIndexes)
     {
         Name = name;
         Models = models;
@@ -71,6 +86,27 @@ public sealed class NwcAssembly
         AllMaterials = allMaterials;
         BoundingBox = boundingBox;
         SavedViewpoints = savedViewpoints;
+        _meshModelIndexes = meshModelIndexes;
+    }
+
+    /// <summary>
+    /// Returns the zero-based index of the source model that owns <paramref name="mesh"/>,
+    /// or -1 when the mesh does not belong to this assembly.
+    /// </summary>
+    public int GetModelIndex(NwcMesh mesh)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        return _meshModelIndexes.TryGetValue(mesh, out int index) ? index : -1;
+    }
+
+    /// <summary>
+    /// Returns the source model that owns <paramref name="mesh"/>, or null when the
+    /// mesh does not belong to this assembly.
+    /// </summary>
+    public NwcDocument? GetModelOf(NwcMesh mesh)
+    {
+        int index = GetModelIndex(mesh);
+        return index >= 0 && index < Models.Count ? Models[index] : null;
     }
 
     /// <summary>
@@ -89,6 +125,7 @@ public sealed class NwcAssembly
 
         var modelList = models.ToList();
         var allMeshes = new List<NwcMesh>();
+        var meshModelIndexes = new Dictionary<NwcMesh, int>();
         // Dedupe by reference, NOT by name: disciplines routinely define their own
         // material with a shared name (Concrete, Steel) and different colours, and a
         // by-name map would silently drop the later ones from AllMaterials.
@@ -100,7 +137,11 @@ public sealed class NwcAssembly
         for (int m = 0; m < modelList.Count; m++)
         {
             var doc = modelList[m];
-            allMeshes.AddRange(doc.Meshes);
+            foreach (var mesh in doc.Meshes)
+            {
+                allMeshes.Add(mesh);
+                meshModelIndexes[mesh] = m;
+            }
 
             foreach (var mat in doc.Materials)
             {
@@ -121,7 +162,7 @@ public sealed class NwcAssembly
                 string docName = Path.GetFileNameWithoutExtension(doc.FileInfo.SourcePath ?? $"Model_{m + 1}");
                 var fallbackNode = new NwcNode
                 {
-                    Id = m + 1,
+                    Id = -(m + 2),
                     Name = docName,
                     Class = "LcOpModelFile",
                 };
@@ -144,13 +185,13 @@ public sealed class NwcAssembly
 
         var rootNode = new NwcNode
         {
-            Id = 0,
+            Id = -1,
             Name = name,
             Class = "LcOpModelAssembly",
         };
         rootNode.Children.AddRange(rootChildren);
 
-        return new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints);
+        return new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints, meshModelIndexes);
     }
 
     /// <summary>
@@ -341,7 +382,9 @@ public sealed class NwcAssembly
     }
 
     /// <summary>
-    /// Detects spatial geometric clashes (bounding box overlaps) between meshes belonging to different models.
+    /// Detects spatial clashes between meshes belonging to different models. Meshes whose world bounding boxes
+    /// come within <paramref name="tolerance"/> of each other are reported; the overlap box is empty when they
+    /// only come close.
     /// </summary>
     public IReadOnlyList<NwcClash> FindClashes(double tolerance = 0.0)
     {
@@ -351,6 +394,7 @@ public sealed class NwcAssembly
         }
 
         var clashes = new List<NwcClash>();
+        var modelKeys = NwcElementGuid.ModelKeys(Models);
 
         // Build per-model spatial indexes
         var modelIndexes = new (NwcDocument Doc, NwcSpatialIndex Index)[Models.Count];
@@ -385,7 +429,7 @@ public sealed class NwcAssembly
                     {
                         var meshB = candidatesB[n];
                         var boxB = meshB.GetWorldBoundingBox();
-                        if (boxA.Intersects(boxB))
+                        if (expanded.Intersects(boxB))
                         {
                             var overlap = new BoundingBox3d(
                                 new Vector3d(
@@ -396,8 +440,21 @@ public sealed class NwcAssembly
                                     Math.Min(boxA.Max.X, boxB.Max.X),
                                     Math.Min(boxA.Max.Y, boxB.Max.Y),
                                     Math.Min(boxA.Max.Z, boxB.Max.Z)));
+                            if (overlap.IsEmpty)
+                            {
+                                // Near miss: point at the middle of the gap (or of the overlap on axes that overlap).
+                                var point = new Vector3d(
+                                    (Math.Max(boxA.Min.X, boxB.Min.X) + Math.Min(boxA.Max.X, boxB.Max.X)) * 0.5,
+                                    (Math.Max(boxA.Min.Y, boxB.Min.Y) + Math.Min(boxA.Max.Y, boxB.Max.Y)) * 0.5,
+                                    (Math.Max(boxA.Min.Z, boxB.Min.Z) + Math.Min(boxA.Max.Z, boxB.Max.Z)) * 0.5);
+                                overlap = new BoundingBox3d(point, point);
+                            }
 
-                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap));
+                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap)
+                            {
+                                ModelKeyA = modelKeys[i],
+                                ModelKeyB = modelKeys[j],
+                            });
                         }
                     }
                 }
@@ -546,21 +603,51 @@ public sealed class NwcAssembly
     /// <summary>Exports the entire federated assembly to a Wavefront OBJ file.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
     {
-        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name);
+        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name, GetModelLabel);
+    }
+
+    internal string? GetModelLabel(NwcMesh mesh)
+    {
+        int modelIndex = GetModelIndex(mesh);
+        if (modelIndex < 0)
+        {
+            return null;
+        }
+
+        var model = Models[modelIndex];
+        string modelName = Path.GetFileNameWithoutExtension(model.FileInfo.SourcePath ?? string.Empty);
+        if (string.IsNullOrEmpty(modelName))
+        {
+            modelName = $"Model_{modelIndex + 1}";
+        }
+        return $"M{modelIndex + 1}_{modelName}";
     }
 
     /// <summary>
-    /// Builds a single document that carries the assembly scene tree, meshes,
-    /// materials, viewpoints, selection sets, GUIDs and TimeLiner schedule.
+    /// Builds a single document that carries the assembly scene tree, meshes with their transforms,
+    /// viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
     /// The file info is neutral and does not claim a Revit origin.
     /// </summary>
+    /// <remarks>
+    /// Node ids of different models overlap (every document root is 0), so the exported tree is a copy
+    /// numbered depth-first from 0 (the assembly root); the assembly itself is not changed. Selection sets
+    /// and TimeLiner tasks stored in the source models bind to the ids of their own tree and are not
+    /// carried over; only <see cref="SelectionSets"/> and <see cref="TimeLiner"/> of the assembly are
+    /// written, unchanged. Materials are part of the returned document but the .nwc writer does not store them.
+    /// </remarks>
     public NwcDocument ToDocument()
     {
-        var guids = Models.SelectMany(m => m.Guids).ToList();
-        var selectionSets = SelectionSets.Count > 0
-            ? SelectionSets
-            : Models.SelectMany(m => m.SelectionSets).ToList();
-        var timeLiner = TimeLiner ?? Models.Select(m => m.TimeLiner).FirstOrDefault(t => t is not null);
+        int nextId = 0;
+        NwcNode Renumber(NwcNode source, NwcNode? parent)
+        {
+            var copy = new NwcNode { Id = nextId++, Name = source.Name, Class = source.Class, Parent = parent };
+            copy.Properties.AddRange(source.Properties);
+            foreach (var child in source.Children)
+            {
+                copy.Children.Add(Renumber(child, copy));
+            }
+            return copy;
+        }
 
         return NwcDocument.Create(
             fileInfo: new NwcFileInfo
@@ -570,11 +657,11 @@ public sealed class NwcAssembly
             },
             meshes: AllMeshes,
             savedViewpoints: SavedViewpoints,
-            guids: guids,
+            guids: Models.SelectMany(m => m.Guids),
             materials: AllMaterials,
-            rootNode: RootNode,
-            selectionSets: selectionSets,
-            timeLiner: timeLiner);
+            rootNode: Renumber(RootNode, null),
+            selectionSets: SelectionSets,
+            timeLiner: TimeLiner);
     }
 
     /// <summary>Exports the federated assembly as a single .nwc document.</summary>
