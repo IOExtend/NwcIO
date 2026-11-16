@@ -57,6 +57,7 @@ internal static class JsonExporter
             }
 
             writer.WriteEndObject();
+            FlushIfNeeded(writer);
         }
 
         writer.WriteEndArray();
@@ -66,6 +67,7 @@ internal static class JsonExporter
         foreach (var guid in document.Guids)
         {
             writer.WriteStringValue(guid.ToString("D"));
+            FlushIfNeeded(writer);
         }
 
         writer.WriteEndArray();
@@ -123,6 +125,7 @@ internal static class JsonExporter
                 writer.WriteEndArray();
 
                 writer.WriteEndObject();
+                FlushIfNeeded(writer);
             }
 
             writer.WriteEndArray();
@@ -168,6 +171,7 @@ internal static class JsonExporter
                 }
 
                 writer.WriteEndObject();
+                FlushIfNeeded(writer);
             }
 
             writer.WriteEndArray();
@@ -298,9 +302,20 @@ internal static class JsonExporter
 
     public static void WriteFile(NwcDocument document, string path, NwcJsonExportOptions options)
     {
-        using var stream = File.Create(path);
-        Write(document, stream, options);
+        // Output is flushed while writing, so a failure part-way would leave truncated JSON; remove it.
+        try
+        {
+            using var stream = File.Create(path);
+            Write(document, stream, options);
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
     }
+
+    private const int FlushThreshold = 64 * 1024;
 
     private static void WriteNodeRecursive(Utf8JsonWriter writer, NwcNode node)
     {
@@ -409,6 +424,17 @@ internal static class JsonExporter
             }
 
             writer.WriteEndArray();
+        }
+
+        FlushIfNeeded(writer);
+    }
+
+    // Keeps the pending buffer bounded so the output stream receives data while the export is still running.
+    private static void FlushIfNeeded(Utf8JsonWriter writer)
+    {
+        if (writer.BytesPending > FlushThreshold)
+        {
+            writer.Flush();
         }
     }
 

@@ -19,12 +19,14 @@ internal static class TransformParser
     public static List<NwcTransform> Parse(byte[] data)
     {
         var transforms = new List<NwcTransform>();
-        if (data.Length < 16)
+        bool writerStream = data.Length >= 8 &&
+            BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(0)) == TransformStreamFormat.TransformsMagic;
+        if (data.Length < 16 && !writerStream)
         {
             return transforms;
         }
 
-        int pos = 4;
+        int pos = writerStream ? 8 : 4;
         while (pos + 8 <= data.Length)
         {
             int recId = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos));
@@ -98,6 +100,18 @@ internal static class TransformParser
             else
             {
                 pos += 4;
+            }
+        }
+
+        // The writer states how many records it wrote and the link stream indexes into them, so a record
+        // lost here would silently attach every later mesh to the wrong transform.
+        if (writerStream)
+        {
+            int declared = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(4));
+            if (declared != transforms.Count)
+            {
+                throw new InvalidDataException(
+                    $"Transform stream declares {declared} records but {transforms.Count} were read.");
             }
         }
 

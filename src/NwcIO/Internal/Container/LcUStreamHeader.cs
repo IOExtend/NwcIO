@@ -8,7 +8,8 @@ namespace NwcIO.Internal.Container;
 /// </summary>
 internal sealed class LcUStreamHeader
 {
-    public required int FileOffset { get; init; }
+    /// <summary>Absolute file offset where the header starts.</summary>
+    public required long FileOffset { get; init; }
 
     /// <summary>Total header length in bytes (text line + terminating LF).</summary>
     public required int HeaderLength { get; init; }
