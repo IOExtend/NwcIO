@@ -42,6 +42,59 @@ public class IfcExportTests
     }
 
     [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, true, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, false, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, true, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, false, false)]
+    public void SaveIfc_CubeWithSplitRenderVertices_StaysAClosedSolid(
+        NwcIfcSchemaVersion schema, bool sharedVertices, bool tessellate)
+    {
+        var mesh = CreateSplitVertexCube();
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            SharedVertices = sharedVertices,
+            UseTessellationInIfc4 = tessellate,
+        });
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3 || !tessellate)
+        {
+            Assert.Contains("IFCCLOSEDSHELL(", ifc);
+            Assert.Contains("IFCFACETEDBREP(", ifc);
+            Assert.DoesNotContain("IFCOPENSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains(",$,.T.,", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_AssemblyWithSplitRenderVertices_StaysAClosedSolid(NwcIfcSchemaVersion schema)
+    {
+        var doc = NwcDocument.Create(meshes: [CreateSplitVertexCube()]);
+        using var sw = new StringWriter();
+
+        NwcAssembly.Create("Split assembly", doc).SaveIfc(sw, new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        string ifc = sw.ToString();
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCCLOSEDSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains(",$,.T.,", ifc);
+        }
+    }
+
+    [Theory]
     [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
     [InlineData(NwcIfcSchemaVersion.Ifc4)]
     public void SaveIfc_ClosedCube_StaysAClosedSolid(NwcIfcSchemaVersion schema)
@@ -151,6 +204,32 @@ public class IfcExportTests
         });
         Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet',$,$);", ifc4);
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
+    }
+
+    /// <summary>Cube as the NWC reader emits it: every face has its own four render vertices with a face normal.</summary>
+    private static NwcMesh CreateSplitVertexCube()
+    {
+        var positions = new[]
+        {
+            new Vector3d(0, 0, 0), new Vector3d(1000, 0, 0), new Vector3d(1000, 1000, 0), new Vector3d(0, 1000, 0),
+            new Vector3d(0, 0, 1000), new Vector3d(1000, 0, 1000), new Vector3d(1000, 1000, 1000), new Vector3d(0, 1000, 1000),
+        };
+        int[][] faces =
+        [
+            [0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+            [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7],
+        ];
+
+        var vertices = new List<Vector3d>(24);
+        var indices = new List<int>(36);
+        foreach (var face in faces)
+        {
+            int first = vertices.Count;
+            vertices.AddRange(face.Select(index => positions[index]));
+            indices.AddRange([first, first + 1, first + 2, first, first + 2, first + 3]);
+        }
+
+        return new NwcMesh { Id = 1, Name = "Split cube", Vertices = vertices, Indices = indices };
     }
 
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")

@@ -152,7 +152,7 @@ internal static class IfcExporter
                 continue;
             }
 
-            bool closed = IsWatertight(indices, vertices.Count);
+            bool closed = IsWatertight(indices, vertices);
 
             // Material style
             int? styleId = null;
@@ -385,7 +385,7 @@ internal static class IfcExporter
                     continue;
                 }
 
-                bool closed = IsWatertight(indices, vertices.Count);
+                bool closed = IsWatertight(indices, vertices);
 
                 int? styleId = null;
                 if (options.ExportMaterials && mesh.Material is not null)
@@ -776,23 +776,40 @@ internal static class IfcExporter
         return false;
     }
 
-    /// <summary>Every undirected edge is shared by exactly two valid triangles, i.e. the surface is closed.</summary>
-    private static bool IsWatertight(IReadOnlyList<int> indices, int vertexCount)
+    /// <summary>
+    /// Every undirected edge is shared by exactly two valid triangles, i.e. the surface is closed. Vertices
+    /// are welded by position first: real NWC meshes store render vertices, so one position is repeated for
+    /// every face normal and index-based edges would report every flat-shaded solid as open.
+    /// </summary>
+    private static bool IsWatertight(IReadOnlyList<int> indices, IReadOnlyList<Vector3d> vertices)
     {
+        var canonical = new Dictionary<Vector3d, int>(vertices.Count);
+        var ids = new int[vertices.Count];
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            if (!canonical.TryGetValue(vertices[i], out int id))
+            {
+                id = canonical.Count;
+                canonical[vertices[i]] = id;
+            }
+
+            ids[i] = id;
+        }
+
         var edges = new Dictionary<(int Low, int High), int>();
         for (int i = 0; i + 2 < indices.Count; i += 3)
         {
             int a = indices[i];
             int b = indices[i + 1];
             int c = indices[i + 2];
-            if ((uint)a >= (uint)vertexCount || (uint)b >= (uint)vertexCount || (uint)c >= (uint)vertexCount)
+            if ((uint)a >= (uint)vertices.Count || (uint)b >= (uint)vertices.Count || (uint)c >= (uint)vertices.Count)
             {
                 continue;
             }
 
-            CountEdge(edges, a, b);
-            CountEdge(edges, b, c);
-            CountEdge(edges, c, a);
+            CountEdge(edges, ids[a], ids[b]);
+            CountEdge(edges, ids[b], ids[c]);
+            CountEdge(edges, ids[c], ids[a]);
         }
 
         return edges.Count > 0 && edges.Values.All(count => count == 2);

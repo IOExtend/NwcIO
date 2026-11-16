@@ -97,6 +97,28 @@ public class IfcBridgeTests
     }
 
     [Fact]
+    public void SaveIfc_WithSectionBoxContainingTheWholeCube_StaysClosed()
+    {
+        var doc = CreateCubeDocument();
+
+        using var sw = new StringWriter();
+        doc.SaveIfc(sw, new NwcIfcExportOptions
+        {
+            SectionBox = new NwcSectionBox
+            {
+                Bounds = new BoundingBox3d(new Vector3d(-10, -10, -10), new Vector3d(2000, 2000, 2000)),
+                IsEnabled = true,
+            },
+            ClipGeometryWithSectionPlanes = true,
+        });
+
+        string ifc = sw.ToString();
+        Assert.Contains("IFCCLOSEDSHELL(", ifc);
+        Assert.Contains("IFCFACETEDBREP(", ifc);
+        Assert.DoesNotContain("IFCSHELLBASEDSURFACEMODEL(", ifc);
+    }
+
+    [Fact]
     public void SaveIfc_WithSectionPlane_ClipsGeometry()
     {
         var doc = CreateCubeDocument();
