@@ -826,6 +826,51 @@ public sealed class ClashDetectiveTests
         }
     }
 
+    [Theory]
+    [InlineData(0.0001, 0.001, 0)]
+    [InlineData(0.002, 0.001, 1)]
+    public void HardTolerance_FiltersOnlyShallowPenetration(double overlap, double tolerance, int expected)
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(1 - overlap, 0, 0), new Vector3d(2 - overlap, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("tolerance", NwcClashTestType.Hard, tolerance);
+        doc.RunClashDetection(test);
+
+        Assert.Equal(expected, test.Results.Count);
+    }
+
+    [Theory]
+    [InlineData(0.0005, 0.001, 1)]
+    [InlineData(0.0005, 0.0001, 0)]
+    public void ClearanceTolerance_ReportsGapsBelowTolerance(double gap, double tolerance, int expected)
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(1 + gap, 0, 0), new Vector3d(2 + gap, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("clearance", NwcClashTestType.Clearance, tolerance);
+        doc.RunClashDetection(test);
+
+        Assert.Equal(expected, test.Results.Count);
+        if (expected == 1)
+        {
+            Assert.Equal(gap, test.Results[0].Distance, 9); // positive for clearance
+        }
+    }
+
+    [Fact]
+    public void ClearanceTolerance_LineMesh_ReportsNoClash()
+    {
+        var box = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var line = new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
+        var doc = new NwcDocumentBuilder().AddMesh(box).AddMesh(line).Build();
+        var test = new NwcClashTest("Lines", NwcClashTestType.Clearance, tolerance: 0.05);
+        doc.RunClashDetection(test);
+        Assert.Empty(test.Results);
+    }
+
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)
     {
         var vertices = new Vector3d[]

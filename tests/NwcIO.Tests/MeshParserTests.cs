@@ -69,6 +69,205 @@ public class MeshParserTests
         Assert.Empty(MeshParser.Parse(container));
     }
 
+    [Fact]
+    public void Parse_SkippedRecord_DoesNotShiftLaterIdsOrTransforms()
+    {
+        // Record 0 is malformed and rejected; records 1 and 2 are triangles.
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = skipped.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, skipped.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100, Translation = new Vector3d(100, 0, 0) },
+            new NwcTransform { Id = 101, Translation = new Vector3d(101, 0, 0) },
+            new NwcTransform { Id = 102, Translation = new Vector3d(102, 0, 0) },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms);
+
+        Assert.Equal(2, meshes.Count);
+        Assert.Equal([1, 2], meshes.Select(m => m.Id));
+        Assert.Same(transforms[1], meshes[0].Transform);
+        Assert.Same(transforms[2], meshes[1].Transform);
+    }
+
+    [Fact]
+    public void Parse_RecordRejectedByVertexValidation_DoesNotShiftLaterIdsOrTransforms()
+    {
+        // Record 0 passes the header checks but its coordinate is beyond the reader limit.
+        var overLimit = Int32Bytes(0, 94, 0, 60, 3, 9,
+            BitConverter.SingleToInt32Bits(3e8f), 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = overLimit.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, overLimit.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100 },
+            new NwcTransform { Id = 101 },
+            new NwcTransform { Id = 102 },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms);
+
+        Assert.Equal([1, 2], meshes.Select(m => m.Id));
+        Assert.Same(transforms[1], meshes[0].Transform);
+        Assert.Same(transforms[2], meshes[1].Transform);
+    }
+
+    [Fact]
+    public void Parse_SkippedRecord_BindsLinkIndicesByRecordOrder()
+    {
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = skipped.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, skipped.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100 },
+            new NwcTransform { Id = 101 },
+            new NwcTransform { Id = 102 },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms, transformIndices: [0, 2, 1]);
+
+        Assert.Same(transforms[2], meshes[0].Transform);
+        Assert.Same(transforms[1], meshes[1].Transform);
+    }
+
+    [Fact]
+    public void Parse_FewerTransformsThanRecords_LeavesTheLaterRecordsUnplaced()
+    {
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = skipped.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, skipped.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100 },
+            new NwcTransform { Id = 101 },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms);
+
+        Assert.Equal(2, meshes.Count);
+        Assert.Same(transforms[1], meshes[0].Transform);
+        Assert.Null(meshes[1].Transform);
+    }
+
+    [Fact]
+    public void Parse_TwoVertexClass95Record_ReturnsLineMesh()
+    {
+        var record = Int32Bytes(0, 95, 0, 60, 2, 6,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0);
+        var toc = Int32Bytes(1, 1, record.Length, record.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([record, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var mesh = Assert.Single(MeshParser.Parse(container));
+
+        Assert.Equal(2, mesh.Vertices.Count);
+        Assert.Empty(mesh.Indices);
+        Assert.Equal([0, 1], mesh.LineIndices);
+        Assert.Equal(0, mesh.TriangleCount);
+    }
+
+    [Fact]
+    public void Parse_MaxMeshVertices_IsConfigurable()
+    {
+        var record = Int32Bytes(0, 94, 0, 60, 4, 12,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0,
+            BitConverter.SingleToInt32Bits(1f), BitConverter.SingleToInt32Bits(1f), 0);
+        var toc = Int32Bytes(1, 1, record.Length, record.Length);
+        var bytes = NwcContainerWriter.Write([record, toc]);
+
+        var container = NwcContainerReader.Read(bytes);
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        Assert.Empty(MeshParser.Parse(container, maxVertices: 3));
+        Assert.Single(MeshParser.Parse(container, maxVertices: 4));
+
+        using var file = new MemoryStream(bytes);
+        Assert.Empty(NwcDocument.Open(file, new NwcReaderOptions { MaxMeshVertices = 3 }).Meshes);
+    }
+
+    [Fact]
+    public void Parse_Class95RecordWithThreeVertices_ReturnsPolylineNotTriangles()
+    {
+        var record = Int32Bytes(0, 95, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var toc = Int32Bytes(1, 1, record.Length, record.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([record, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var mesh = Assert.Single(MeshParser.Parse(container));
+
+        Assert.Empty(mesh.Indices);
+        Assert.Equal([0, 1, 1, 2], mesh.LineIndices);
+    }
+
+    [Fact]
+    public void Parse_TwoVertexRecordWithoutToc_ReturnsLineMesh()
+    {
+        var data = Int32Bytes(0, 60, 2, 0,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([data]));
+
+        var mesh = Assert.Single(MeshParser.Parse(container));
+
+        Assert.Equal([0, 1], mesh.LineIndices);
+    }
+
+    [Fact]
+    public void Parse_HeuristicVertexCountBeyondTheBuffer_SkipsRecordWithoutAllocating()
+    {
+        // 357913942 * 12 wraps to 8 in an int; the cap is raised so the count reaches the size check.
+        var data = Int32Bytes(0, 60, 357913942, 0, 0, 0, 0, 0);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([data]));
+
+        Assert.Empty(MeshParser.Parse(container, maxVertices: int.MaxValue));
+    }
+
+    [Fact]
+    public void Parse_MaxVerticesBelowTheMinimum_Throws()
+    {
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([Int32Bytes(0, 0, 0, 0)]));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => MeshParser.Parse(container, maxVertices: 2));
+    }
+
     private static byte[] Int32Bytes(params int[] values)
     {
         var data = new byte[values.Length * 4];
@@ -355,6 +554,145 @@ public class MeshParserTests
 
         var meshes = MeshParser.Parse(container);
         Assert.Empty(meshes);
+    }
+
+    [Fact]
+    public void Parse_WithoutLinkTable_BindsTransformsByPosition()
+    {
+        var data = new byte[16 + 3 * 12];
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(0), 101);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 60);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), 3);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(12), 9);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(16), 0f);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(28), 1f);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(44), 1f);
+
+        var stream = new LcRawStream
+        {
+            Index = 0,
+            FileOffset = 0,
+            CompressedLength = data.Length,
+            GapBefore = 0,
+            Data = data,
+            SectionIndex = 0,
+            Kind = NwcStreamKind.Geometry,
+        };
+        var container = new NwcContainer
+        {
+            Sections = [],
+            Streams = [stream],
+            FileLength = data.Length,
+            TrailingGap = 0,
+        };
+        var first = new NwcTransform { Id = 999, Translation = new Vector3d(1, 2, 3) };
+        var second = new NwcTransform { Id = 998, Translation = new Vector3d(4, 5, 6) };
+
+        var mesh = Assert.Single(MeshParser.Parse(container, [first, second]));
+
+        Assert.Same(first, mesh.Transform);
+    }
+
+    [Fact]
+    public void Parse_TrailerIds_PreserveZeroAndMakeDuplicatesUnique()
+    {
+        var first = TrailerRecord(0, meshId: 5, [0, 1, 2], "A");
+        var second = TrailerRecord(1, meshId: 0, [0, 1, 2], "B");
+        var third = TrailerRecord(2, meshId: 0, [0, 1, 2], "C");
+
+        var meshes = ParseRecords(first, second, third);
+
+        Assert.Equal([5, 0, 2], meshes.Select(mesh => mesh.Id));
+    }
+
+    [Theory]
+    [InlineData("magic")]
+    [InlineData("indexCount")]
+    [InlineData("negativeIndexCount")]
+    [InlineData("indexRange")]
+    [InlineData("nameLength")]
+    [InlineData("truncated")]
+    public void Parse_MalformedTrailer_FallsBackToTheStrip(string defect)
+    {
+        var record = TrailerRecord(0, meshId: 0, [0, 1, 2], "Name", defect);
+
+        var mesh = Assert.Single(ParseRecords(record));
+
+        Assert.Equal([0, 1, 2], mesh.Indices);
+        Assert.Equal("Mesh_0", mesh.Name);
+    }
+
+    [Fact]
+    public void Parse_TrailerName_DropsControlCharacters()
+    {
+        var record = TrailerRecord(0, meshId: 0, [0, 1, 2], "A\nB\rC");
+
+        var mesh = Assert.Single(ParseRecords(record));
+
+        Assert.Equal("ABC", mesh.Name);
+    }
+
+    [Fact]
+    public void Parse_EmptyTrailerName_UsesTrailerIdForSynthesizedName()
+    {
+        var record = TrailerRecord(0, meshId: 7, [0, 1, 2], "");
+
+        var mesh = Assert.Single(ParseRecords(record));
+
+        Assert.Equal(7, mesh.Id);
+        Assert.Equal("Mesh_7", mesh.Name);
+    }
+
+    private static List<NwcMesh> ParseRecords(params byte[][] records)
+    {
+        var chunk = records.SelectMany(record => record).ToArray();
+        var toc = new int[3 + records.Length];
+        toc[0] = records.Length;
+        toc[1] = 1;
+        toc[2] = chunk.Length;
+        for (int i = 0; i < records.Length; i++)
+        {
+            toc[3 + i] = records[i].Length;
+        }
+
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, Int32Bytes(toc)]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+        return MeshParser.Parse(container).ToList();
+    }
+
+    private static byte[] TrailerRecord(int recId, int meshId, int[] indices, string name, string? defect = null)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        writer.Write(recId);
+        writer.Write(94);
+        writer.Write(0);
+        writer.Write(60);
+        writer.Write(3);
+        writer.Write(9);
+        writer.Write(0f); writer.Write(0f); writer.Write(0f);
+        writer.Write(1f); writer.Write(0f); writer.Write(0f);
+        writer.Write(0f); writer.Write(1f); writer.Write(0f);
+
+        int magic = defect == "magic" ? 0x12345678 : NwcStreamSerializer.MeshTrailerMagic;
+        writer.Write(magic);
+        writer.Write(defect == "indexCount" ? 4 : defect == "negativeIndexCount" ? -3 : indices.Length);
+        foreach (int index in indices)
+        {
+            writer.Write(defect == "indexRange" ? 3 : index);
+        }
+
+        writer.Write(meshId);
+        byte[] nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
+        writer.Write(defect == "nameLength" ? -1 : nameBytes.Length);
+        writer.Write(nameBytes);
+        while ((ms.Position & 3) != 0)
+        {
+            writer.Write((byte)0);
+        }
+
+        byte[] record = ms.ToArray();
+        return defect == "truncated" ? record[..^2] : record;
     }
 
     [Fact]
