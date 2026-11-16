@@ -1199,10 +1199,7 @@ internal static class Program
         else if (outputPath.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase))
         {
             EnsureParentDirectory(outputPath);
-            var merged = NwcDocument.Create(
-                fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
-                meshes: assembly.AllMeshes);
-            merged.Save(outputPath);
+            assembly.SaveNwc(outputPath);
         }
         else if (outputPath == "-")
         {
@@ -1228,10 +1225,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitNwcPath))
         {
             EnsureParentDirectory(explicitNwcPath);
-            var merged = NwcDocument.Create(
-                fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
-                meshes: assembly.AllMeshes);
-            merged.Save(explicitNwcPath);
+            assembly.SaveNwc(explicitNwcPath);
         }
         if (!string.IsNullOrEmpty(explicitGlbPath)) { EnsureParentDirectory(explicitGlbPath); assembly.SaveGlb(explicitGlbPath, worldCoords); }
         if (!string.IsNullOrEmpty(explicitObjPath)) { EnsureParentDirectory(explicitObjPath); assembly.SaveObj(explicitObjPath, worldCoords); }
@@ -1499,10 +1493,7 @@ internal static class Program
         else if (outputPath.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase))
         {
             EnsureParentDirectory(outputPath);
-            var merged = NwcDocument.Create(
-                fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
-                meshes: assembly.AllMeshes);
-            merged.Save(outputPath);
+            assembly.SaveNwc(outputPath);
         }
         else if (outputPath == "-")
         {
@@ -1528,10 +1519,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitNwcPath))
         {
             EnsureParentDirectory(explicitNwcPath);
-            var merged = NwcDocument.Create(
-                fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
-                meshes: assembly.AllMeshes);
-            merged.Save(explicitNwcPath);
+            assembly.SaveNwc(explicitNwcPath);
         }
         if (!string.IsNullOrEmpty(explicitGlbPath)) { EnsureParentDirectory(explicitGlbPath); assembly.SaveGlb(explicitGlbPath, worldCoords); }
         if (!string.IsNullOrEmpty(explicitObjPath)) { EnsureParentDirectory(explicitObjPath); assembly.SaveObj(explicitObjPath, worldCoords); }

@@ -538,6 +538,54 @@ public sealed class NwcAssembly
         return $"M{modelIndex + 1}_{modelName}";
     }
 
+    /// <summary>
+    /// Builds a single document that carries the assembly scene tree, meshes with their transforms,
+    /// viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
+    /// The file info is neutral and does not claim a Revit origin.
+    /// </summary>
+    /// <remarks>
+    /// Node ids of different models overlap (every document root is 0), so the exported tree is a copy
+    /// numbered depth-first from 0 (the assembly root); the assembly itself is not changed. Selection sets
+    /// and TimeLiner tasks stored in the source models bind to the ids of their own tree and are not
+    /// carried over; only <see cref="SelectionSets"/> and <see cref="TimeLiner"/> of the assembly are
+    /// written, unchanged. Materials are part of the returned document but the .nwc writer does not store them.
+    /// </remarks>
+    public NwcDocument ToDocument()
+    {
+        int nextId = 0;
+        NwcNode Renumber(NwcNode source, NwcNode? parent)
+        {
+            var copy = new NwcNode { Id = nextId++, Name = source.Name, Class = source.Class, Parent = parent };
+            copy.Properties.AddRange(source.Properties);
+            foreach (var child in source.Children)
+            {
+                copy.Children.Add(Renumber(child, copy));
+            }
+            return copy;
+        }
+
+        return NwcDocument.Create(
+            fileInfo: new NwcFileInfo
+            {
+                SourcePath = $"{Name}.nwc",
+                LoaderPlugin = "LcOpNwcIOAssembly",
+            },
+            meshes: AllMeshes,
+            savedViewpoints: SavedViewpoints,
+            guids: Models.SelectMany(m => m.Guids),
+            materials: AllMaterials,
+            rootNode: Renumber(RootNode, null),
+            selectionSets: SelectionSets,
+            timeLiner: TimeLiner);
+    }
+
+    /// <summary>Exports the federated assembly as a single .nwc document.</summary>
+    public void SaveNwc(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ToDocument().Save(path);
+    }
+
     /// <summary>Exports the entire federated assembly with geometry, materials, and spatial hierarchy to an IFC2x3 STEP file (.ifc).</summary>
     public void SaveIfc(string path, NwcIfcExportOptions? options = null)
     {

@@ -279,6 +279,80 @@ public class AssemblyTests
         }
     }
 
+    private static NwcDocument CreateTreeModel(string sourcePath, double x, string layerName, bool withSet = false)
+    {
+        var root = new NwcNode { Id = 0, Name = Path.GetFileNameWithoutExtension(sourcePath), Class = "Model" };
+        root.Children.Add(new NwcNode { Id = 1, Name = layerName, Class = "LcRevitLayer" });
+        var builder = new NwcDocumentBuilder()
+            .SetFileInfo(sourcePath, "LcIfcLoader")
+            .AddMesh(new NwcMesh
+            {
+                Id = 0,
+                Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+                Transform = new NwcTransform { Id = 100, Translation = new(x, 0, 0) },
+            })
+            .AddGuid(Guid.NewGuid())
+            .SetRootNode(root);
+        if (withSet)
+        {
+            builder.AddSelectionSet(new Model.Sets.NwcSelectionSet("Own", [1]));
+        }
+        return builder.Build();
+    }
+
+    [Fact]
+    public void SaveNwc_KeepsModelTreesTransformsAndAssemblySetsUnderNeutralOrigin()
+    {
+        var assembly = NwcAssembly.Create("Fed", CreateTreeModel("A.ifc", 0, "Level A"), CreateTreeModel("B.ifc", 20, "Level B"));
+        assembly.SelectionSets.Add(new Model.Sets.NwcSelectionSet("Everything") { NodePaths = { "Fed/A" } });
+        assembly.TimeLiner = new Model.TimeLiner.NwcTimeLinerSchedule();
+        assembly.TimeLiner.Tasks.Add(new Model.TimeLiner.NwcTimeLinerTask("t1", "Pour", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1)));
+        string path = Path.Combine(Path.GetTempPath(), "nwcio-asm-" + Guid.NewGuid().ToString("N") + ".nwc");
+        try
+        {
+            assembly.SaveNwc(path);
+
+            var reopened = NwcDocument.Open(path);
+            Assert.Equal("LcOpNwcIOAssembly", reopened.FileInfo.LoaderPlugin);
+            Assert.Equal("Fed.nwc", reopened.FileInfo.SourcePath);
+            Assert.Equal(2, reopened.Meshes.Count);
+            Assert.Equal("0,20", string.Join(",", reopened.Meshes.Select(m => m.Transform!.Translation.X)));
+            Assert.Equal(2, reopened.Guids.Count);
+            Assert.Equal("Fed", reopened.RootNode!.Name);
+            Assert.Equal("A,B", string.Join(",", reopened.RootNode.Children.Select(c => c.Name)));
+            Assert.Equal("Level A,Level B", string.Join(",", reopened.RootNode.Children.Select(c => Assert.Single(c.Children).Name)));
+            var set = Assert.IsType<Model.Sets.NwcSelectionSet>(Assert.Single(reopened.SelectionSets));
+            Assert.Equal("Everything", set.Name);
+            Assert.Equal("A", Assert.Single(set.ResolveNodes(reopened)).Name);
+            Assert.Equal("Pour", Assert.Single(reopened.TimeLiner!.Tasks).Name);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void ToDocument_NumbersTreeUniquelyLeavesAssemblyUntouchedAndSkipsModelSets()
+    {
+        var first = CreateTreeModel("A.ifc", 0, "Level A", withSet: true);
+        var second = CreateTreeModel("B.ifc", 20, "Level B");
+        var assembly = NwcAssembly.Create("Fed", first, second);
+
+        var document = assembly.ToDocument();
+
+        var ids = new List<int>();
+        void Collect(NwcNode node) { ids.Add(node.Id); node.Children.ForEach(Collect); }
+        Collect(document.RootNode!);
+        Assert.Equal(Enumerable.Range(0, 5), ids);
+        Assert.Equal(-1, assembly.RootNode.Id);
+        Assert.Equal(0, second.RootNode!.Id);
+        Assert.Empty(document.SelectionSets);
+        Assert.Null(document.TimeLiner);
+    }
+
     private static NwcDocument CreateComponentModel(string sourcePath, int meshId, double offsetX)
     {
         return new NwcDocumentBuilder().SetFileInfo(sourcePath)
