@@ -185,8 +185,11 @@ internal static class IfcExporter
             int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                 $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-            string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-            string elemGuid = IfcGuid.FromElementId(mesh.Id, "NwcMesh");
+            var owner = mesh.Node?.Element ?? mesh.Node;
+            string elemName = !string.IsNullOrEmpty(owner?.Name)
+                ? owner.Name
+                : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+            string elemGuid = ElementGuidOf(mesh, owner, modelIndex: 0, assembly: false);
             string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
             int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -413,8 +416,11 @@ internal static class IfcExporter
                 int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-                string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-                string elemGuid = IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
+                var owner = mesh.Node?.Element ?? mesh.Node;
+                string elemName = !string.IsNullOrEmpty(owner?.Name)
+                    ? owner.Name
+                    : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+                string elemGuid = ElementGuidOf(mesh, owner, modelIdx, assembly: true);
                 string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -813,6 +819,25 @@ internal static class IfcExporter
                 : w.Add("IFCDOORSTYLE", $"{StepWriter.Str(guid)},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(name)},$,$,$,$,$,.NOTDEFINED.,.NOTDEFINED.,.F.,.F."),
             _ => w.Add("IFCBUILDINGELEMENTPROXYTYPE", $"{prefix},.NOTDEFINED."),
         };
+    }
+
+    /// <summary>
+    /// GlobalId of one mesh product. The authoring element id is only the base: several fragments of one
+    /// element, and copies of one element across assembly models, must still get distinct IfcRoot ids.
+    /// </summary>
+    private static string ElementGuidOf(NwcMesh mesh, NwcNode? owner, int modelIndex, bool assembly)
+    {
+        if (!string.IsNullOrEmpty(owner?.IfcGlobalId))
+        {
+            return IfcGuid.FromKey($"ifc:element:{owner.IfcGlobalId}:mesh:{mesh.Id}:model:{modelIndex}");
+        }
+
+        if (owner?.ElementGuid is { } elementGuid && elementGuid != Guid.Empty)
+        {
+            return IfcGuid.FromKey($"ifc:element:{elementGuid:D}:mesh:{mesh.Id}:model:{modelIndex}");
+        }
+
+        return IfcGuid.FromElementId(mesh.Id + modelIndex * 1_000_000, assembly ? "NwcAssemblyMesh" : "NwcMesh");
     }
 
     private static string CleanTypeName(string elemName, string? matName, string ifcType)

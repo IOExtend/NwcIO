@@ -68,6 +68,51 @@ public class IfcExportTests
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveIfc_MeshInsideCompositeElement_UsesOwnerIdentity(bool assembly)
+    {
+        var element = new NwcNode
+        {
+            Id = 1,
+            Name = "Wall A",
+            Class = "LcRevitComposite",
+            IfcGlobalId = "2O2Fr$t4X7Zf8NOew3FL9r",
+            ElementGuid = Guid.NewGuid(),
+        };
+
+        NwcMesh Mesh(int id, NwcNode leaf, double x) => new()
+        {
+            Id = id,
+            Name = $"Mesh {id}",
+            Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = leaf,
+        };
+
+        var firstLeaf = new NwcNode { Id = 2, Name = "Solid", Class = "LcRevitSolid", Element = element };
+        var secondLeaf = new NwcNode { Id = 3, Name = "Panel", Class = "LcRevitSolid", Element = element };
+        var doc = NwcDocument.Create(meshes: [Mesh(10, firstLeaf, 0), Mesh(11, secondLeaf, 2)]);
+        string ifc;
+        if (assembly)
+        {
+            using var sw = new StringWriter();
+            NwcAssembly.Create("Composite", doc).SaveIfc(sw);
+            ifc = sw.ToString();
+        }
+        else
+        {
+            ifc = doc.ToIfcString(new NwcIfcExportOptions());
+        }
+
+        Assert.Contains("IFCWALL(", ifc);
+        var guids = System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCWALL\('([^']+)'")
+            .Select(m => m.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(2, guids.Distinct().Count());
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]
@@ -804,5 +849,50 @@ public class IfcExportTests
         }
 
         return NwcDocument.Create(meshes: meshes, materials: materials);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveIfc_LinkedNode_SuppliesElementNameAndGuid(bool assembly)
+    {
+        var guid = Guid.Parse("00112233-4455-6677-8899-aabbccddeeff");
+        string globalId = NwcIO.Internal.Export.IfcGuid.ToIfcGuid(guid);
+        var node = new NwcNode
+        {
+            Id = 7,
+            Name = "Concrete Wall 200",
+            Class = "LcRevitData_Element",
+            ElementGuid = guid,
+            IfcGlobalId = globalId,
+        };
+
+        var mesh = new NwcMesh
+        {
+            Id = 42,
+            Name = "Mesh_42",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = node,
+        };
+        node.Meshes.Add(mesh);
+        node.Mesh = mesh;
+
+        var doc = NwcDocument.Create(meshes: [mesh]);
+        using var sw = new StringWriter();
+        if (assembly)
+        {
+            NwcAssembly.Create("Linked node", doc).SaveIfc(sw);
+        }
+        else
+        {
+            doc.SaveIfc(sw);
+        }
+
+        string ifc = sw.ToString();
+        string expectedGuid = NwcIO.Internal.Export.IfcGuid.FromKey($"ifc:element:{globalId}:mesh:42:model:0");
+        Assert.Contains($"IFCWALL('{expectedGuid}',", ifc);
+        Assert.Contains("'Concrete Wall 200'", ifc);
+        Assert.DoesNotContain("Mesh_42", ifc);
     }
 }
