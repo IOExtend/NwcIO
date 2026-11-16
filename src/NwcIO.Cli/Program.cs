@@ -1747,6 +1747,7 @@ internal static class Program
                 @err.WriteLine($"Models:           {assembly.Models.Count}");
             }
             @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
+            @err.WriteLine($"Total Materials:  {assembly.AllMaterials.Count}");
             @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
             @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
             if (bvhStats)
@@ -1772,7 +1773,7 @@ internal static class Program
         else
         {
             infoOut.WriteLine(FormattableString.Invariant(
-                $"NWF Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
+                $"NWF Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes, {assembly.AllMaterials.Count} materials exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
         return 0;
