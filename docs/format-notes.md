@@ -158,6 +158,7 @@ UVBODY := [p1][fc][fc x f32] TOKENS(p1, fc/2)?        (raw; tokens iff fc/2 != p
 - **Polylines** (class 95): render vertices `0..p1-1` are split by `L` into open polylines; the segment count is the sum of `L-1`. There is no implicit closing segment.
 - **UVBODY**: the raw form has a non-negative first int `p1` and `fc` floats (two per UV pair, `fc/2` pairs). The quantised form has `-p1`, four floats, then `w`, `m` and the packed words; `bu = w & 0xFF` and `bv = (w >> 8) & 0xFF` are the bit widths of the two coordinates, so the packed block is `ceil(m*(bu+bv)/32)` words. The token stream maps each of the `p1` render vertices to one of the `fc/2` or `m` stored pairs.
 - **Not decoded**: UV values and colour channels. Only their lengths and maps are read, to find the next field.
+- **Writer records**: `NwcWriter` emits its own simplified record, `[id][94][0][60][p1][p2][p2 x f32 xyz]`, followed by the trailer `["NWCI"][indexCount][indexCount x i32][Id i32][nameLength][UTF-8 name][pad4]`. The fallback mesh parser (§2.5) restores the exact triangle indices, `Id` and `Name` from the trailer; records without it keep the rebuilt strip and the synthesized `Mesh_{index}` identity. The trailer is writer-specific: it is not part of the documented Navisworks grammar.
 
 ### 2.7 DB Cache Directory (`DbCache` / `LcOpDBCache`)
 The directory is the only stream of section 1. It lists every other segment and tiles section 0 exactly.
