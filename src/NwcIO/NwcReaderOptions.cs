@@ -39,4 +39,10 @@ public sealed class NwcReaderOptions
 
     /// <summary>Keep the stream catalog (offsets, sizes, kinds) in the document (default: true).</summary>
     public bool KeepStreamCatalog { get; set; } = true;
+
+    /// <summary>
+    /// Override the document length unit when the source unit is known. Null (default) infers feet for the Revit
+    /// loader/exporter and millimetres for everything else. Exposed as <see cref="NwcDocument.LengthUnit"/>.
+    /// </summary>
+    public NwcLengthUnit? LengthUnit { get; set; }
 }

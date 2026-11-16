@@ -56,7 +56,8 @@ public sealed class NwcClashMatrixCell
     public string DisciplineA { get; set; } = string.Empty;
     public string DisciplineB { get; set; } = string.Empty;
     public NwcClashTestType TestType { get; set; } = NwcClashTestType.Hard;
-    public double Tolerance { get; set; } = 0.001; // in meters
+    /// <summary>Tolerance in document length units (see <see cref="NwcDocument.LengthUnit"/>).</summary>
+    public double Tolerance { get; set; } = 0.001;
     public bool Enabled { get; set; } = true;
     public NwcClashTest? ExecutedTest { get; set; }
 

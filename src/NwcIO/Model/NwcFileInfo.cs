@@ -30,4 +30,11 @@ public sealed class NwcFileInfo
 
     /// <summary>Chunk layout marker declared by the section header ("lichunk-008", "lizlib"); null when undeclared.</summary>
     public string? ChunkMarker { get; set; }
+
+    /// <summary>
+    /// Length unit of coordinates and raw length values. Navisworks does not store the unit in a stream we decode;
+    /// the reader infers <see cref="NwcLengthUnit.Feet"/> for the Revit loader/exporter and leaves it
+    /// <see cref="NwcLengthUnit.Unknown"/> otherwise. Override with <see cref="NwcReaderOptions.LengthUnit"/>.
+    /// </summary>
+    public NwcLengthUnit LengthUnit { get; set; } = NwcLengthUnit.Unknown;
 }

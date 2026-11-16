@@ -24,7 +24,8 @@ public enum NwcChangeKind
 public sealed class NwcDiffOptions
 {
     /// <summary>
-    /// Geometric displacement tolerance in meters below which changes in bounding box center or vertex coordinates are ignored (default: 0.005m = 5mm).
+    /// Geometric displacement tolerance in document length units below which changes in bounding box center or
+    /// vertex coordinates are ignored (default: 0.005). The unit is <see cref="NwcDocument.LengthUnit"/>.
     /// </summary>
     public double GeometricTolerance { get; set; } = 0.005;
 

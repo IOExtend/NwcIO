@@ -41,16 +41,16 @@ public sealed class NwcDocument
 
     public NwcFileInfo FileInfo { get; }
 
+    /// <summary>Length unit of the document coordinates and raw length values, inferred or overridden.</summary>
+    public NwcLengthUnit LengthUnit => FileInfo.LengthUnit;
+
     /// <summary>
     /// True when the loader plugin is exactly (ordinal) the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> (Navisworks reading a
     /// <c>.rvt</c>) or the Revit NWC exporter <c>nwexportrevit</c>. Computed from <see cref="FileInfo"/>.
     /// </summary>
     public bool IsRevitSource => FileInfo.LoaderPlugin is "LcNwcLoaderPlugin:lcldrevit" or "nwexportrevit";
 
-    /// <summary>Feet when <see cref="IsRevitSource"/> (the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> or the Revit NWC exporter <c>nwexportrevit</c>); no file names its unit. Computed from <see cref="FileInfo"/>.</summary>
-    public NwcLengthUnit LengthUnit => IsRevitSource ? NwcLengthUnit.Feet : NwcLengthUnit.Unknown;
-
-    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet, which the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> and the Revit NWC exporter <c>nwexportrevit</c> write; no file names its unit); null when the unit is unknown.</summary>
+    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet); null when the unit is unknown.</summary>
     public double? MetresPerUnit => LengthUnit.GetMetresPerUnit();
 
     /// <summary>Flat records parsed from the scene-tree/property streams.</summary>
@@ -148,6 +148,7 @@ public sealed class NwcDocument
         }
 
         fileInfo.FormatVersion ??= container.Sections.Select(s => s.InternalVersion).FirstOrDefault(v => v is not null);
+        fileInfo.LengthUnit = options.LengthUnit ?? InferLengthUnit(fileInfo.LoaderPlugin);
         fileInfo.Encoding ??= container.Sections.Select(s => s.Encoding).FirstOrDefault(e => e is not null);
         fileInfo.ChunkMarker ??= container.Sections.Select(s => s.Marker).FirstOrDefault(m => m is not null);
 
@@ -287,6 +288,10 @@ public sealed class NwcDocument
         Model.Appearance.NwcAppearanceProfiler? appearanceProfiler = null)
     {
         var fi = fileInfo ?? new NwcFileInfo { SourcePath = "Model.rvt", LoaderPlugin = "LcOpRevitExport", SourceTimestampUtc = DateTime.UtcNow };
+        if (fi.LengthUnit == NwcLengthUnit.Unknown)
+        {
+            fi.LengthUnit = InferLengthUnit(fi.LoaderPlugin);
+        }
         var mList = meshes?.ToList() ?? [];
         var tList = transforms?.ToList() ?? [];
         var vList = savedViewpoints?.ToList() ?? [];
@@ -649,4 +654,9 @@ public sealed class NwcDocument
     /// </summary>
     public Model.Grids.NwcGridSystem ExtractGridSystem() =>
         Model.Grids.NwcGridSystem.ExtractFromDocument(this);
+
+    private static NwcLengthUnit InferLengthUnit(string? loaderPlugin) =>
+        loaderPlugin is "LcNwcLoaderPlugin:lcldrevit" or "nwexportrevit"
+            ? NwcLengthUnit.Feet
+            : NwcLengthUnit.Unknown;
 }

@@ -292,7 +292,12 @@ public sealed class NwcClashTest
     public Guid TestGuid { get; set; } = Guid.NewGuid();
     public NwcClashTestType TestType { get; set; } = NwcClashTestType.Hard;
     public string Status { get; set; } = "active";
-    public double Tolerance { get; set; } = 0.001; // in meters (default: 1 mm)
+    /// <summary>
+    /// Tolerance in document length units (the unit reported by <see cref="NwcDocument.LengthUnit"/>; default 0.001).
+    /// For <see cref="NwcClashTestType.Hard"/>, intersections whose penetration is below it are ignored; for
+    /// <see cref="NwcClashTestType.Clearance"/>, pairs closer than it are reported.
+    /// </summary>
+    public double Tolerance { get; set; } = 0.001; // document units
     public NwcClashSelection SelectionA { get; set; } = NwcClashSelection.All();
     public NwcClashSelection SelectionB { get; set; } = NwcClashSelection.All();
     public List<NwcClashRule> Rules { get; } = [];

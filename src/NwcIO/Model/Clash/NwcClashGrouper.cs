@@ -13,7 +13,10 @@ public static class NwcClashGrouper
     /// are clustered into unified <see cref="NwcClashGroup"/> containers.
     /// </summary>
     /// <param name="test">The clash test whose standalone results will be grouped.</param>
-    /// <param name="clusterDistance">Maximum distance in meters between two clashes to belong to the same cluster (default: 1.0m).</param>
+    /// <summary>
+    /// Maximum distance in document length units between two clashes to belong to the same cluster (default: 1.0).
+    /// The unit is the one reported by <see cref="NwcDocument.LengthUnit"/>.
+    /// </summary>
     /// <param name="groupPrefix">Name prefix for created clash groups (default: "Cluster").</param>
     /// <param name="minClusterSize">Minimum number of clashes required to form a group (default: 2).</param>
     /// <returns>The number of new clash groups created.</returns>
