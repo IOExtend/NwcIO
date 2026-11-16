@@ -1247,13 +1247,17 @@ public sealed class ClashDetectiveTests
         var meshA = CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2));
         meshA.Node = new NwcNode
         {
-            Id = 10, Name = "Basic Wall", Class = "LcOaNode",
+            Id = 10,
+            Name = "Basic Wall",
+            Class = "LcOaNode",
             Parent = new NwcNode { Id = 9, Name = "Level 1", Class = "LcOaLayer" },
         };
         var meshB = CreateBoxMesh(2, new(1, 1, 1), new(3, 3, 3));
         meshB.Node = new NwcNode
         {
-            Id = 20, Name = "Basic Wall", Class = "LcOaNode",
+            Id = 20,
+            Name = "Basic Wall",
+            Class = "LcOaNode",
             Parent = new NwcNode { Id = 19, Name = secondLayer, Class = "LcOaLayer" },
         };
         var architecture = new NwcDocumentBuilder().SetFileInfo("Architecture.nwc").AddMesh(meshA).Build();

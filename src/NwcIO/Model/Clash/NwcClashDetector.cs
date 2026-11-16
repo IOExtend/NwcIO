@@ -279,18 +279,18 @@ public static class NwcClashDetector
         switch (test.TestType)
         {
             case NwcClashTestType.Clearance:
-            {
-                // MeasureMeshToMesh reports zero distance at the origin for meshes without triangles.
-                if (meshA.Indices.Count < 3 || meshB.Indices.Count < 3)
                 {
-                    return false;
-                }
+                    // MeasureMeshToMesh reports zero distance at the origin for meshes without triangles.
+                    if (meshA.Indices.Count < 3 || meshB.Indices.Count < 3)
+                    {
+                        return false;
+                    }
 
-                var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
-                clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
-                distance = measurement.Distance;
-                return measurement.Distance <= tolerance;
-            }
+                    var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
+                    clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
+                    distance = measurement.Distance;
+                    return measurement.Distance <= tolerance;
+                }
 
             case NwcClashTestType.Duplicates:
                 if (!IsDuplicate(meshA, meshB, tolerance))
@@ -304,18 +304,18 @@ public static class NwcClashDetector
                 return true;
 
             case NwcClashTestType.Conservative:
-            {
-                var overlap = meshA.GetWorldBoundingBox().Intersect(meshB.GetWorldBoundingBox());
-                if (overlap.IsEmpty)
                 {
-                    distance = 0;
-                    return false;
-                }
+                    var overlap = meshA.GetWorldBoundingBox().Intersect(meshB.GetWorldBoundingBox());
+                    if (overlap.IsEmpty)
+                    {
+                        distance = 0;
+                        return false;
+                    }
 
-                clashPoint = overlap.Center;
-                distance = -Math.Min(overlap.Size.X, Math.Min(overlap.Size.Y, overlap.Size.Z));
-                return true;
-            }
+                    clashPoint = overlap.Center;
+                    distance = -Math.Min(overlap.Size.X, Math.Min(overlap.Size.Y, overlap.Size.Z));
+                    return true;
+                }
 
             default:
                 if (CheckMeshIntersection(meshA, meshB, out clashPoint, out double penetration))

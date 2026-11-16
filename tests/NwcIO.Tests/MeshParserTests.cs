@@ -405,8 +405,13 @@ public class MeshParserTests
     [Fact]
     public void Mesh_GetWorldVertices_WithMirroredTransform_AppliesScale()
     {
-        var mesh = new NwcMesh { Id = 1, Vertices = [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)], Indices = [0, 1, 2],
-            Transform = new NwcTransform { Id = 1, Translation = new(10, 0, 0), Scale = -1 } };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 1, Translation = new(10, 0, 0), Scale = -1 }
+        };
         Assert.Equal([new Vector3d(9, 0, 0), new(10, -1, 0), new(10, 0, -1)], mesh.GetWorldVertices());
         Assert.Equal(new BoundingBox3d(new(9, -1, -1), new(10, 0, 0)), mesh.GetWorldBoundingBox());
     }
@@ -418,8 +423,13 @@ public class MeshParserTests
     public void Mesh_GetWorldIndices_ReversesTrianglesOnlyForNegativeScale(double scale, int[] expected)
     {
         int[] indices = [0, 1, 2, 2, 1, 3];
-        var mesh = new NwcMesh { Id = 1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = indices,
-            Transform = new NwcTransform { Id = 1, Scale = scale } };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)],
+            Indices = indices,
+            Transform = new NwcTransform { Id = 1, Scale = scale }
+        };
         Assert.Equal(expected, mesh.GetWorldIndices());
         Assert.Equal([0, 1, 2, 2, 1, 3], indices);
         if (scale > 0) Assert.Same(indices, mesh.GetWorldIndices());
@@ -428,8 +438,13 @@ public class MeshParserTests
     [Fact]
     public void Mesh_GetWorldIndices_LeavesAnIncompleteTrailingTriple()
     {
-        var mesh = new NwcMesh { Id = 1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = [0, 1, 2, 3],
-            Transform = new NwcTransform { Id = 1, Scale = -1 } };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)],
+            Indices = [0, 1, 2, 3],
+            Transform = new NwcTransform { Id = 1, Scale = -1 }
+        };
         Assert.Equal([0, 2, 1, 3], mesh.GetWorldIndices());
     }
 
