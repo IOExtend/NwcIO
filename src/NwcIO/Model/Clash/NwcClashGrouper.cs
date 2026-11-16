@@ -13,23 +13,15 @@ public static class NwcClashGrouper
     /// are clustered into unified <see cref="NwcClashGroup"/> containers.
     /// </summary>
     /// <param name="test">The clash test whose standalone results will be grouped.</param>
-    /// <summary>
-    /// Maximum distance in document length units between two clashes to belong to the same cluster (default: 1.0).
-    /// The unit is the one reported by <see cref="NwcDocument.LengthUnit"/>.
-    /// </summary>
+    /// <param name="clusterDistance">Maximum distance in document length units (see <see cref="NwcDocument.LengthUnit"/>) between two clashes to belong to the same cluster (default: 1.0).</param>
     /// <param name="groupPrefix">Name prefix for created clash groups (default: "Cluster").</param>
     /// <param name="minClusterSize">Minimum number of clashes required to form a group (default: 2).</param>
-    /// <param name="lengthUnit">
-    /// Length unit of the clash coordinates, used to scale the minimum camera distance. <see cref="NwcLengthUnit.Unknown"/>
-    /// keeps the historical 3-unit minimum.
-    /// </param>
     /// <returns>The number of new clash groups created.</returns>
     public static int GroupByProximity(
         NwcClashTest test,
         double clusterDistance = 1.0,
         string groupPrefix = "Cluster",
-        int minClusterSize = 2,
-        NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+        int minClusterSize = 2)
     {
         ArgumentNullException.ThrowIfNull(test);
         if (test.Results.Count < minClusterSize || clusterDistance <= 0.0)
@@ -119,7 +111,7 @@ public static class NwcClashGrouper
                 }
 
                 // Create composite camera viewpoint for the group
-                group.Viewpoint = CreateGroupViewpoint(group, lengthUnit);
+                group.Viewpoint = CreateGroupViewpoint(group);
                 test.Groups.Add(group);
             }
         }
@@ -134,8 +126,7 @@ public static class NwcClashGrouper
     public static int GroupByPrimaryElement(
         NwcClashTest test,
         string groupPrefix = "Element",
-        int minGroupSize = 2,
-        NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+        int minGroupSize = 2)
     {
         ArgumentNullException.ThrowIfNull(test);
         if (test.Results.Count < minGroupSize) return 0;
@@ -156,7 +147,7 @@ public static class NwcClashGrouper
             list.Add(clash);
         }
 
-        return ApplyBuckets(test, buckets, groupPrefix, minGroupSize, lengthUnit);
+        return ApplyBuckets(test, buckets, groupPrefix, minGroupSize);
     }
 
     /// <summary>
@@ -165,8 +156,7 @@ public static class NwcClashGrouper
     public static int GroupByGrid(
         NwcClashTest test,
         string groupPrefix = "Grid",
-        int minGroupSize = 2,
-        NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+        int minGroupSize = 2)
     {
         ArgumentNullException.ThrowIfNull(test);
         if (test.Results.Count < minGroupSize) return 0;
@@ -185,7 +175,7 @@ public static class NwcClashGrouper
             list.Add(clash);
         }
 
-        return ApplyBuckets(test, buckets, groupPrefix, minGroupSize, lengthUnit);
+        return ApplyBuckets(test, buckets, groupPrefix, minGroupSize);
     }
 
     /// <summary>
@@ -194,8 +184,7 @@ public static class NwcClashGrouper
     public static int GroupByLayer(
         NwcClashTest test,
         string groupPrefix = "Layer",
-        int minGroupSize = 2,
-        NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+        int minGroupSize = 2)
     {
         ArgumentNullException.ThrowIfNull(test);
         if (test.Results.Count < minGroupSize) return 0;
@@ -216,7 +205,7 @@ public static class NwcClashGrouper
             list.Add(clash);
         }
 
-        return ApplyBuckets(test, buckets, groupPrefix, minGroupSize, lengthUnit);
+        return ApplyBuckets(test, buckets, groupPrefix, minGroupSize);
     }
 
     /// <summary>
@@ -238,8 +227,7 @@ public static class NwcClashGrouper
         NwcClashTest test,
         Dictionary<string, List<NwcClashResult>> buckets,
         string groupPrefix,
-        int minGroupSize,
-        NwcLengthUnit lengthUnit)
+        int minGroupSize)
     {
         int groupsCreated = 0;
         var toRemove = new HashSet<NwcClashResult>();
@@ -261,7 +249,7 @@ public static class NwcClashGrouper
                     toRemove.Add(clash);
                 }
 
-                group.Viewpoint = CreateGroupViewpoint(group, lengthUnit);
+                group.Viewpoint = CreateGroupViewpoint(group);
                 test.Groups.Add(group);
             }
         }
@@ -270,7 +258,7 @@ public static class NwcClashGrouper
         return groupsCreated;
     }
 
-    private static NwcSavedViewpoint CreateGroupViewpoint(NwcClashGroup group, NwcLengthUnit lengthUnit)
+    private static NwcSavedViewpoint CreateGroupViewpoint(NwcClashGroup group)
     {
         var centroid = group.ClashPoint;
 
@@ -289,9 +277,7 @@ public static class NwcClashGrouper
         }
 
         double span = Math.Max(maxX - minX, Math.Max(maxY - minY, maxZ - minZ));
-        // Keep the camera at least 3 m from the group, expressed in the document unit.
-        double minimumDistance = 3.0 / (lengthUnit.GetMetresPerUnit() ?? 1.0);
-        double dist = Math.Max(span * 1.5, minimumDistance);
+        double dist = Math.Max(span * 1.5, 3.0);
 
         var camPos = new Vector3d(
             centroid.X + dist * 0.7071,

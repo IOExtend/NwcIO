@@ -26,7 +26,7 @@ internal static class Program
                              Default for .nwf: <input-without-ext>.glb (or standard output if '-').
 
         Options:
-          --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
+          --nwc <file.nwc>   Save or convert to a .nwc file (NwcIO layout)
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
@@ -765,7 +765,7 @@ internal static class Program
                 EnsureParentDirectory(explicitClashXmlPath);
                 var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                 doc.RunClashDetection(test);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, doc.LengthUnit);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
                 doc.ExportClashReportXml(explicitClashXmlPath);
                 if (printReport)
                 {
@@ -780,7 +780,7 @@ internal static class Program
                 {
                     var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                     doc.RunClashDetection(test);
-                    ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, doc.LengthUnit);
+                    ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
                 }
                 doc.ExportClashBcf(explicitClashBcfPath);
                 if (printReport)
@@ -1123,7 +1123,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1198,7 +1198,7 @@ internal static class Program
         {
             EnsureParentDirectory(explicitClashXmlPath);
             var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -1207,7 +1207,7 @@ internal static class Program
             if (assembly.ClashTests.Count == 0)
             {
                 var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
         }
@@ -1422,7 +1422,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1497,7 +1497,7 @@ internal static class Program
         {
             EnsureParentDirectory(explicitClashXmlPath);
             var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -1506,7 +1506,7 @@ internal static class Program
             if (assembly.ClashTests.Count == 0)
             {
                 var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
         }
@@ -1651,29 +1651,26 @@ internal static class Program
         }
     }
 
-    private static NwcLengthUnit FirstKnownLengthUnit(NwcAssembly assembly) =>
-        assembly.Models.Select(model => model.LengthUnit).FirstOrDefault(unit => unit != NwcLengthUnit.Unknown);
-
-    private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport, TextWriter? errWriter = null, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+    private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport, TextWriter? errWriter = null)
     {
         var @err = errWriter ?? Console.Error;
         if (string.IsNullOrEmpty(mode)) return;
         int grps = 0;
         if (mode.Equals("proximity", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByProximity(test, radius, lengthUnit: lengthUnit);
+            grps = Model.Clash.NwcClashGrouper.GroupByProximity(test, radius);
         }
         else if (mode.Equals("element", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByPrimaryElement(test, lengthUnit: lengthUnit);
+            grps = Model.Clash.NwcClashGrouper.GroupByPrimaryElement(test);
         }
         else if (mode.Equals("grid", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByGrid(test, lengthUnit: lengthUnit);
+            grps = Model.Clash.NwcClashGrouper.GroupByGrid(test);
         }
         else if (mode.Equals("layer", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByLayer(test, lengthUnit: lengthUnit);
+            grps = Model.Clash.NwcClashGrouper.GroupByLayer(test);
         }
         if (printReport && grps > 0)
         {

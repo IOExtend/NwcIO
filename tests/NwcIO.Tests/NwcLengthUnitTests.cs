@@ -71,25 +71,6 @@ public class NwcLengthUnitTests
     }
 
     [Fact]
-    public void GridLocation_UsesTheDocumentUnitSymbol()
-    {
-        var grids = new NwcIO.Model.Grids.NwcGridSystem { LengthUnit = NwcLengthUnit.Feet };
-        grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
-        grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(30, 0, 0));
-
-        Assert.Equal("A (+20.00ft) / 1", grids.FormatLocation(new Vector3d(20, 0, 0)));
-    }
-
-    [Fact]
-    public void Measurement_UsesTheRequestedUnitSymbol()
-    {
-        var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureDistance(
-            new Vector3d(0, 0, 0), new Vector3d(3, 4, 0), NwcLengthUnit.Millimeters);
-
-        Assert.Contains("5.000 mm", measurement.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void IfcExport_ConvertsKnownFeetCoordinatesToTheOutputUnit()
     {
         var mesh = new NwcMesh
@@ -123,47 +104,6 @@ public class NwcLengthUnitTests
         string ifc = doc.ToIfcString(new NwcIfcExportOptions { LengthUnit = NwcIfcLengthUnit.Metre });
 
         Assert.Contains("1234", ifc, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void GridXml_RoundTripsTheLengthUnitAndIgnoresUndefinedValues()
-    {
-        var grids = new NwcIO.Model.Grids.NwcGridSystem { LengthUnit = NwcLengthUnit.Feet };
-        grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
-        using var ms = new MemoryStream();
-        grids.SaveXml(ms);
-        ms.Position = 0;
-        Assert.Equal(NwcLengthUnit.Feet, NwcIO.Model.Grids.NwcGridSystem.ReadXml(ms).LengthUnit);
-
-        string xml = System.Text.Encoding.UTF8.GetString(ms.ToArray()).Replace("units=\"Feet\"", "units=\"99\"", StringComparison.Ordinal);
-        Assert.Contains("units=\"99\"", xml, StringComparison.Ordinal);
-        using var bad = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
-        Assert.Equal(NwcLengthUnit.Unknown, NwcIO.Model.Grids.NwcGridSystem.ReadXml(bad).LengthUnit);
-    }
-
-    [Fact]
-    public void DiffReport_TakesTheRevisionUnitAndFallsBackToTheBaseline()
-    {
-        var feet = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Feet });
-        var unknown = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Unknown });
-        var meters = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Meters });
-
-        Assert.Equal(NwcLengthUnit.Feet, NwcIO.Model.Diff.NwcDiffEngine.Compare(unknown, feet).LengthUnit);
-        Assert.Equal(NwcLengthUnit.Feet, NwcIO.Model.Diff.NwcDiffEngine.Compare(feet, unknown).LengthUnit);
-        Assert.Equal(NwcLengthUnit.Meters, NwcIO.Model.Diff.NwcDiffEngine.Compare(feet, meters).LengthUnit);
-    }
-
-    [Fact]
-    public void DiffReport_OfMixedUnitAssemblies_IsUnknownInsteadOfTheFirstModelUnit()
-    {
-        var feet = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Feet });
-        var meters = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Meters });
-        var mixed = NwcAssembly.Create("mixed", feet, meters);
-        var uniform = NwcAssembly.Create("uniform", feet, feet);
-
-        Assert.Equal(NwcLengthUnit.Unknown, NwcIO.Model.Diff.NwcDiffEngine.Compare(mixed, mixed).LengthUnit);
-        Assert.Equal(NwcLengthUnit.Feet, NwcIO.Model.Diff.NwcDiffEngine.Compare(mixed, uniform).LengthUnit);
-        Assert.Equal(NwcLengthUnit.Feet, NwcIO.Model.Diff.NwcDiffEngine.Compare(uniform, uniform).LengthUnit);
     }
 
     [Fact]

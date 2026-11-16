@@ -24,8 +24,7 @@ public enum NwcChangeKind
 public sealed class NwcDiffOptions
 {
     /// <summary>
-    /// Geometric displacement tolerance in document length units below which changes in bounding box center or
-    /// vertex coordinates are ignored (default: 0.005). The unit is <see cref="NwcDocument.LengthUnit"/>.
+    /// Geometric displacement tolerance in document length units (see <see cref="NwcDocument.LengthUnit"/>) below which changes in bounding box center or vertex coordinates are ignored (default: 0.005).
     /// </summary>
     public double GeometricTolerance { get; set; } = 0.005;
 
@@ -114,12 +113,6 @@ public sealed class NwcDiffReport
     public string BaselineName { get; }
     public string RevisionName { get; }
 
-    /// <summary>
-    /// Length unit of the compared coordinates, used to scale the BCF camera offset. Derived from the documents by
-    /// <see cref="NwcDiffEngine"/>; <see cref="NwcLengthUnit.Unknown"/> keeps the historical metre-sized offset.
-    /// </summary>
-    public NwcLengthUnit LengthUnit { get; }
-
     public List<NwcElementDiff> Added { get; } = [];
     public List<NwcElementDiff> Deleted { get; } = [];
     public List<NwcElementDiff> Modified { get; } = [];
@@ -127,11 +120,10 @@ public sealed class NwcDiffReport
 
     public int TotalChangesCount => Added.Count + Deleted.Count + Modified.Count;
 
-    public NwcDiffReport(string baselineName, string revisionName, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+    public NwcDiffReport(string baselineName, string revisionName)
     {
         BaselineName = baselineName;
         RevisionName = revisionName;
-        LengthUnit = lengthUnit;
     }
 
     /// <summary>
@@ -367,11 +359,7 @@ public sealed class NwcDiffReport
                 xml.WriteAttributeString("Guid", vpGuid);
 
                 var center = item.Centroid;
-                // The offsets are 5 m, -5 m and 4 m; express them in the document unit so the camera keeps
-                // the same physical distance on millimetre and feet models.
-                double metresPerUnit = LengthUnit.GetMetresPerUnit() ?? 1.0;
-                double offset = 5.0 / metresPerUnit;
-                var eye = center + new Vector3d(offset, -offset, 4.0 / metresPerUnit);
+                var eye = center + new Vector3d(5.0, -5.0, 4.0);
                 var dir = (center - eye).Normalize();
 
                 xml.WriteStartElement("PerspectiveCamera");

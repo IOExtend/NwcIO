@@ -19,13 +19,8 @@ public sealed record NwcDistanceMeasurement(
     double AzimuthDegrees
 )
 {
-    /// <summary>Length unit of <see cref="Distance"/> and the deltas; <see cref="NwcLengthUnit.Unknown"/> prints "m".</summary>
-    public NwcLengthUnit LengthUnit { get; init; } = NwcLengthUnit.Unknown;
-
-    private string Unit => LengthUnit.GetSymbol() ?? "m";
-
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"Distance: {Distance:F3} {Unit} (dX: {DeltaX:F3}, dY: {DeltaY:F3}, dZ: {DeltaZ:F3}, Horiz: {HorizontalDistance:F3}, Pitch: {PitchDegrees:F1}°)");
+        string.Create(CultureInfo.InvariantCulture, $"Distance: {Distance:F3} m (dX: {DeltaX:F3}, dY: {DeltaY:F3}, dZ: {DeltaZ:F3}, Horiz: {HorizontalDistance:F3}, Pitch: {PitchDegrees:F1}°)");
 }
 
 /// <summary>
@@ -39,13 +34,8 @@ public sealed record NwcPointToMeshMeasurement(
     Vector3d Normal
 )
 {
-    /// <summary>Length unit of <see cref="Distance"/>; <see cref="NwcLengthUnit.Unknown"/> prints "m".</summary>
-    public NwcLengthUnit LengthUnit { get; init; } = NwcLengthUnit.Unknown;
-
-    private string Unit => LengthUnit.GetSymbol() ?? "m";
-
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"Point-to-Mesh Distance: {Distance:F3} {Unit} at ({ClosestPoint.X:F3}, {ClosestPoint.Y:F3}, {ClosestPoint.Z:F3})");
+        string.Create(CultureInfo.InvariantCulture, $"Point-to-Mesh Distance: {Distance:F3} m at ({ClosestPoint.X:F3}, {ClosestPoint.Y:F3}, {ClosestPoint.Z:F3})");
 }
 
 /// <summary>
@@ -59,13 +49,8 @@ public sealed record NwcMeshToMeshMeasurement(
     Vector3d PointB
 )
 {
-    /// <summary>Length unit of <see cref="Distance"/>; <see cref="NwcLengthUnit.Unknown"/> prints "m".</summary>
-    public NwcLengthUnit LengthUnit { get; init; } = NwcLengthUnit.Unknown;
-
-    private string Unit => LengthUnit.GetSymbol() ?? "m";
-
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"Mesh-to-Mesh Clearance: {Distance:F3} {Unit} between ({PointA.X:F3},{PointA.Y:F3},{PointA.Z:F3}) and ({PointB.X:F3},{PointB.Y:F3},{PointB.Z:F3})");
+        string.Create(CultureInfo.InvariantCulture, $"Mesh-to-Mesh Clearance: {Distance:F3} m between ({PointA.X:F3},{PointA.Y:F3},{PointA.Z:F3}) and ({PointB.X:F3},{PointB.Y:F3},{PointB.Z:F3})");
 }
 
 /// <summary>
@@ -75,11 +60,7 @@ public sealed record NwcPolylineMeasurement(
     IReadOnlyList<Vector3d> Points,
     IReadOnlyList<double> SegmentLengths,
     double TotalLength
-)
-{
-    /// <summary>Length unit of <see cref="TotalLength"/> and the segment lengths.</summary>
-    public NwcLengthUnit LengthUnit { get; init; } = NwcLengthUnit.Unknown;
-}
+);
 
 /// <summary>
 /// High-precision 3D measurement engine providing point-to-point, point-to-mesh,
@@ -90,7 +71,7 @@ public static class NwcMeasureEngine
     /// <summary>
     /// Measures the 3D Euclidean distance and directional projections between two points.
     /// </summary>
-    public static NwcDistanceMeasurement MeasureDistance(Vector3d a, Vector3d b, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+    public static NwcDistanceMeasurement MeasureDistance(Vector3d a, Vector3d b)
     {
         double dx = b.X - a.X;
         double dy = b.Y - a.Y;
@@ -104,7 +85,7 @@ public static class NwcMeasureEngine
         double azimuth = horiz > 1e-12 ? Math.Atan2(dy, dx) * (180.0 / Math.PI) : 0.0;
         if (azimuth < 0.0) azimuth += 360.0;
 
-        return new NwcDistanceMeasurement(a, b, dist, dx, dy, dz, horiz, vert, pitch, azimuth) { LengthUnit = lengthUnit };
+        return new NwcDistanceMeasurement(a, b, dist, dx, dy, dz, horiz, vert, pitch, azimuth);
     }
 
     /// <summary>
@@ -132,7 +113,7 @@ public static class NwcMeasureEngine
     /// <summary>
     /// Measures cumulative polyline distance across a sequence of 3D points.
     /// </summary>
-    public static NwcPolylineMeasurement MeasurePath(IEnumerable<Vector3d> points, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+    public static NwcPolylineMeasurement MeasurePath(IEnumerable<Vector3d> points)
     {
         ArgumentNullException.ThrowIfNull(points);
         var ptList = points.ToList();
@@ -146,7 +127,7 @@ public static class NwcMeasureEngine
             total += len;
         }
 
-        return new NwcPolylineMeasurement(ptList, segments, total) { LengthUnit = lengthUnit };
+        return new NwcPolylineMeasurement(ptList, segments, total);
     }
 
     /// <summary>
@@ -221,8 +202,7 @@ public static class NwcMeasureEngine
     /// <summary>
     /// Measures the shortest distance from a 3D point to a mesh surface, locating the closest point.
     /// </summary>
-    public static NwcPointToMeshMeasurement MeasurePointToMesh(
-        Vector3d point, NwcMesh mesh, bool useWorldCoordinates = true, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+    public static NwcPointToMeshMeasurement MeasurePointToMesh(Vector3d point, NwcMesh mesh, bool useWorldCoordinates = true)
     {
         ArgumentNullException.ThrowIfNull(mesh);
 
@@ -231,7 +211,7 @@ public static class NwcMeasureEngine
 
         if (verts.Count == 0 || indices.Count < 3)
         {
-            return new NwcPointToMeshMeasurement(point, point, 0.0, -1, Vector3d.Zero) { LengthUnit = lengthUnit };
+            return new NwcPointToMeshMeasurement(point, point, 0.0, -1, Vector3d.Zero);
         }
 
         double minDistance = double.PositiveInfinity;
@@ -267,14 +247,13 @@ public static class NwcMeasureEngine
             }
         }
 
-        return new NwcPointToMeshMeasurement(point, closestPt, minDistance, closestTri, closestNormal) { LengthUnit = lengthUnit };
+        return new NwcPointToMeshMeasurement(point, closestPt, minDistance, closestTri, closestNormal);
     }
 
     /// <summary>
     /// Measures the clearance (minimum distance) between two 3D polygon meshes.
     /// </summary>
-    public static NwcMeshToMeshMeasurement MeasureMeshToMesh(
-        NwcMesh meshA, NwcMesh meshB, bool useWorldCoordinates = true, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
+    public static NwcMeshToMeshMeasurement MeasureMeshToMesh(NwcMesh meshA, NwcMesh meshB, bool useWorldCoordinates = true)
     {
         ArgumentNullException.ThrowIfNull(meshA);
         ArgumentNullException.ThrowIfNull(meshB);
@@ -287,7 +266,7 @@ public static class NwcMeasureEngine
 
         if (vertsA.Count == 0 || vertsB.Count == 0 || indicesA.Count < 3 || indicesB.Count < 3)
         {
-            return new NwcMeshToMeshMeasurement(meshA, meshB, 0.0, Vector3d.Zero, Vector3d.Zero) { LengthUnit = lengthUnit };
+            return new NwcMeshToMeshMeasurement(meshA, meshB, 0.0, Vector3d.Zero, Vector3d.Zero);
         }
 
         var minDistance = double.PositiveInfinity;
@@ -320,7 +299,7 @@ public static class NwcMeasureEngine
                     if (SegmentIntersectsTriangle(a[edge], a[(edge + 1) % 3], b, out var intersection) ||
                         SegmentIntersectsTriangle(b[edge], b[(edge + 1) % 3], a, out intersection))
                     {
-                        return new NwcMeshToMeshMeasurement(meshA, meshB, 0.0, intersection, intersection) { LengthUnit = lengthUnit };
+                        return new NwcMeshToMeshMeasurement(meshA, meshB, 0.0, intersection, intersection);
                     }
 
                     Consider(a[edge], ClosestPointOnTriangle(a[edge], b[0], b[1], b[2]));
@@ -335,7 +314,7 @@ public static class NwcMeasureEngine
             }
         }
 
-        return new NwcMeshToMeshMeasurement(meshA, meshB, minDistance, bestPtA, bestPtB) { LengthUnit = lengthUnit };
+        return new NwcMeshToMeshMeasurement(meshA, meshB, minDistance, bestPtA, bestPtB);
 
         void Consider(Vector3d pointA, Vector3d pointB)
         {

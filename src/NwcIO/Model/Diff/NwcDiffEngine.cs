@@ -36,7 +36,7 @@ public static class NwcDiffEngine
         string baseName = Path.GetFileNameWithoutExtension(baseline.FileInfo.SourcePath ?? "Baseline");
         string revName = Path.GetFileNameWithoutExtension(revision.FileInfo.SourcePath ?? "Revision");
 
-        var report = new NwcDiffReport(baseName, revName, UnitOf(baseline, revision));
+        var report = new NwcDiffReport(baseName, revName);
 
         var baseItems = CollectItems(baseline);
         var revItems = CollectItems(revision);
@@ -54,7 +54,7 @@ public static class NwcDiffEngine
         ArgumentNullException.ThrowIfNull(revision);
         options ??= new NwcDiffOptions();
 
-        var report = new NwcDiffReport(baseline.Name, revision.Name, UnitOf(revision, baseline));
+        var report = new NwcDiffReport(baseline.Name, revision.Name);
 
         var baseItems = CollectAssemblyItems(baseline);
         var revItems = CollectAssemblyItems(revision);
@@ -62,18 +62,6 @@ public static class NwcDiffEngine
         PerformDiff(report, baseItems, revItems, options);
         return report;
     }
-
-    private static NwcLengthUnit UnitOf(NwcDocument baseline, NwcDocument revision) =>
-        revision.LengthUnit != NwcLengthUnit.Unknown ? revision.LengthUnit : baseline.LengthUnit;
-
-    private static NwcLengthUnit UnitOf(NwcAssembly revision, NwcAssembly baseline) =>
-        FirstKnownUnit(revision) is var unit && unit != NwcLengthUnit.Unknown ? unit : FirstKnownUnit(baseline);
-
-    // Models of different units are not rescaled, so no single unit describes the coordinates: report Unknown.
-    private static NwcLengthUnit FirstKnownUnit(NwcAssembly assembly) =>
-        assembly.HasMixedLengthUnits
-            ? NwcLengthUnit.Unknown
-            : assembly.Models.Select(model => model.LengthUnit).FirstOrDefault(unit => unit != NwcLengthUnit.Unknown);
 
     private static void PerformDiff(
         NwcDiffReport report,

@@ -12,8 +12,6 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Fixed
 - IFC export converts coordinates with the document length unit when it is known: a document in metres exported with `NwcIfcLengthUnit.Metre` keeps its coordinates (before, `ConvertMmToMetres` scaled them by 0.001), and a document in feet is converted to the output unit. A document with an unknown unit keeps the `ConvertMmToMetres` behaviour.
-- `NwcDiffEngine.Compare` of assemblies whose models use different units reports `NwcDiffReport.LengthUnit` as `Unknown` (the metre-sized camera offset) instead of the unit of the first model.
-- The `NwcIO.Cli` clash grouping passes the document unit, so the minimum camera distance of a group viewpoint is metres-based for any unit. `NwcGridSystem.ReadXml` ignores an undefined `units` value.
 - `NwcSceneResult.Diagnostics` and `docs/scene.md` say what the conversion reports: what it left out of the document and could detect, not what a document read with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off already lacked. `docs/scene.md` names `.nwf` under Limits and says that length, area, volume and angle values are left out while the unit is unknown, not while it is not feet.
 - The release workflow runs on tag pushes only and fails before anything is built or pushed unless the tag equals `v<Version>`. It can no longer be started by hand from a branch, and its release step runs `gh release create --verify-tag`, so it never creates a tag and the release tag is always the commit the packages were built from.
 
