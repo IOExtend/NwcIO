@@ -639,6 +639,7 @@ public sealed class NwcSceneReaderTests
             new NwcSavedViewpoint
             {
                 Id = null,
+                IsCameraApproximated = true,
                 Name = "From file",
                 Camera = new NwcCamera
                 {
@@ -656,6 +657,79 @@ public sealed class NwcSceneReaderTests
 
         Assert.Contains(result.Diagnostics,
             d => d.Code == "viewpoint-camera-approximated" && d.Severity == SceneSeverity.Info);
+    }
+
+    [Fact]
+    public void Read_SavedViewpointWithoutIdAndWithDecodedCamera_IsNotReportedAsApproximated()
+    {
+        // An XML viewpoint without a guid has no Id but a real camera.
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint
+            {
+                Id = null,
+                Name = "No guid",
+                Camera = new NwcCamera { Position = new NwcIO.Model.Vector3d(1, 2, 3), Rotation = Quaterniond.Identity },
+            },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Single(result.Document.Viewpoints);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoint-camera-approximated");
+    }
+
+    private static NwcSavedViewpoint ViewpointWithFov(string name, double fov) => new()
+    {
+        Name = name,
+        Camera = new NwcCamera { Position = new NwcIO.Model.Vector3d(1, 2, 3), Rotation = Quaterniond.Identity, FieldOfView = fov },
+    };
+
+    [Fact]
+    public void Read_SavedViewpointWithUnconvertibleCamera_IsSkippedAndCounted()
+    {
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            ViewpointWithFov("Good", 60),
+            ViewpointWithFov("Bad", 180),
+            ViewpointWithFov("Nan", double.NaN),
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Equal("Good", Assert.Single(result.Document.Viewpoints).Name);
+        var diagnostic = Assert.Single(result.Diagnostics, d => d.Code == "viewpoints-skipped");
+        Assert.Equal(SceneSeverity.Warning, diagnostic.Severity);
+        Assert.Equal("2 saved viewpoints could not be converted.", diagnostic.Message);
+    }
+
+    [Fact]
+    public void Read_SavedViewpointsWithUnknownUnit_AreAllSkipped()
+    {
+        var document = NwcDocument.Create(savedViewpoints: [ViewpointWithFov("A", 60), ViewpointWithFov("B", 60)],
+            rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Unknown }));
+
+        Assert.Empty(result.Document.Viewpoints);
+        Assert.Contains(result.Diagnostics, d => d.Code == "viewpoints-skipped" && d.Message == "2 saved viewpoints could not be converted.");
+    }
+
+    [Fact]
+    public void Read_SavedViewpointsWithSectionPlanesOrBox_ReportSkippedContent()
+    {
+        var camera = new NwcCamera { Position = new NwcIO.Model.Vector3d(1, 2, 3), Rotation = Quaterniond.Identity };
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint { Name = "Planes", Camera = camera, SectionPlanes = [new NwcIO.Model.Sectioning.NwcSectionPlane { Normal = new NwcIO.Model.Vector3d(1, 0, 0) }] },
+            new NwcSavedViewpoint { Name = "Box", Camera = camera, SectionBox = new NwcIO.Model.Sectioning.NwcSectionBox { Bounds = new NwcIO.Model.BoundingBox3d(new NwcIO.Model.Vector3d(0, 0, 0), new NwcIO.Model.Vector3d(1, 1, 1)), IsEnabled = true } },
+            new NwcSavedViewpoint { Name = "Plain", Camera = camera },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Equal(3, result.Document.Viewpoints.Count);
+        Assert.Contains(result.Diagnostics, d => d.Code == "viewpoint-content-skipped" && d.Message.StartsWith("2 saved viewpoints", StringComparison.Ordinal));
     }
 
     [Fact]

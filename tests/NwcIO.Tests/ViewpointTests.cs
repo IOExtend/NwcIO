@@ -151,6 +151,7 @@ public class ViewpointTests
         Assert.Single(viewpoints);
         var vp = viewpoints[0];
         Assert.Null(vp.Id);
+        Assert.True(vp.IsCameraApproximated);
         Assert.Equal("Overview Viewpoint", vp.Name);
         Assert.Equal(12.5, vp.Camera.Position.X);
         Assert.Equal(34.5, vp.Camera.Position.Y);
@@ -293,6 +294,10 @@ public class ViewpointTests
     [Fact]   // guard: 0.11 also generates it
     public void SavedViewpoint_MadeInCode_KeepsAGeneratedId() =>
         Assert.NotNull(new NwcSavedViewpoint { Name = "V", Camera = new NwcCamera() }.Id);
+
+    [Fact]
+    public void SavedViewpoint_MadeInCode_IsNotApproximated() =>
+        Assert.False(new NwcSavedViewpoint { Name = "V", Camera = new NwcCamera() }.IsCameraApproximated);
 
     [Fact]
     public void BcfExport_ViewpointWithoutId_UsesOneGuidPerTopic()

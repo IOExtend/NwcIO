@@ -273,7 +273,7 @@ public static partial class NwcSceneReader
                 if (TryMapViewpoint(saved, viewpointMetres, out var viewpoint))
                 {
                     scene.Viewpoints.Add(viewpoint);
-                    if (saved.Id is null)
+                    if (saved.IsCameraApproximated)
                     {
                         approximatedViewpoints++;
                     }
