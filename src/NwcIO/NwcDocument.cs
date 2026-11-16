@@ -522,7 +522,7 @@ public sealed class NwcDocument
     }
 
     /// <summary>
-    /// Saves the document to an Autodesk Navisworks (.nwc) file. When <see cref="PropertyRecords"/> is non-empty it is the
+    /// Saves the document to a .nwc file in NwcIO's own layout, not verified to open in Autodesk Navisworks. When <see cref="PropertyRecords"/> is non-empty it is the
     /// source of truth for the scene tree; <see cref="RootNode"/> is serialized only when no records exist, so edits to the
     /// tree of an opened document are not persisted unless the records are cleared first.
     /// </summary>
@@ -531,14 +531,14 @@ public sealed class NwcDocument
         NwcWriter.Write(this, path, header);
     }
 
-    /// <summary>Saves the document to an output stream in Autodesk Navisworks (.nwc) format.</summary>
+    /// <summary>Saves the document to an output stream in NwcIO's .nwc layout.</summary>
     public void Save(Stream stream, string? header = null)
     {
         NwcWriter.Write(this, stream, header);
     }
 
     /// <summary>
-    /// Serializes the document to a byte array in Autodesk Navisworks (.nwc) format. See <see cref="Save(string, string?)"/>
+    /// Serializes the document to a byte array in NwcIO's .nwc layout. See <see cref="Save(string, string?)"/>
     /// for the <see cref="PropertyRecords"/> / <see cref="RootNode"/> precedence.
     /// </summary>
     public byte[] ToByteArray(string? header = null)
