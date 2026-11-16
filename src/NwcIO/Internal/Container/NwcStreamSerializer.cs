@@ -30,10 +30,23 @@ internal static class NwcStreamSerializer
             streams.Add(sceneTree);
         }
 
-        // 3. Transforms stream
-        if (doc.Transforms.Count > 0)
+        // 3. Transforms stream and the writer-side mesh-to-transform links. Links use the index in
+        // this list, not NwcTransform.Id: ids repeat across merged documents and are not unique.
+        var transforms = CollectTransforms(doc);
+        var transformIndices = new Dictionary<NwcTransform, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < transforms.Count; i++)
         {
-            streams.Add(BuildTransformsStream(doc.Transforms));
+            transformIndices[transforms[i]] = i;
+        }
+
+        if (transforms.Count > 0)
+        {
+            streams.Add(BuildTransformsStream(transforms));
+        }
+
+        if (doc.Meshes.Count > 0)
+        {
+            streams.Add(BuildTransformLinksStream(doc.Meshes, transformIndices));
         }
 
         // 4. Guids stream
@@ -484,13 +497,13 @@ internal static class NwcStreamSerializer
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
 
+        w.Write(TransformStreamFormat.TransformsMagic);
         w.Write(transforms.Count);
 
         for (int i = 0; i < transforms.Count; i++)
         {
             var t = transforms[i];
-            int recId = (i == 0) ? 100 : (t.Id != 0 ? t.Id : 100 + i);
-            w.Write(recId);
+            w.Write(t.Id);
             w.Write(13); // TagTransform
 
             w.Write(1);  // inner id
@@ -517,6 +530,53 @@ internal static class NwcStreamSerializer
         }
 
         return ms.ToArray();
+    }
+
+    public static byte[] BuildTransformLinksStream(
+        IReadOnlyList<NwcMesh> meshes,
+        IReadOnlyDictionary<NwcTransform, int> transformIndices)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        w.Write(TransformStreamFormat.LinksMagic);
+        w.Write(meshes.Count);
+        foreach (var mesh in meshes)
+        {
+            w.Write(mesh.Transform is { } transform && transformIndices.TryGetValue(transform, out int index)
+                ? index
+                : -1);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static List<NwcTransform> CollectTransforms(NwcDocument doc)
+    {
+        var result = new List<NwcTransform>();
+        var seen = new HashSet<NwcTransform>(ReferenceEqualityComparer.Instance);
+
+        void Add(NwcTransform transform)
+        {
+            if (seen.Add(transform))
+            {
+                result.Add(transform);
+            }
+        }
+
+        foreach (var transform in doc.Transforms)
+        {
+            Add(transform);
+        }
+
+        foreach (var mesh in doc.Meshes)
+        {
+            if (mesh.Transform is { } transform)
+            {
+                Add(transform);
+            }
+        }
+
+        return result;
     }
 
     public static byte[] BuildGuidsStream(IReadOnlyList<Guid> guids)

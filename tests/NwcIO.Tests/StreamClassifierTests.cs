@@ -38,6 +38,32 @@ public class StreamClassifierTests
         Assert.Equal(NwcStreamKind.Toc, StreamClassifier.Classify(stream));
     }
 
+    [Fact]
+    public void Classify_LinkStreamThatMatchesLegacyTransformHeader_ReturnsTransformLinks()
+    {
+        // NWTL with 100 links, the first one an index of 13, also matches the legacy [n][100][13] layout.
+        var data = new byte[8 + 4 * 100];
+        BinaryPrimitives.WriteInt32LittleEndian(data, TransformStreamFormat.LinksMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 100);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), 13);
+        for (var i = 1; i < 100; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8 + 4 * i), -1);
+        }
+
+        var stream = new LcRawStream
+        {
+            Index = 0,
+            SectionIndex = 0,
+            FileOffset = 0,
+            CompressedLength = 0,
+            GapBefore = 0,
+            Data = data,
+        };
+
+        Assert.Equal(NwcStreamKind.TransformLinks, StreamClassifier.Classify(stream));
+    }
+
     [Theory]
     [InlineData("LcOaNode")]
     [InlineData("LcOaGroup")]

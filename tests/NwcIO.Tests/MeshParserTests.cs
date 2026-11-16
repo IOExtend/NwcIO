@@ -445,6 +445,43 @@ public class MeshParserTests
     }
 
     [Fact]
+    public void Parse_WithoutLinkTable_BindsTransformsByPosition()
+    {
+        var data = new byte[16 + 3 * 12];
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(0), 101);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 60);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), 3);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(12), 9);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(16), 0f);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(28), 1f);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(44), 1f);
+
+        var stream = new LcRawStream
+        {
+            Index = 0,
+            FileOffset = 0,
+            CompressedLength = data.Length,
+            GapBefore = 0,
+            Data = data,
+            SectionIndex = 0,
+            Kind = NwcStreamKind.Geometry,
+        };
+        var container = new NwcContainer
+        {
+            Sections = [],
+            Streams = [stream],
+            FileLength = data.Length,
+            TrailingGap = 0,
+        };
+        var first = new NwcTransform { Id = 999, Translation = new Vector3d(1, 2, 3) };
+        var second = new NwcTransform { Id = 998, Translation = new Vector3d(4, 5, 6) };
+
+        var mesh = Assert.Single(MeshParser.Parse(container, [first, second]));
+
+        Assert.Same(first, mesh.Transform);
+    }
+
+    [Fact]
     public void Parse_TrailerIds_PreserveZeroAndMakeDuplicatesUnique()
     {
         var first = TrailerRecord(0, meshId: 5, [0, 1, 2], "A");

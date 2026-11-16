@@ -205,7 +205,14 @@ public sealed class NwcDocument
 
             if (options.ReadMeshes)
             {
-                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices));
+                IReadOnlyList<int>? transformIndices = null;
+                var linksStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.TransformLinks);
+                if (linksStream is not null)
+                {
+                    transformIndices = TransformLinkParser.TryParse(linksStream);
+                }
+
+                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices, transformIndices));
             }
 
             if (options.BuildSceneTree)
