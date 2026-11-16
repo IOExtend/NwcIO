@@ -704,6 +704,118 @@ public class GlbExportTests
         Assert.Equal("OPAQUE", AlphaModeOf(root, PrimitiveOf(root, 0, LinesMode)));
     }
 
+    [Fact]
+    public void GlbExporter_LineColorsOutsideUnitRange_AreClampedInColor0()
+    {
+        var start = new RgbaColor(2f, -1f, 0.5f, 1f);
+        var end = new RgbaColor(0f, 0.25f, 1.5f, 3f);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([1f, 0f, 0.5f, 1f], colors[0]);
+        AssertColor([0f, 0.25f, 1f, 1f], colors[1]);
+        Assert.Equal("OPAQUE", AlphaModeOf(root, line));
+    }
+
+    [Fact]
+    public void GlbExporter_NonFiniteLineColorComponents_AreWrittenAsZero()
+    {
+        var start = new RgbaColor(float.NaN, float.PositiveInfinity, float.NegativeInfinity, 1f);
+        var end = new RgbaColor(0.5f, 0.5f, 0.5f, float.NaN);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([0f, 0f, 0f, 1f], colors[0]);
+        AssertColor([0.5f, 0.5f, 0.5f, 0f], colors[1]);
+        Assert.All(colors.SelectMany(color => color), component => Assert.True(float.IsFinite(component)));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorsClampEveryComponentOnBothSides()
+    {
+        var below = new RgbaColor(-1f, -1f, -1f, -1f);
+        var above = new RgbaColor(5f, 5f, 5f, 5f);
+        var largest = new RgbaColor(float.MaxValue, float.MinValue, float.MaxValue, float.MinValue);
+
+        var glb = ExportGlb([LineMesh(1, null, [below, above]), LineMesh(2, null, [largest, largest])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var first = EffectiveColors(glb, root, PrimitiveOf(root, 0, LinesMode));
+        AssertColor([0f, 0f, 0f, 0f], first[0]);
+        AssertColor([1f, 1f, 1f, 1f], first[1]);
+        var second = EffectiveColors(glb, root, PrimitiveOf(root, 1, LinesMode));
+        Assert.All(second, color => AssertColor([1f, 0f, 1f, 0f], color));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorOfAnUnusedVertex_IsSanitisedToo()
+    {
+        var opaque = new RgbaColor(1f, 0f, 0f, 1f);
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Mixed",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [],
+            LineIndices = [0, 1],
+            LineColors = [opaque, opaque, new RgbaColor(float.NaN, 5f, -5f, float.NaN)],
+        };
+
+        var glb = ExportGlb([mesh]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        AssertColor([0f, 1f, 0f, 0f], EffectiveColors(glb, root, line)[2]);
+        Assert.Equal("OPAQUE", AlphaModeOf(root, line));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorsInUnitRange_AreWrittenExactly()
+    {
+        var start = new RgbaColor(100f / 255f, 37f / 255f, 211f / 255f, 128f / 255f);
+        var end = new RgbaColor(0.123456789f, 1f, 0f, 1f);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var colors = EffectiveColors(glb, root, PrimitiveOf(root, 0, LinesMode));
+        float[][] expected = [[start.R, start.G, start.B, start.A], [end.R, end.G, end.B, end.A]];
+        for (int v = 0; v < expected.Length; v++)
+        {
+            Assert.Equal(expected[v], colors[v]);
+        }
+    }
+
+    [Theory]
+    [InlineData(-0.5f, 0f, "BLEND")]
+    [InlineData(float.NaN, 0f, "BLEND")]
+    [InlineData(1.5f, 1f, "OPAQUE")]
+    [InlineData(float.PositiveInfinity, 0f, "BLEND")]
+    [InlineData(float.NegativeInfinity, 0f, "BLEND")]
+    public void GlbExporter_LineColorAlphaOutsideUnitRange_BlendsOnTheWrittenAlpha(float alpha, float expectedWrittenAlpha, string expectedAlphaMode)
+    {
+        var color = new RgbaColor(1f, 0f, 0f, alpha);
+
+        var glb = ExportGlb([LineMesh(1, null, [color, color])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        Assert.Equal(expectedAlphaMode, AlphaModeOf(root, line));
+        Assert.Equal(expectedWrittenAlpha, EffectiveColors(glb, root, line)[0][3]);
+    }
+
     [Theory]
     [InlineData(1f, 0.5f)]
     [InlineData(0.5f, 1f)]

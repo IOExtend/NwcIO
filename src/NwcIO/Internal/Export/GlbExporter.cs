@@ -215,10 +215,10 @@ public static class GlbExporter
                 for (int v = 0; v < vCount; v++)
                 {
                     var c = lineColors[v];
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16), c.R);
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 4), c.G);
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 8), c.B);
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 12), c.A);
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16), ColorComponent(c.R));
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 4), ColorComponent(c.G));
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 8), ColorComponent(c.B));
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 12), ColorComponent(c.A));
                 }
 
                 binMs.Write(colSpan);
@@ -341,7 +341,7 @@ public static class GlbExporter
             int? lineMatIdx = matIdx;
             if (lineColors is not null)
             {
-                bool blend = lineIndices.Any(i => lineColors[i].A < 1.0f);
+                bool blend = lineIndices.Any(i => ColorComponent(lineColors[i].A) < 1.0f);
                 if (matIdx.HasValue || blend)
                 {
                     if (!lineMaterialMap.TryGetValue((matIdx, blend), out int lineMaterialIdx))
@@ -751,6 +751,10 @@ public static class GlbExporter
 
     private static double PositiveOr(double value, double fallback) =>
         double.IsFinite(value) && value > 0 ? value : fallback;
+
+    // glTF requires COLOR_0 floats to be finite and within [0,1]. A non-finite component is written as 0, as the
+    // material factors are; the written alpha is also the one that decides BLEND.
+    private static float ColorComponent(float value) => float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : 0f;
 
     private static void WriteSafeFloatValue(Utf8JsonWriter writer, float val)
     {
