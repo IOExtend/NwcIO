@@ -26,9 +26,11 @@ SceneJson.Save(result.Document, "Tower.scene.json");
 
 `NwcSceneReader.Read(NwcDocument, NwcSceneOptions)` converts a document that is already open. It needs `NwcSceneOptions.ModelKey`, because a document has no file name, and a document opened from a model file with the default `NwcReaderOptions`. It throws `ArgumentException` for a document without a scene tree. `NwcSceneOptions.LengthUnit` replaces the unit of the document (see [Limits](#limits)).
 
+`NwcSceneReader.Read(NwcAssembly, NwcSceneOptions)` converts an assembly loaded by NwcIO (a folder or a `.nwf`) into one scene with one model per component document. Model keys come from the source file name and are made unique with `#2`, `#3`; the `.nwf` document itself is skipped when component models exist. Each document keeps its own source unit. If the units differ, `NwcSceneResult.LengthUnit` is `Unknown` and `MetresPerUnit` is null.
+
 ## What the scene holds
 
-The scene has one model. Geometry and instance positions are in metres.
+The scene has one model per input document. Geometry and instance positions are in metres.
 
 | Scene part | Content |
 | --- | --- |
@@ -86,7 +88,7 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 ## Limits
 
 - `.nwd` partition trees and linked Revit models are not supported: `Read` throws `NotSupportedException`.
-- A `.nwf` file is read like a `.nwc`: the models it refers to are not loaded, so the scene holds only the content of the file itself (`xrefs-skipped`), and its `SourceFormat` is still `nwc`.
+- A `.nwf` file is read like a `.nwc` by `Read(string)`: the models it refers to are not loaded, so the scene holds only the content of the file itself (`xrefs-skipped`), and its `SourceFormat` is still `nwc`. Use `Read(NwcAssembly, ...)` with `NwcAssembly.OpenNwf` to convert the component models into one scene.
 - Level elevations are written in metres when the file holds them. Saved viewpoints are written when their camera is finite and the document unit is known; otherwise they are reported with `viewpoints-skipped`.
 - Selection sets and search sets, the TimeLiner schedule and clash tests are not converted (`selection-sets-skipped`, `timeliner-skipped`, `clash-tests-skipped`).
 - A Revit file is one read by Navisworks from a `.rvt` (loader `LcNwcLoaderPlugin:lcldrevit`) or written by the Revit NWC exporter (loader `nwexportrevit`); the loader plugin is compared exactly, so any other loader is a non-Revit file. Files from a non-Revit loader name no unit: geometry, grid lines and dimensioned values are left out with a `unit-unknown` warning, and there are no categories or levels. Set `NwcSceneOptions.LengthUnit` to bring the geometry back in metres; the option always wins over the unit of the document.

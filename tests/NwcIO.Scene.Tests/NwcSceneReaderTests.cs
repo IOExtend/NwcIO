@@ -587,6 +587,84 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_Assembly_ConvertsEachDocumentWithUniqueIds()
+    {
+        var assembly = NwcAssembly.Create("Federation",
+            Model("A.nwc", 1, 0),
+            Model("B.nwc", 2, 10));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        Assert.Equal([1, 2], result.Document.Models.Select(m => m.Id));
+        Assert.Equal(["A.nwc", "B.nwc"], result.Document.Models.Select(m => m.Key));
+        Assert.Equal(2, result.Document.Geometries.Count);
+        Assert.Equal([1, 2], result.Document.Geometries.Select(g => g.Id));
+        Assert.Equal(2, result.Document.Instances.Count);
+        Assert.Equal([1, 2], result.Document.Materials.Select(m => m.Id));
+        Assert.Equal(result.Document.Elements.Count, result.Document.Elements.Select(e => e.Id).Distinct().Count());
+        Assert.Equal(2, result.ElementCount);
+        Assert.Equal(1, result.LengthUnit.GetMetresPerUnit());
+        Assert.Empty(result.Document.Validate());
+
+        static NwcDocument Model(string sourcePath, int meshId, double x)
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var child = new NwcNode { Id = 2, Name = "Child", Class = "Model" };
+            root.Children.Add(child);
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Material = new NwcMaterial { Id = meshId, Name = $"Material {meshId}" };
+            mesh.Node = child;
+            child.Mesh = mesh;
+            return NwcDocument.Create(
+                fileInfo: new NwcFileInfo { SourcePath = sourcePath },
+                meshes: [mesh],
+                rootNode: root);
+        }
+    }
+
+    [Fact]
+    public void Read_Assembly_DuplicateFileNamesGetUniqueKeysAndSkipsTheNwfDocument()
+    {
+        var assembly = NwcAssembly.Create("Federation",
+            Model("fed.nwf", 1, 0),
+            Model("model.nwc", 2, 10),
+            Model("model.nwc", 3, 20));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        Assert.Equal(["model.nwc", "model.nwc#2"], result.Document.Models.Select(m => m.Key));
+        Assert.DoesNotContain(result.Document.Models, m => m.Key == "fed.nwf");
+        Assert.Empty(result.Document.Validate());
+
+        static NwcDocument Model(string sourcePath, int meshId, double x)
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var child = new NwcNode { Id = 2, Name = "Child", Class = "Model" };
+            root.Children.Add(child);
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Material = new NwcMaterial { Id = meshId, Name = $"Material {meshId}" };
+            mesh.Node = child;
+            child.Mesh = mesh;
+            return NwcDocument.Create(
+                fileInfo: new NwcFileInfo { SourcePath = sourcePath },
+                meshes: [mesh],
+                rootNode: root);
+        }
+    }
+
+    [Fact]
     public void Read_FileWithSavedViews_SkipsThemWithAWarning()
     {
         var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));

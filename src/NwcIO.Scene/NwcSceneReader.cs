@@ -16,8 +16,6 @@ namespace NwcIO.Scene;
 /// </remarks>
 public static partial class NwcSceneReader
 {
-    private const int ModelId = 1;
-
     private static readonly string Producer = "NwcIO.Scene "
         + typeof(NwcSceneReader).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
 
@@ -81,14 +79,122 @@ public static partial class NwcSceneReader
         return Convert(document, options.ModelKey, null, options);
     }
 
+    /// <summary>
+    /// Converts every model file of an assembly into one scene, with one <see cref="SceneModel"/> per document.
+    /// Keys come from the source file name and are de-duplicated with a numeric suffix. The .nwf document itself
+    /// is skipped when the assembly has component models.
+    /// </summary>
+    /// <param name="assembly">The federated assembly or opened .nwf file.</param>
+    /// <param name="options">Conversion options; <see cref="NwcSceneOptions.ModelKey"/> names the first converted model.</param>
+    /// <returns>The scene with a report of the conversion.</returns>
+    /// <exception cref="ArgumentException">The assembly has no models, or a model has no scene tree.</exception>
+    public static NwcSceneResult Read(NwcAssembly assembly, NwcSceneOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        if (assembly.Models.Count == 0)
+        {
+            throw new ArgumentException("The assembly has no models.", nameof(assembly));
+        }
+
+        var documents = assembly.Models.Count > 1
+            ? assembly.Models
+                .Where(d => !string.Equals(Path.GetExtension(d.FileInfo.SourcePath ?? string.Empty), ".nwf", StringComparison.OrdinalIgnoreCase))
+                .ToList()
+            : assembly.Models.ToList();
+        if (documents.Count == 0)
+        {
+            documents = assembly.Models.ToList();
+        }
+
+        var scene = new SceneDocument { Title = assembly.Name };
+        var diagnostics = new List<SceneDiagnostic>();
+        var usedKeys = new HashSet<string>(StringComparer.Ordinal);
+        int elementCount = 0;
+        int elementsWithGeometry = 0;
+        NwcLengthUnit? commonUnit = null;
+        bool mixedUnits = false;
+
+        for (int i = 0; i < documents.Count; i++)
+        {
+            var document = documents[i];
+            string key = ModelKey(document, i, options, usedKeys);
+            if (document.RootNode is null)
+            {
+                throw new ArgumentException(
+                    $"Model '{key}' has no scene tree: open it with NwcReaderOptions.BuildSceneTree on.",
+                    nameof(assembly));
+            }
+
+            var result = ConvertInto(scene, document, key, document.FileInfo.SourcePath, options, modelId: i + 1);
+            diagnostics.AddRange(result.Diagnostics.Select(d => new SceneDiagnostic(
+                d.Severity,
+                d.Code,
+                $"{key}: {d.Message}")));
+            elementCount += result.ElementCount;
+            elementsWithGeometry += result.ElementsWithGeometry;
+
+            var unit = options?.LengthUnit ?? document.LengthUnit;
+            if (commonUnit is null)
+            {
+                commonUnit = unit;
+            }
+            else if (commonUnit != unit)
+            {
+                mixedUnits = true;
+            }
+        }
+
+        return new NwcSceneResult
+        {
+            Document = scene,
+            Diagnostics = diagnostics,
+            ElementCount = elementCount,
+            ElementsWithGeometry = elementsWithGeometry,
+            GeometryCount = scene.Geometries.Count,
+            InstanceCount = scene.Instances.Count,
+            LengthUnit = mixedUnits ? NwcLengthUnit.Unknown : commonUnit ?? NwcLengthUnit.Unknown,
+            MetresPerUnit = mixedUnits ? null : (commonUnit ?? NwcLengthUnit.Unknown).GetMetresPerUnit(),
+        };
+    }
+
+    private static string ModelKey(NwcDocument document, int index, NwcSceneOptions? options, HashSet<string> used)
+    {
+        string candidate = options?.ModelKey is { Length: > 0 } key && index == 0
+            ? key
+            : Path.GetFileName(document.FileInfo.SourcePath ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            candidate = $"Model_{index + 1}";
+        }
+
+        string unique = candidate;
+        int suffix = 2;
+        while (!used.Add(unique))
+        {
+            unique = $"{candidate}#{suffix++}";
+        }
+        return unique;
+    }
+
     private static NwcSceneResult Convert(NwcDocument document, string key, string? path, NwcSceneOptions? options)
+    {
+        var scene = new SceneDocument { Title = key };
+        return ConvertInto(scene, document, key, path, options, modelId: 1);
+    }
+
+    private static NwcSceneResult ConvertInto(
+        SceneDocument scene,
+        NwcDocument document,
+        string key,
+        string? path,
+        NwcSceneOptions? options,
+        int modelId)
     {
         var unit = options?.LengthUnit ?? document.LengthUnit;
         string? loader = document.FileInfo.LoaderPlugin;
-        var scene = new SceneDocument { Title = key };
         scene.Models.Add(new SceneModel
         {
-            Id = ModelId,
+            Id = modelId,
             Key = key,
             Name = key,
             Path = path,
@@ -104,11 +210,12 @@ public static partial class NwcSceneReader
         // Element ids are preorder indices in the order of the walk below; NwcNode.Id is one only on the strict path (a file read
         // without its DbCache directory keeps stored ints, which can repeat).
         var ids = new Dictionary<NwcNode, long>(ReferenceEqualityComparer.Instance);
+        long elementIdBase = scene.Elements.Count;
         var order = new Stack<NwcNode>();
         order.Push(root);
         while (order.TryPop(out var next))
         {
-            ids[next] = ids.Count;
+            ids[next] = elementIdBase + ids.Count;
             for (int i = next.Children.Count - 1; i >= 0; i--)
             {
                 order.Push(next.Children[i]);
@@ -179,7 +286,7 @@ public static partial class NwcSceneReader
                 scene.Levels.Add(new SceneLevel
                 {
                     Id = levelId.Value,
-                    ModelId = ModelId,
+                    ModelId = modelId,
                     Name = node.Name,
                     Elevation = levelElementId is not null && levelElevations.TryGetValue(levelElementId, out double elevation)
                         ? elevation
@@ -205,12 +312,14 @@ public static partial class NwcSceneReader
             {
                 if (metresPerUnit is double m && lineMeshes.TryGetValue(node, out var meshes) && IsGrid(node) && GridLine(node, meshes, m) is { } gridLine)
                 {
-                    if (scene.Grids.Count == 0)
+                    var gridSystem = scene.Grids.FirstOrDefault(g => g.ModelId == modelId);
+                    if (gridSystem is null)
                     {
-                        scene.Grids.Add(new SceneGridSystem { ModelId = ModelId, Name = "Grids" });
+                        gridSystem = new SceneGridSystem { ModelId = modelId, Name = "Grids" };
+                        scene.Grids.Add(gridSystem);
                     }
 
-                    scene.Grids[0].Lines.Add(gridLine);
+                    gridSystem.Lines.Add(gridLine);
                 }
 
                 elementCount++;
@@ -233,7 +342,7 @@ public static partial class NwcSceneReader
             scene.Elements.Add(new SceneElement
             {
                 Id = ids[node],
-                ModelId = ModelId,
+                ModelId = modelId,
                 ParentId = parentId,
                 Kind = kind,
                 Name = node.Name,
