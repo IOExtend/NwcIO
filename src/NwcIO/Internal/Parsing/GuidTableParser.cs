@@ -6,7 +6,7 @@ namespace NwcIO.Internal.Parsing;
 /// <summary>
 /// Parses GUID table streams: [int32 a][int32 count][count x 16-byte little-endian GUIDs].
 /// </summary>
-public static class GuidTableParser
+internal static class GuidTableParser
 {
     public static bool TryParse(LcRawStream stream, out IReadOnlyList<Guid> guids)
     {

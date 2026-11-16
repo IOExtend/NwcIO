@@ -7,6 +7,49 @@ namespace NwcIO.Tests;
 public class HierarchyParserTests
 {
     [Fact]
+    public void Read_DuplicateElementUnderDifferentParents_KeepsBothAsLinkedPlacement()
+    {
+        var wrote = Begin(1, 2);
+        Group(wrote, 1);
+        LeafWithX(wrote, 1);
+        Group(wrote, 1);
+        LeafWithX(wrote, 1);
+        var guids = new[] { Guid.NewGuid(), Guid.NewGuid() };
+
+        var nodes = HierarchyParser.Read(End(wrote), "Model", guids: guids);
+
+        var first = nodes[2];
+        var linked = nodes[4];
+        Assert.True(first.IsElement);
+        Assert.False(linked.IsElement);
+        Assert.True(linked.IsLinkPlacement);
+        Assert.True(linked.Parent!.IsLinkRoot);
+        Assert.Same(first, linked.Element);
+        Assert.NotSame(first.Parent, linked.Parent);
+        Assert.Equal([first, linked], nodes[0].Children.SelectMany(g => g.Children));
+    }
+
+    [Fact]
+    public void Read_SeveralElementsRepeatedUnderOneGroup_MarkOnlyThatGroupAsLinkRoot()
+    {
+        var wrote = Begin(1, 2);
+        Group(wrote, 2);
+        LeafWithX(wrote, 1);
+        LeafWithX(wrote, 2);
+        Group(wrote, 2);
+        LeafWithX(wrote, 1);
+        LeafWithX(wrote, 2);
+        var guids = new[] { Guid.NewGuid(), Guid.NewGuid() };
+
+        var nodes = HierarchyParser.Read(End(wrote), "Model", guids: guids);
+
+        var second = nodes[4];
+        Assert.Equal(2, second.Children.Count);
+        Assert.All(second.Children, child => Assert.True(child.IsLinkPlacement));
+        Assert.Same(second, Assert.Single(nodes, node => node.IsLinkRoot));
+    }
+
+    [Fact]
     public void Read_H1_ExpandsBackReferencedSubtreeInPreorder()
     {
         var nodes = HierarchyParser.Read(FormatVectors.H1, "Model");
@@ -512,6 +555,14 @@ public class HierarchyParserTests
         Username(w, "L", "LcTestLeaf");
         w.Int(0).Int(0).Int(attributeCount);
         attributes(w);
+    }
+
+    private static void LeafWithX(LcGraphWriter w, int x)
+    {
+        w.New(22);
+        w.Str("L");
+        Username(w, "L", "LcTestLeaf");
+        w.Int(0).Int(x).Int(0);
     }
 
     // Top-level group G with one child: a leaf holding the attributes.

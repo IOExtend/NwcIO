@@ -41,16 +41,16 @@ public sealed class NwcDocument
 
     public NwcFileInfo FileInfo { get; }
 
+    /// <summary>Length unit of the document coordinates and raw length values, inferred or overridden.</summary>
+    public NwcLengthUnit LengthUnit => FileInfo.LengthUnit;
+
     /// <summary>
     /// True when the loader plugin is exactly (ordinal) the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> (Navisworks reading a
     /// <c>.rvt</c>) or the Revit NWC exporter <c>nwexportrevit</c>. Computed from <see cref="FileInfo"/>.
     /// </summary>
     public bool IsRevitSource => FileInfo.LoaderPlugin is "LcNwcLoaderPlugin:lcldrevit" or "nwexportrevit";
 
-    /// <summary>Feet when <see cref="IsRevitSource"/> (the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> or the Revit NWC exporter <c>nwexportrevit</c>); no file names its unit. Computed from <see cref="FileInfo"/>.</summary>
-    public NwcLengthUnit LengthUnit => IsRevitSource ? NwcLengthUnit.Feet : NwcLengthUnit.Unknown;
-
-    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet, which the Revit loader <c>LcNwcLoaderPlugin:lcldrevit</c> and the Revit NWC exporter <c>nwexportrevit</c> write; no file names its unit); null when the unit is unknown.</summary>
+    /// <summary>Metres in one <see cref="LengthUnit"/> (0.3048 for feet); null when the unit is unknown.</summary>
     public double? MetresPerUnit => LengthUnit.GetMetresPerUnit();
 
     /// <summary>Flat records parsed from the scene-tree/property streams.</summary>
@@ -65,7 +65,7 @@ public sealed class NwcDocument
     /// <summary>3D polygon meshes extracted from geometry streams and TOC tables.</summary>
     public IReadOnlyList<NwcMesh> Meshes { get; }
 
-    /// <summary>Surface materials, RGBA colors and PBR properties: for model files read through their DbCache directory, the materials decoded from the fragments' appearances (none without the scene tree); for other files, materials assigned by heuristics from properties and categories.</summary>
+    /// <summary>Surface materials, RGBA colors and PBR properties: for model files read through their DbCache directory, the materials decoded from the fragments' appearances (none without the scene tree); for other files, the materials named in property records with their `revit_Color` colours (neutral and `IsInferred` when none) plus one inferred default for meshes without a material.</summary>
     public IReadOnlyList<NwcMaterial> Materials { get; }
 
     /// <summary>Root of the hierarchical scene graph tree (matching Navisworks selection tree).</summary>
@@ -92,6 +92,9 @@ public sealed class NwcDocument
     /// <summary>Configured Clash Detective tests and results for this document.</summary>
     public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
 
+    /// <summary>Reader diagnostics for data that was skipped or substituted.</summary>
+    public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
+
     /// <summary>Spatial grid system (axes and levels) associated with the document.</summary>
     public Model.Grids.NwcGridSystem? GridSystem { get; set; }
 
@@ -113,8 +116,9 @@ public sealed class NwcDocument
 
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
-    /// <exception cref="InvalidDataException">The file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
+    /// <exception cref="InvalidDataException">The file is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
         => Open(path, options, null, default);
 
@@ -140,8 +144,9 @@ public sealed class NwcDocument
     }
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>
-    /// <exception cref="InvalidDataException">The stream is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
+    /// <exception cref="InvalidDataException">The stream is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
         => Open(stream, options, fallbackName, null, default);
 
@@ -159,7 +164,7 @@ public sealed class NwcDocument
         options ??= NwcReaderOptions.Default;
         cancellationToken.ThrowIfCancellationRequested();
 
-        var container = NwcContainerReader.Read(stream);
+        var container = NwcContainerReader.Read(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("read-container", 1, 1));
         StreamClassifier.ClassifyAll(container.Streams);
@@ -173,6 +178,7 @@ public sealed class NwcDocument
         }
 
         fileInfo.FormatVersion ??= container.Sections.Select(s => s.InternalVersion).FirstOrDefault(v => v is not null);
+        fileInfo.LengthUnit = options.LengthUnit ?? InferLengthUnit(fileInfo.LoaderPlugin);
         fileInfo.Encoding ??= container.Sections.Select(s => s.Encoding).FirstOrDefault(e => e is not null);
         fileInfo.ChunkMarker ??= container.Sections.Select(s => s.Marker).FirstOrDefault(m => m is not null);
 
@@ -203,6 +209,7 @@ public sealed class NwcDocument
 
         var transforms = new List<NwcTransform>();
         var meshes = new List<NwcMesh>();
+        int skippedMeshRecords = 0;
         var materials = new List<NwcMaterial>();
         NwcNode? rootNode = null;
         cancellationToken.ThrowIfCancellationRequested();
@@ -230,7 +237,14 @@ public sealed class NwcDocument
 
             if (options.ReadMeshes)
             {
-                meshes.AddRange(MeshParser.Parse(container, transforms));
+                IReadOnlyList<int>? transformIndices = null;
+                var linksStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.TransformLinks);
+                if (linksStream is not null)
+                {
+                    transformIndices = TransformLinkParser.TryParse(linksStream);
+                }
+
+                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices, transformIndices, out skippedMeshRecords));
             }
 
             if (options.BuildSceneTree)
@@ -298,7 +312,29 @@ public sealed class NwcDocument
 
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("open", 1, 1));
-        return new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        var document = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        var diagnostics = new List<NwcDiagnostic>();
+        if (skippedMeshRecords > 0)
+        {
+            diagnostics.Add(new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "meshes-skipped",
+                $"{skippedMeshRecords} geometry records were skipped: their vertex count is outside " +
+                $"{MeshParser.MinMeshVertices}..{options.MaxMeshVertices} or the record is malformed."));
+        }
+
+        if (container.TrailingGap > 0)
+        {
+            diagnostics.Add(new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "ContainerTrailingGap",
+                $"Unrecognized {container.TrailingGap} byte tail after the last stream.",
+                ByteOffset: container.FileLength - container.TrailingGap));
+        }
+
+        document.Diagnostics = diagnostics;
+
+        return document;
     }
 
     /// <summary>
@@ -320,6 +356,10 @@ public sealed class NwcDocument
         Model.Appearance.NwcAppearanceProfiler? appearanceProfiler = null)
     {
         var fi = fileInfo ?? new NwcFileInfo { SourcePath = "Model.rvt", LoaderPlugin = "LcOpRevitExport", SourceTimestampUtc = DateTime.UtcNow };
+        if (fi.LengthUnit == NwcLengthUnit.Unknown)
+        {
+            fi.LengthUnit = InferLengthUnit(fi.LoaderPlugin);
+        }
         var mList = meshes?.ToList() ?? [];
         var tList = transforms?.ToList() ?? [];
         var vList = savedViewpoints?.ToList() ?? [];
@@ -501,18 +541,6 @@ public sealed class NwcDocument
         return test;
     }
 
-    /// <summary>Runs clash detection with cancellation and progress reporting.</summary>
-    public Model.Clash.NwcClashTest RunClashDetection(
-        Model.Clash.NwcClashTest? test,
-        IProgress<NwcProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        test ??= new Model.Clash.NwcClashTest("Clash Test");
-        Model.Clash.NwcClashDetector.Run(this, test, progress, cancellationToken);
-        if (!ClashTests.Contains(test)) ClashTests.Add(test);
-        return test;
-    }
-
     /// <summary>Exports detected clash results to Autodesk Navisworks Clash Report XML format.</summary>
     public void ExportClashReportXml(string path, string? testName = null)
     {
@@ -557,19 +585,26 @@ public sealed class NwcDocument
         return tests;
     }
 
-    /// <summary>Saves the document to an Autodesk Navisworks (.nwc) file.</summary>
+    /// <summary>
+    /// Saves the document to a .nwc file in NwcIO's own layout, not verified to open in Autodesk Navisworks. When <see cref="PropertyRecords"/> is non-empty it is the
+    /// source of truth for the scene tree; <see cref="RootNode"/> is serialized only when no records exist, so edits to the
+    /// tree of an opened document are not persisted unless the records are cleared first.
+    /// </summary>
     public void Save(string path, string? header = null)
     {
         NwcWriter.Write(this, path, header);
     }
 
-    /// <summary>Saves the document to an output stream in Autodesk Navisworks (.nwc) format.</summary>
+    /// <summary>Saves the document to an output stream in NwcIO's .nwc layout.</summary>
     public void Save(Stream stream, string? header = null)
     {
         NwcWriter.Write(this, stream, header);
     }
 
-    /// <summary>Serializes the document to a byte array in Autodesk Navisworks (.nwc) format.</summary>
+    /// <summary>
+    /// Serializes the document to a byte array in NwcIO's .nwc layout. See <see cref="Save(string, string?)"/>
+    /// for the <see cref="PropertyRecords"/> / <see cref="RootNode"/> precedence.
+    /// </summary>
     public byte[] ToByteArray(string? header = null)
     {
         return NwcWriter.WriteToBytes(this, header);
@@ -704,54 +739,6 @@ public sealed class NwcDocument
     public Task SaveAsync(Stream stream, string? header = null, CancellationToken cancellationToken = default)
         => Task.Run(() => Save(stream, header), cancellationToken);
 
-    /// <summary>Saves JSON asynchronously.</summary>
-    public Task SaveJsonAsync(string path, NwcJsonExportOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveJson(path, options), cancellationToken);
-
-    /// <summary>Saves JSON to a stream asynchronously.</summary>
-    public Task SaveJsonAsync(Stream stream, NwcJsonExportOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveJson(stream, options), cancellationToken);
-
-    /// <summary>Saves OBJ asynchronously.</summary>
-    public Task SaveObjAsync(string path, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveObj(path, worldCoordinates), cancellationToken);
-
-    /// <summary>Saves OBJ to a text writer asynchronously.</summary>
-    public Task SaveObjAsync(TextWriter writer, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveObj(writer, worldCoordinates), cancellationToken);
-
-    /// <summary>Saves GLB asynchronously.</summary>
-    public Task SaveGlbAsync(string path, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveGlb(path, worldCoordinates), cancellationToken);
-
-    /// <summary>Saves GLB to a stream asynchronously.</summary>
-    public Task SaveGlbAsync(Stream stream, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveGlb(stream, worldCoordinates), cancellationToken);
-
-    /// <summary>Saves IFC asynchronously.</summary>
-    public Task SaveIfcAsync(string path, NwcIfcExportOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveIfc(path, options), cancellationToken);
-
-    /// <summary>Saves IFC to a text writer asynchronously.</summary>
-    public Task SaveIfcAsync(TextWriter writer, NwcIfcExportOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveIfc(writer, options), cancellationToken);
-
-    /// <summary>Saves viewpoints as a BCF archive asynchronously.</summary>
-    public Task SaveViewpointsBcfAsync(string path, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveViewpointsBcf(path), cancellationToken);
-
-    /// <summary>Saves viewpoints as a BCF stream asynchronously.</summary>
-    public Task SaveViewpointsBcfAsync(Stream stream, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveViewpointsBcf(stream), cancellationToken);
-
-    /// <summary>Saves viewpoints as Navisworks XML asynchronously.</summary>
-    public Task SaveViewpointsXmlAsync(string path, string units = "m", CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveViewpointsXml(path, units), cancellationToken);
-
-    /// <summary>Saves the HTML viewer asynchronously.</summary>
-    public Task SaveHtmlViewerAsync(string path, Model.Viewer.NwcHtmlViewerOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveHtmlViewer(path, options), cancellationToken);
-
     /// <summary>
     /// Populates clash grid location tags across all clash detective tests in this document using the provided or attached grid system.
     /// </summary>
@@ -767,4 +754,9 @@ public sealed class NwcDocument
     /// </summary>
     public Model.Grids.NwcGridSystem ExtractGridSystem() =>
         Model.Grids.NwcGridSystem.ExtractFromDocument(this);
+
+    private static NwcLengthUnit InferLengthUnit(string? loaderPlugin) =>
+        loaderPlugin is "LcNwcLoaderPlugin:lcldrevit" or "nwexportrevit"
+            ? NwcLengthUnit.Feet
+            : NwcLengthUnit.Unknown;
 }

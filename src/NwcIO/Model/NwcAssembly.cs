@@ -12,9 +12,23 @@ namespace NwcIO.Model;
 public sealed class NwcAssembly
 {
     private NwcSpatialIndex? _spatialIndex;
+    private readonly Dictionary<NwcMesh, int> _meshModelIndexes;
 
     public string Name { get; }
     public IReadOnlyList<NwcDocument> Models { get; }
+
+    /// <summary>True when the contributing models report different length units; the assembly does not rescale them.</summary>
+    public bool HasMixedLengthUnits =>
+        Models.Select(model => model.LengthUnit)
+            .Where(unit => unit != NwcLengthUnit.Unknown)
+            .Distinct()
+            .Skip(1)
+            .Any();
+
+    /// <summary>
+    /// Synthetic assembly root. Its id is negative so it cannot collide with the
+    /// document roots (id 0); node ids are otherwise unique only within a document.
+    /// </summary>
     public NwcNode RootNode { get; }
     public IReadOnlyList<NwcMesh> AllMeshes { get; }
     public IReadOnlyList<NwcMaterial> AllMaterials { get; }
@@ -35,6 +49,9 @@ public sealed class NwcAssembly
 
     /// <summary>Multi-discipline clash coordination matrix associated with the assembly.</summary>
     public Clash.NwcClashMatrix? ClashMatrix { get; set; }
+
+    /// <summary>Diagnostics from contributing models plus assembly-level issues such as unresolved references.</summary>
+    public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
 
     /// <summary>
     /// XRef entries of the opened federation that could not be resolved to an existing file,
@@ -62,7 +79,8 @@ public sealed class NwcAssembly
         IReadOnlyList<NwcMesh> allMeshes,
         IReadOnlyList<NwcMaterial> allMaterials,
         BoundingBox3d boundingBox,
-        IReadOnlyList<NwcSavedViewpoint> savedViewpoints)
+        IReadOnlyList<NwcSavedViewpoint> savedViewpoints,
+        Dictionary<NwcMesh, int> meshModelIndexes)
     {
         Name = name;
         Models = models;
@@ -71,6 +89,27 @@ public sealed class NwcAssembly
         AllMaterials = allMaterials;
         BoundingBox = boundingBox;
         SavedViewpoints = savedViewpoints;
+        _meshModelIndexes = meshModelIndexes;
+    }
+
+    /// <summary>
+    /// Returns the zero-based index of the source model that owns <paramref name="mesh"/>,
+    /// or -1 when the mesh does not belong to this assembly.
+    /// </summary>
+    public int GetModelIndex(NwcMesh mesh)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        return _meshModelIndexes.TryGetValue(mesh, out int index) ? index : -1;
+    }
+
+    /// <summary>
+    /// Returns the source model that owns <paramref name="mesh"/>, or null when the
+    /// mesh does not belong to this assembly.
+    /// </summary>
+    public NwcDocument? GetModelOf(NwcMesh mesh)
+    {
+        int index = GetModelIndex(mesh);
+        return index >= 0 && index < Models.Count ? Models[index] : null;
     }
 
     /// <summary>
@@ -89,6 +128,7 @@ public sealed class NwcAssembly
 
         var modelList = models.ToList();
         var allMeshes = new List<NwcMesh>();
+        var meshModelIndexes = new Dictionary<NwcMesh, int>();
         // Dedupe by reference, NOT by name: disciplines routinely define their own
         // material with a shared name (Concrete, Steel) and different colours, and a
         // by-name map would silently drop the later ones from AllMaterials.
@@ -100,7 +140,11 @@ public sealed class NwcAssembly
         for (int m = 0; m < modelList.Count; m++)
         {
             var doc = modelList[m];
-            allMeshes.AddRange(doc.Meshes);
+            foreach (var mesh in doc.Meshes)
+            {
+                allMeshes.Add(mesh);
+                meshModelIndexes[mesh] = m;
+            }
 
             foreach (var mat in doc.Materials)
             {
@@ -121,7 +165,7 @@ public sealed class NwcAssembly
                 string docName = Path.GetFileNameWithoutExtension(doc.FileInfo.SourcePath ?? $"Model_{m + 1}");
                 var fallbackNode = new NwcNode
                 {
-                    Id = m + 1,
+                    Id = -(m + 2),
                     Name = docName,
                     Class = "LcOpModelFile",
                 };
@@ -144,13 +188,15 @@ public sealed class NwcAssembly
 
         var rootNode = new NwcNode
         {
-            Id = 0,
+            Id = -1,
             Name = name,
             Class = "LcOpModelAssembly",
         };
         rootNode.Children.AddRange(rootChildren);
 
-        return new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints);
+        var assembly = new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints, meshModelIndexes);
+        assembly.Diagnostics = modelList.SelectMany(m => m.Diagnostics).ToList();
+        return assembly;
     }
 
     /// <summary>
@@ -161,8 +207,20 @@ public sealed class NwcAssembly
     public static NwcAssembly LoadFromDirectory(
         string directoryPath,
         string searchPattern = "*.nwc",
+        NwcReaderOptions? options = null) =>
+        LoadFromDirectory(directoryPath, [searchPattern], recursive: false, options);
+
+    /// <summary>
+    /// Discovers and loads files matching any of <paramref name="searchPatterns"/> into a
+    /// single federated assembly, optionally recursing into subfolders. Files are opened
+    /// in a deterministic case-insensitive path order.
+    /// </summary>
+    public static NwcAssembly LoadFromDirectory(
+        string directoryPath,
+        IReadOnlyList<string> searchPatterns,
+        bool recursive = false,
         NwcReaderOptions? options = null)
-        => LoadFromDirectory(directoryPath, searchPattern, options, null, default);
+        => LoadFromDirectory(directoryPath, searchPatterns, recursive, options, null, default);
 
     /// <summary>
     /// Loads a folder of models with cancellation and per-model progress.
@@ -173,30 +231,132 @@ public sealed class NwcAssembly
         NwcReaderOptions? options,
         IProgress<NwcProgress>? progress,
         CancellationToken cancellationToken)
+        => LoadFromDirectory(directoryPath, [searchPattern], recursive: false, options, progress, cancellationToken);
+
+    /// <summary>
+    /// Loads files matching any of <paramref name="searchPatterns"/> with cancellation and per-model progress.
+    /// </summary>
+    public static NwcAssembly LoadFromDirectory(
+        string directoryPath,
+        IReadOnlyList<string> searchPatterns,
+        bool recursive,
+        NwcReaderOptions? options,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(searchPatterns);
         if (!Directory.Exists(directoryPath))
         {
             throw new DirectoryNotFoundException($"Directory not found: {directoryPath}");
         }
+        if (searchPatterns.Count == 0)
+        {
+            throw new ArgumentException("At least one search pattern is required.", nameof(searchPatterns));
+        }
 
-        var files = Directory.GetFiles(directoryPath, searchPattern);
+        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var files = searchPatterns
+            .SelectMany(pattern => Directory.GetFiles(directoryPath, pattern, searchOption))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f, StringComparer.Ordinal)
+            .ToArray();
         if (files.Length == 0)
         {
-            throw new FileNotFoundException($"No files matching '{searchPattern}' found in {directoryPath}");
+            throw new FileNotFoundException(
+                $"No files matching '{string.Join(";", searchPatterns)}' found in {directoryPath}");
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var ordered = files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToArray();
-        var docs = new List<NwcDocument>(ordered.Length);
-        for (int i = 0; i < ordered.Length; i++)
+        var docs = new List<NwcDocument>(files.Length);
+        for (int i = 0; i < files.Length; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            docs.Add(NwcDocument.Open(ordered[i], options, null, cancellationToken));
-            progress?.Report(new NwcProgress("load-models", i + 1, ordered.Length));
+            docs.Add(NwcDocument.Open(files[i], options, null, cancellationToken));
+            progress?.Report(new NwcProgress("load-models", i + 1, files.Length));
         }
 
         string assemblyName = Path.GetFileName(directoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         return Create(assemblyName, docs);
+    }
+
+    /// <summary>
+    /// Opens a federation manifest (.nwf.xml) and loads the .nwc/.nwd models it lists.
+    /// Relative paths are resolved under the manifest folder; an absolute path is tried as written first
+    /// and then by its trailing segments under the manifest folder. Backslashes in stored paths are read as
+    /// directory separators on every platform. Only the model list is read: viewpoints, sets, appearance
+    /// rules and clash tests of the manifest are not loaded.
+    /// Missing and unsupported entries are recorded on <see cref="UnresolvedXRefs"/>
+    /// and <see cref="SkippedXRefs"/>.
+    /// </summary>
+    /// <exception cref="FileNotFoundException">The manifest is missing, or none of its models could be resolved.</exception>
+    public static NwcAssembly OpenManifest(string manifestPath, NwcReaderOptions? options = null)
+        => OpenManifest(manifestPath, options, null, default);
+
+    /// <summary>
+    /// Opens a federation manifest with cancellation and progress for each listed model.
+    /// </summary>
+    public static NwcAssembly OpenManifest(
+        string manifestPath,
+        NwcReaderOptions? options,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(manifestPath);
+        if (!File.Exists(manifestPath))
+        {
+            throw new FileNotFoundException($"Manifest file not found: {manifestPath}", manifestPath);
+        }
+
+        var manifest = Clash.NwcNwfManifest.Open(manifestPath);
+        var baseDir = Path.GetDirectoryName(Path.GetFullPath(manifestPath)) ?? ".";
+        var loadedDocs = new List<NwcDocument>();
+        var loadedPaths = new HashSet<string>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal);
+        var unresolved = new List<NwcXRef>();
+        var skipped = new List<NwcXRef>();
+
+        int processed = 0;
+        foreach (var modelPath in manifest.ModelPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new NwcProgress("load-models", processed++, manifest.ModelPaths.Count));
+            var xref = new NwcXRef(modelPath.Replace('\\', Path.DirectorySeparatorChar), "");
+            if (!xref.TryResolve(baseDir, out string resolved))
+            {
+                unresolved.Add(xref);
+                continue;
+            }
+
+            if (!resolved.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) &&
+                !resolved.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
+            {
+                skipped.Add(xref);
+                continue;
+            }
+
+            if (loadedPaths.Add(Path.GetFullPath(resolved)))
+            {
+                loadedDocs.Add(NwcDocument.Open(resolved, options, null, cancellationToken));
+            }
+        }
+
+        if (loadedDocs.Count == 0)
+        {
+            throw new FileNotFoundException(
+                $"No .nwc or .nwd models listed in manifest '{manifestPath}' could be resolved.");
+        }
+
+        progress?.Report(new NwcProgress("load-models", manifest.ModelPaths.Count, manifest.ModelPaths.Count));
+        string fileName = Path.GetFileNameWithoutExtension(manifestPath);
+        string assemblyName = fileName.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetFileNameWithoutExtension(fileName)
+            : fileName;
+        var assembly = Create(assemblyName, loadedDocs);
+        assembly.UnresolvedXRefs = unresolved;
+        assembly.SkippedXRefs = skipped;
+        return assembly;
     }
 
     /// <summary>
@@ -236,18 +396,23 @@ public sealed class NwcAssembly
 
         if (primaryDoc.XRefs is not null && primaryDoc.XRefs.References.Count > 0)
         {
+            int processed = 1;
             foreach (var xref in primaryDoc.XRefs.References)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // Every reference counts, loaded or not, so Completed reaches Total.
+                processed++;
                 if (!xref.TryResolve(baseDir, out string resolved))
                 {
                     unresolved.Add(xref);
+                    progress?.Report(new NwcProgress("load-models", processed, total));
                     continue;
                 }
 
                 // Load every resolved file once, whatever the stored path spelled like.
                 if (!loadedPaths.Add(Path.GetFullPath(resolved)))
                 {
+                    progress?.Report(new NwcProgress("load-models", processed, total));
                     continue;
                 }
 
@@ -255,11 +420,12 @@ public sealed class NwcAssembly
                     !resolved.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
                 {
                     skipped.Add(xref);
+                    progress?.Report(new NwcProgress("load-models", processed, total));
                     continue;
                 }
 
                 loadedDocs.Add(NwcDocument.Open(resolved, options, null, cancellationToken));
-                progress?.Report(new NwcProgress("load-models", loadedDocs.Count, total));
+                progress?.Report(new NwcProgress("load-models", processed, total));
             }
         }
 
@@ -267,6 +433,19 @@ public sealed class NwcAssembly
         var assembly = Create(assemblyName, loadedDocs);
         assembly.UnresolvedXRefs = unresolved;
         assembly.SkippedXRefs = skipped;
+        if (unresolved.Count > 0 || skipped.Count > 0)
+        {
+            var diagnostics = assembly.Diagnostics.ToList();
+            diagnostics.AddRange(unresolved.Select(x => new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "NwfUnresolvedXref",
+                $"Unresolved NWF reference: '{x.EffectivePath}'.")));
+            diagnostics.AddRange(skipped.Select(x => new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "NwfSkippedXref",
+                $"Skipped unsupported NWF reference: '{x.EffectivePath}'.")));
+            assembly.Diagnostics = diagnostics;
+        }
         return assembly;
     }
 
@@ -303,7 +482,9 @@ public sealed class NwcAssembly
     }
 
     /// <summary>
-    /// Detects spatial geometric clashes (bounding box overlaps) between meshes belonging to different models.
+    /// Detects spatial clashes between meshes belonging to different models. Meshes whose world bounding boxes
+    /// come within <paramref name="tolerance"/> of each other are reported; the overlap box is empty when they
+    /// only come close.
     /// </summary>
     public IReadOnlyList<NwcClash> FindClashes(double tolerance = 0.0)
     {
@@ -313,6 +494,7 @@ public sealed class NwcAssembly
         }
 
         var clashes = new List<NwcClash>();
+        var modelKeys = NwcElementGuid.ModelKeys(Models);
 
         // Build per-model spatial indexes
         var modelIndexes = new (NwcDocument Doc, NwcSpatialIndex Index)[Models.Count];
@@ -347,7 +529,7 @@ public sealed class NwcAssembly
                     {
                         var meshB = candidatesB[n];
                         var boxB = meshB.GetWorldBoundingBox();
-                        if (boxA.Intersects(boxB))
+                        if (expanded.Intersects(boxB))
                         {
                             var overlap = new BoundingBox3d(
                                 new Vector3d(
@@ -358,8 +540,21 @@ public sealed class NwcAssembly
                                     Math.Min(boxA.Max.X, boxB.Max.X),
                                     Math.Min(boxA.Max.Y, boxB.Max.Y),
                                     Math.Min(boxA.Max.Z, boxB.Max.Z)));
+                            if (overlap.IsEmpty)
+                            {
+                                // Near miss: point at the middle of the gap (or of the overlap on axes that overlap).
+                                var point = new Vector3d(
+                                    (Math.Max(boxA.Min.X, boxB.Min.X) + Math.Min(boxA.Max.X, boxB.Max.X)) * 0.5,
+                                    (Math.Max(boxA.Min.Y, boxB.Min.Y) + Math.Min(boxA.Max.Y, boxB.Max.Y)) * 0.5,
+                                    (Math.Max(boxA.Min.Z, boxB.Min.Z) + Math.Min(boxA.Max.Z, boxB.Max.Z)) * 0.5);
+                                overlap = new BoundingBox3d(point, point);
+                            }
 
-                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap));
+                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap)
+                            {
+                                ModelKeyA = modelKeys[i],
+                                ModelKeyB = modelKeys[j],
+                            });
                         }
                     }
                 }
@@ -508,7 +703,72 @@ public sealed class NwcAssembly
     /// <summary>Exports the entire federated assembly to a Wavefront OBJ file.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
     {
-        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name);
+        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name, GetModelLabel);
+    }
+
+    internal string? GetModelLabel(NwcMesh mesh)
+    {
+        int modelIndex = GetModelIndex(mesh);
+        if (modelIndex < 0)
+        {
+            return null;
+        }
+
+        var model = Models[modelIndex];
+        string modelName = Path.GetFileNameWithoutExtension(model.FileInfo.SourcePath ?? string.Empty);
+        if (string.IsNullOrEmpty(modelName))
+        {
+            modelName = $"Model_{modelIndex + 1}";
+        }
+        return $"M{modelIndex + 1}_{modelName}";
+    }
+
+    /// <summary>
+    /// Builds a single document that carries the assembly scene tree, meshes with their transforms,
+    /// viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
+    /// The file info is neutral and does not claim a Revit origin.
+    /// </summary>
+    /// <remarks>
+    /// Node ids of different models overlap (every document root is 0), so the exported tree is a copy
+    /// numbered depth-first from 0 (the assembly root); the assembly itself is not changed. Selection sets
+    /// and TimeLiner tasks stored in the source models bind to the ids of their own tree and are not
+    /// carried over; only <see cref="SelectionSets"/> and <see cref="TimeLiner"/> of the assembly are
+    /// written, unchanged. Materials are part of the returned document but the .nwc writer does not store them.
+    /// </remarks>
+    public NwcDocument ToDocument()
+    {
+        int nextId = 0;
+        NwcNode Renumber(NwcNode source, NwcNode? parent)
+        {
+            var copy = new NwcNode { Id = nextId++, Name = source.Name, Class = source.Class, Parent = parent };
+            copy.Properties.AddRange(source.Properties);
+            foreach (var child in source.Children)
+            {
+                copy.Children.Add(Renumber(child, copy));
+            }
+            return copy;
+        }
+
+        return NwcDocument.Create(
+            fileInfo: new NwcFileInfo
+            {
+                SourcePath = $"{Name}.nwc",
+                LoaderPlugin = "LcOpNwcIOAssembly",
+            },
+            meshes: AllMeshes,
+            savedViewpoints: SavedViewpoints,
+            guids: Models.SelectMany(m => m.Guids),
+            materials: AllMaterials,
+            rootNode: Renumber(RootNode, null),
+            selectionSets: SelectionSets,
+            timeLiner: TimeLiner);
+    }
+
+    /// <summary>Exports the federated assembly as a single .nwc document.</summary>
+    public void SaveNwc(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ToDocument().Save(path);
     }
 
     /// <summary>Exports the entire federated assembly with geometry, materials, and spatial hierarchy to an IFC2x3 STEP file (.ifc).</summary>
