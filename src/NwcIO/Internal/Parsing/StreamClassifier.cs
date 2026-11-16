@@ -170,7 +170,7 @@ internal static class StreamClassifier
         int limit = Math.Min(data.Length - 96, 512);
         for (int i = 0; i <= limit; i += 4)
         {
-            if (ReadInt32(data, i) == 517 && ReadInt32(data, i + 4) == 1)
+            if (ReadInt32(data, i) == 517 && ReadInt32(data, i + 4) is 0 or 1)
             {
                 // Check if quaternion at i + 36 is approximately normalized
                 double qx = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(i + 36));

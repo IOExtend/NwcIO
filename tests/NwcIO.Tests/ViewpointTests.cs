@@ -94,8 +94,10 @@ public class ViewpointTests
         Assert.True(vp.Camera.Direction.Z < -0.9);
     }
 
-    [Fact]
-    public void ViewpointParser_DecodesSyntheticStream()
+    [Theory]
+    [InlineData(0, NwcCameraProjection.Perspective)]
+    [InlineData(1, NwcCameraProjection.Orthographic)]
+    public void ViewpointParser_DecodesSyntheticStream(int projection, NwcCameraProjection expectedProjection)
     {
         // Build synthetic stream buffer with viewpoint tag 517
         using var ms = new MemoryStream();
@@ -112,9 +114,9 @@ public class ViewpointTests
             bw.Write((byte)0);
         }
 
-        // Tag 517: 517, 1, 0
+        // Tag 517: 517, projection, 0
         bw.Write((int)517);
-        bw.Write((int)1);
+        bw.Write(projection);
         bw.Write((int)0);
 
         // Position: X=12.5, Y=34.5, Z=56.5
@@ -159,6 +161,7 @@ public class ViewpointTests
         Assert.Equal(50.0, vp.Camera.FocalDistance);
         Assert.Equal(60.0, vp.Camera.FieldOfView); // the +84 slot (10.0 here) is not a field of view in degrees
         Assert.InRange(vp.Camera.AspectRatio, 1.77, 1.78);
+        Assert.Equal(expectedProjection, vp.Camera.Projection);
         Assert.Equal(new Vector3d(0, 0, -1), vp.Camera.Direction);
     }
 
