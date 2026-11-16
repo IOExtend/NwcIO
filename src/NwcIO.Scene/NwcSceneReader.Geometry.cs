@@ -9,6 +9,25 @@ public static partial class NwcSceneReader
 {
     private const int MaxLineColourGroups = 64;   // shortcut: segments of colours past 64 per record are drawn with the material colour; the corpus has 10 palette entries in all (spike-look (a)); raise it if a real file shows more
 
+    // The node a mesh counts for: the nearest linked placement at or above it inside its element, else its element, else the node itself.
+    private static NwcNode Owner(NwcNode node)
+    {
+        if (node.Element is not { } element)
+        {
+            return node;
+        }
+
+        for (var n = node; n is not null; n = n.Parent)
+        {
+            if (ReferenceEquals(n, element) || n.IsLinkPlacement)
+            {
+                return n;
+            }
+        }
+
+        return element;   // the second node of a sibling pair: its element is a sibling, not an ancestor
+    }
+
     // Writes the geometries, materials and instances of the document's meshes in their order, each made at first use; returns
     // the element of every placed mesh (its node's Element, or the node itself outside elements).
     private static HashSet<NwcNode> AddGeometry(NwcDocument document, SceneDocument scene, double metresPerUnit, Dictionary<NwcNode, long> ids, List<SceneDiagnostic> diagnostics)
@@ -65,8 +84,7 @@ public static partial class NwcSceneReader
                 scene.Instances.Add(new SceneInstance { ElementId = elementId, GeometryId = geometryId, Transform = transform, MaterialId = materialId, Color = colour });
             }
 
-            placed.Add(node.Element ?? node);
-            placed.Add(node);
+            placed.Add(Owner(node));
         }
 
         if (unplaced > 0)

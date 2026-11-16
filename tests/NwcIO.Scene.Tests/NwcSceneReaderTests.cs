@@ -761,6 +761,58 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_GeometryUnderALinkedPlacement_CountsThePlacementNotItsElement()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true, Parent = root };
+        first.Element = first;
+        var link = new NwcNode { Id = 2, Name = "Link", Class = "LcOpModelFile", Element = first, IsLinkPlacement = true, IsLinkRoot = true, Parent = root };
+        var part = new NwcNode { Id = 3, Name = "Part", Class = "LcRevitData_Element", Element = first, Parent = link };
+        link.Children.Add(part);
+        root.Children.Add(first);
+        root.Children.Add(link);
+
+        var result = Valid(NwcSceneReader.Read(
+            NwcDocument.Create(meshes: [Mesh(1, 0, first), Mesh(2, 10, part)], rootNode: root),
+            new NwcSceneOptions { ModelKey = "model.nwc", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Equal(2, result.ElementCount);
+        Assert.Equal(2, result.ElementsWithGeometry);
+
+        static NwcMesh Mesh(int id, double x, NwcNode node)
+        {
+            var mesh = new NwcMesh
+            {
+                Id = id,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Node = node;
+            node.Mesh = mesh;
+            return mesh;
+        }
+    }
+
+    [Fact]
+    public void Read_MoreLinkedPlacementsThanTheModelLimit_Throws()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true, Parent = root };
+        first.Element = first;
+        root.Children.Add(first);
+        for (int i = 0; i < 100_000; i++)
+        {
+            root.Children.Add(new NwcNode { Id = i + 2, Name = "Link", Class = "LcOpModelFile", Element = first, IsLinkPlacement = true, IsLinkRoot = true, Parent = root });
+        }
+
+        var ex = Assert.Throws<InvalidDataException>(() => NwcSceneReader.Read(
+            NwcDocument.Create(rootNode: root),
+            new NwcSceneOptions { ModelKey = "model.nwc", LengthUnit = NwcLengthUnit.Meters }));
+        Assert.Contains("100000", ex.Message);
+    }
+
+    [Fact]
     public void Read_LinkedSubtreesWithTheSameName_GetOneModelPerRoot()
     {
         var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };

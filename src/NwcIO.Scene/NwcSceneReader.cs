@@ -19,7 +19,7 @@ public static partial class NwcSceneReader
     private static readonly string Producer = "NwcIO.Scene "
         + typeof(NwcSceneReader).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
 
-    private const int MaxLinkModels = 100_000;
+    private const int MaxModels = 100_000;   // models in one scene, linked placements included
 
     /// <summary>Reads the model file at <paramref name="path"/> with <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> and converts it.</summary>
     /// <param name="path">The model file.</param>
@@ -64,6 +64,7 @@ public static partial class NwcSceneReader
     /// <exception cref="ArgumentException">
     /// <see cref="NwcSceneOptions.ModelKey"/> is null or empty, or the document has no scene tree (<see cref="NwcDocument.RootNode"/> is null).
     /// </exception>
+    /// <exception cref="InvalidDataException">The linked placements would make the scene hold more than 100,000 models.</exception>
     public static NwcSceneResult Read(NwcDocument document, NwcSceneOptions options)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -90,6 +91,7 @@ public static partial class NwcSceneReader
     /// <param name="options">Conversion options; <see cref="NwcSceneOptions.ModelKey"/> names the first converted model.</param>
     /// <returns>The scene with a report of the conversion.</returns>
     /// <exception cref="ArgumentException">The assembly has no models, or a model has no scene tree.</exception>
+    /// <exception cref="InvalidDataException">The documents and their linked placements together would make the scene hold more than 100,000 models.</exception>
     public static NwcSceneResult Read(NwcAssembly assembly, NwcSceneOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -288,7 +290,6 @@ public static partial class NwcSceneReader
         // Each item carries the names at depth 2 and 4 on its path and the depth of the node's element, for Category and TypeName.
         var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4, int ModelId, int? LinkModelId)>();
         pending.Push((root, null, 0, null, 0, "", "", modelId, null));
-        int linkModels = 0;
         while (pending.TryPop(out var item))
         {
             var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4, nodeModelId, linkModelId) = item;
@@ -305,10 +306,9 @@ public static partial class NwcSceneReader
             bool isLinkRoot = false;
             if ((node.IsLinkRoot || node.IsLinkPlacement) && parent is not null && linkModelId is null)
             {
-                if (++linkModels > MaxLinkModels)
+                if (scene.Models.Count >= MaxModels)
                 {
-                    throw new InvalidDataException(
-                        $"The scene would need more than {MaxLinkModels} linked models.");
+                    throw new InvalidDataException($"The scene would need more than {MaxModels} models.");
                 }
 
                 nodeModelId = scene.Models.Count + 1;

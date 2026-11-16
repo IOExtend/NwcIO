@@ -30,6 +30,26 @@ public class HierarchyParserTests
     }
 
     [Fact]
+    public void Read_SeveralElementsRepeatedUnderOneGroup_MarkOnlyThatGroupAsLinkRoot()
+    {
+        var wrote = Begin(1, 2);
+        Group(wrote, 2);
+        LeafWithX(wrote, 1);
+        LeafWithX(wrote, 2);
+        Group(wrote, 2);
+        LeafWithX(wrote, 1);
+        LeafWithX(wrote, 2);
+        var guids = new[] { Guid.NewGuid(), Guid.NewGuid() };
+
+        var nodes = HierarchyParser.Read(End(wrote), "Model", guids: guids);
+
+        var second = nodes[4];
+        Assert.Equal(2, second.Children.Count);
+        Assert.All(second.Children, child => Assert.True(child.IsLinkPlacement));
+        Assert.Same(second, Assert.Single(nodes, node => node.IsLinkRoot));
+    }
+
+    [Fact]
     public void Read_H1_ExpandsBackReferencedSubtreeInPreorder()
     {
         var nodes = HierarchyParser.Read(FormatVectors.H1, "Model");
