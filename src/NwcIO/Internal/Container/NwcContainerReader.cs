@@ -46,6 +46,7 @@ public static class NwcContainerReader
 
         int sectionIndex = -1;
         int pos = 0;
+        int rejectedOffset = -1; // zlib signature at this offset already failed to inflate
         while (pos < data.Length)
         {
             if (StartsWithAscii(data, pos, SectionMarker))
@@ -57,11 +58,10 @@ public static class NwcContainerReader
                 continue;
             }
 
-            if (IsZlibSignature(data, pos))
+            if (pos != rejectedOffset && IsZlibSignature(data, pos))
             {
-                if (TryInflateAt(data, pos, maxDecompressedStreamBytes, maxTotalDecompressedBytes, totalDecompressed, out var stream))
+                if (TryInflateAt(data, pos, maxDecompressedStreamBytes, maxTotalDecompressedBytes, ref totalDecompressed, out var stream))
                 {
-                    totalDecompressed += stream.Data.Length;
                     streams.Add(stream with
                     {
                         Index = streams.Count,
@@ -96,9 +96,8 @@ public static class NwcContainerReader
             }
 
             if (IsZlibSignature(data, gapEnd) &&
-                TryInflateAt(data, gapEnd, maxDecompressedStreamBytes, maxTotalDecompressedBytes, totalDecompressed, out var gapStream))
+                TryInflateAt(data, gapEnd, maxDecompressedStreamBytes, maxTotalDecompressedBytes, ref totalDecompressed, out var gapStream))
             {
-                totalDecompressed += gapStream.Data.Length;
                 streams.Add(gapStream with
                 {
                     Index = streams.Count,
@@ -109,6 +108,7 @@ public static class NwcContainerReader
             }
             else
             {
+                rejectedOffset = IsZlibSignature(data, gapEnd) ? gapEnd : -1;
                 pos = gapEnd;
             }
         }
@@ -164,7 +164,7 @@ public static class NwcContainerReader
         int offset,
         long maxDecompressedStreamBytes,
         long maxTotalDecompressedBytes,
-        long alreadyDecompressed,
+        ref long totalDecompressed,
         out LcRawStream stream)
     {
         try
@@ -187,13 +187,14 @@ public static class NwcContainerReader
                         $"Decompressed stream at offset {offset} exceeds the per-stream limit of {maxDecompressedStreamBytes} bytes.");
                 }
 
-                if (alreadyDecompressed + output.Length + n > maxTotalDecompressedBytes)
+                if (totalDecompressed + n > maxTotalDecompressedBytes)
                 {
                     throw new InflateLimitException(
                         $"Decompressed streams exceed the total limit of {maxTotalDecompressedBytes} bytes at stream offset {offset}.");
                 }
 
                 output.Write(buffer, 0, n);
+                totalDecompressed += n; // charged even if the stream is later rejected (bad trailer), so crafted garbage cannot dodge the total cap
             }
 
             var compressedLength = (int)feed.BytesServed;

@@ -186,6 +186,61 @@ public class ContainerReaderTests
         Assert.Throws<InvalidDataException>(() => NwcDocument.Open(new MemoryStream(bytes), options));
     }
 
+    [Fact]
+    public void Open_TotalLimit_IsPassedToTheContainerReader()
+    {
+        var payload = new byte[100_000];
+        Array.Fill(payload, (byte)'A');
+        var compressed = CompressZlib(payload);
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        ms.Write(compressed);
+        ms.Write(compressed);
+
+        var options = new NwcReaderOptions { MaxDecompressedStreamBytes = 1L << 30, MaxTotalDecompressedBytes = 150_000 };
+
+        var ex = Assert.Throws<InvalidDataException>(() => NwcDocument.Open(new MemoryStream(ms.ToArray()), options));
+        Assert.Contains("total limit", ex.Message);
+    }
+
+    [Fact]
+    public void Read_RejectedStreamsCountTowardTotalLimit()
+    {
+        var bomb = CompressZlibWithBadTrailer(100_000);
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        ms.Write(bomb);
+        ms.Write(bomb);
+
+        var ex = Assert.Throws<InvalidDataException>(
+            () => NwcContainerReader.Read(ms.ToArray(), 1L << 20, 150_000));
+
+        Assert.Contains("total limit", ex.Message);
+    }
+
+    [Fact]
+    public void Read_RejectedStreamAfterGap_IsInflatedOnce()
+    {
+        var bomb = CompressZlibWithBadTrailer(100_000);
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        ms.Write(new byte[] { 0xFF, 0xFF, 0xFF });
+        ms.Write(bomb);
+
+        var container = NwcContainerReader.Read(ms.ToArray(), 1L << 20, 150_000);
+
+        Assert.Empty(container.Streams);
+    }
+
+    private static byte[] CompressZlibWithBadTrailer(int size)
+    {
+        var payload = new byte[size];
+        Array.Fill(payload, (byte)'A');
+        var compressed = CompressZlib(payload);
+        compressed[^1] ^= 0xFF;
+        return compressed;
+    }
+
     private static byte[] ContainerWith(byte[] compressedPayload)
     {
         using var ms = new MemoryStream();
