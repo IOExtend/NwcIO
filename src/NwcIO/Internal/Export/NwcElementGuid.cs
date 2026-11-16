@@ -3,9 +3,9 @@ using NwcIO.Model;
 namespace NwcIO.Internal.Export;
 
 /// <summary>
-/// Stable IFC GlobalIds for meshes, derived from the model's source path and the mesh id, so equal mesh ids
-/// in different models stay distinct, every fragment of an element keeps its own id, and repeated exports of
-/// the same input produce the same ids.
+/// Stable IFC GlobalIds for meshes, derived from the model's source path, the authoring element id when the
+/// mesh has one and the mesh id, so equal mesh ids in different models stay distinct, every fragment of an
+/// element keeps its own id, and repeated exports of the same input produce the same ids.
 /// </summary>
 internal static class NwcElementGuid
 {
@@ -40,6 +40,25 @@ internal static class NwcElementGuid
 
     public static string ForMesh(NwcMesh mesh, NwcDocument document) => ForMesh(mesh, ModelKey(document));
 
-    public static string ForMesh(NwcMesh mesh, string modelKey) =>
-        IfcGuid.FromKey($"{modelKey}:mesh:{mesh.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+    /// <summary>
+    /// GlobalId of one mesh product. The authoring element id (the Revit IFC GlobalId, else the element GUID)
+    /// is only a base: several fragments of one element, and copies of one element across assembly models,
+    /// must still get distinct ids, so the model key and the mesh id are part of the key.
+    /// </summary>
+    public static string ForMesh(NwcMesh mesh, string modelKey)
+    {
+        string meshId = mesh.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        NwcNode? owner = mesh.Node?.Element ?? mesh.Node;
+        if (!string.IsNullOrEmpty(owner?.IfcGlobalId))
+        {
+            return IfcGuid.FromKey($"{modelKey}:element:{owner.IfcGlobalId}:mesh:{meshId}");
+        }
+
+        if (owner?.ElementGuid is { } guid && guid != Guid.Empty)
+        {
+            return IfcGuid.FromKey($"{modelKey}:element:{guid:D}:mesh:{meshId}");
+        }
+
+        return IfcGuid.FromKey($"{modelKey}:mesh:{meshId}");
+    }
 }

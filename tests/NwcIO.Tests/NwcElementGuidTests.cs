@@ -20,14 +20,19 @@ public class NwcElementGuidTests
     }
 
     [Fact]
-    public void ForMesh_IgnoresTheAuthoringGuid_AndUsesTheMeshKey()
+    public void ForMesh_AuthoringGuid_IsPartOfTheKey_AndEmptyGuidFallsBackToTheMeshKey()
     {
-        var element = new NwcNode { Id = 1, Name = "Door", Class = "LcRevitData_Element", ElementGuid = Guid.NewGuid() };
-        var leaf = new NwcNode { Id = 2, Name = "Panel", Class = "LcRevitData_Element", Element = element };
-        var mesh = new NwcMesh { Id = 10, Node = leaf, Vertices = [], Indices = [] };
-        var doc = NwcDocument.Create();
+        static NwcMesh MeshOf(Guid guid) => new()
+        {
+            Id = 10,
+            Node = new NwcNode { Id = 2, Name = "Panel", Class = "LcRevitData_Element", ElementGuid = guid },
+            Vertices = [],
+            Indices = [],
+        };
 
-        Assert.Equal(IfcGuid.FromKey("Model.rvt:mesh:10"), NwcElementGuid.ForMesh(mesh, doc));
+        var guid = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        Assert.Equal(IfcGuid.FromKey($"Model.rvt:element:{guid:D}:mesh:10"), NwcElementGuid.ForMesh(MeshOf(guid), "Model.rvt"));
+        Assert.Equal(IfcGuid.FromKey("Model.rvt:mesh:10"), NwcElementGuid.ForMesh(MeshOf(Guid.Empty), "Model.rvt"));
     }
 
     [Fact]
