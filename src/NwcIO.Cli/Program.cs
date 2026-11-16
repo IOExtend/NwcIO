@@ -12,7 +12,7 @@ namespace NwcIO.Cli;
 internal static class Program
 {
     private const string UsageText = """
-        Usage: nwcio <input.nwc|input.nwd|input.nwf|input_dir> [output.json|output.obj|output.glb|output.ifc|output.bcfzip|output.html|output.nwc] [options]
+        Usage: nwcio <input.nwc|input.nwd|input.nwf|input.nwf.xml|input_dir> [output.json|output.obj|output.glb|output.ifc|output.bcfzip|output.html|output.nwc] [options]
                nwcio --help | --version
 
         Reads Autodesk Navisworks files (.nwc, .nwd, .nwf) or assemblies of models
@@ -20,11 +20,11 @@ internal static class Program
         (IFC/GLB/OBJ/JSON/BCF/HTML/NWC) with BVH spatial acceleration, without requiring Navisworks.
 
         Arguments:
-          <input>            Path to .nwc, .nwd, .nwf file or a folder of .nwc models.
+          <input>            Path to .nwc, .nwd, .nwf file, .nwf.xml manifest or a folder of .nwc models.
           [output]           Destination path for exported file (.json, .obj, .glb, .ifc, .bcfzip, .html, or .nwc).
                              Default for file: <input-without-ext>.json (or standard output if '-').
                              Default for folder: <dir>/<dirname>_assembly.glb (or standard output if '-').
-                             Default for .nwf: <input-without-ext>.glb (or standard output if '-').
+                             Default for .nwf and .nwf.xml: <input-without-ext>.glb (or standard output if '-').
 
         Options:
           --nwc <file.nwc>   Save or convert to a .nwc file (NwcIO layout)
@@ -82,9 +82,11 @@ internal static class Program
           -v, --version      Show version information and exit
 
         Input-type scope:
-          --nwf-xml and --clashes require folder or .nwf assembly input.
+          --nwf-xml and --clashes require an assembly input: folder, .nwf, .nwf.xml or
+          several -i inputs.
           --sets-xml, --timeliner-csv, --grids and --export-grids require a
           single .nwc/.nwd input.
+          --recursive and --pattern require folder input.
 
         Exit codes:
           0  Success
@@ -468,8 +470,20 @@ internal static class Program
         bool isDirectory = Directory.Exists(inputPath);
         bool isFile = File.Exists(inputPath);
         bool isNwf = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
+        bool isManifest = inputPath.EndsWith(".nwf.xml", StringComparison.OrdinalIgnoreCase);
 
-        if (isDirectory || isNwf || multipleInputs)
+        if ((recursiveFolders || folderPattern is not null) && !isDirectory)
+        {
+            @err.WriteLine("Error: --recursive and --pattern are only supported for folder input.");
+            return 1;
+        }
+        if (folderPattern is not null && SplitPatterns(folderPattern).Length == 0)
+        {
+            @err.WriteLine("Error: --pattern needs at least one non-empty pattern.");
+            return 1;
+        }
+
+        if (isDirectory || isNwf || isManifest || multipleInputs)
         {
             if (explicitDiffBaseline != null || explicitDiffJsonPath != null || explicitDiffBcfPath != null || diffToleranceSpecified)
             {
@@ -500,7 +514,7 @@ internal static class Program
             KeepStreamCatalog = includeCatalog,
         };
 
-        if (!multipleInputs && !isDirectory && !isNwf)
+        if (!multipleInputs && !isDirectory && !isNwf && !isManifest)
         {
             if (!string.IsNullOrEmpty(explicitNwfXmlPath))
             {
@@ -549,7 +563,7 @@ internal static class Program
                 explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                 explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
                 explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
-                readerOptions, explicitSetsXmlPath, explicitTimeLinerCsvPath, explicitGridsPath, explicitExportGridsPath,
+                readerOptions,
                 includeTree, stdoutStream, @out, @err, preloadedAssembly: preloaded);
 
         // Handle multi-model directory assembly and NWF assembly files with the same
@@ -561,6 +575,7 @@ internal static class Program
             if (multipleInputs)
             {
                 var docs = new List<NwcDocument>(explicitInputPaths.Count);
+                var seenInputs = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
                 foreach (var path in explicitInputPaths)
                 {
                     if (!File.Exists(path))
@@ -574,7 +589,19 @@ internal static class Program
                         @err.WriteLine($"Error: Multiple inputs must be .nwc or .nwd files; '{path}' is not supported.");
                         return 1;
                     }
-                    docs.Add(NwcDocument.Open(path, readerOptions));
+                    if (!seenInputs.Add(Path.GetFullPath(path)))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        docs.Add(NwcDocument.Open(path, readerOptions));
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        @err.WriteLine($"Error: File '{path}' is not a valid Navisworks container: {ex.Message}");
+                        return 3;
+                    }
                 }
 
                 return ProcessLoadedAssembly(NwcAssembly.Create("Federation", docs), "Federation", outputPath);
@@ -583,7 +610,19 @@ internal static class Program
             if (inputPath.EndsWith(".nwf.xml", StringComparison.OrdinalIgnoreCase))
             {
                 var manifestAssembly = NwcAssembly.OpenManifest(inputPath, readerOptions);
-                outputPath ??= Path.ChangeExtension(inputPath[..^".nwf.xml".Length], ".glb");
+                outputPath ??= inputPath[..^".nwf.xml".Length] + ".glb";
+                if (!printReport)
+                {
+                    // The report prints these itself; without it a missing model would be silent.
+                    foreach (var xref in manifestAssembly.UnresolvedXRefs)
+                    {
+                        @err.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
+                    }
+                    foreach (var xref in manifestAssembly.SkippedXRefs)
+                    {
+                        @err.WriteLine($"Warning: skipped unsupported reference (not .nwc/.nwd): '{xref.EffectivePath}'");
+                    }
+                }
                 return ProcessLoadedAssembly(manifestAssembly, inputPath, outputPath);
             }
 
@@ -1180,9 +1219,7 @@ internal static class Program
             outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
         }
 
-        var patterns = string.IsNullOrWhiteSpace(folderPattern)
-            ? new[] { "*.nwc" }
-            : folderPattern.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var patterns = string.IsNullOrWhiteSpace(folderPattern) ? ["*.nwc"] : SplitPatterns(folderPattern);
         var assembly = NwcAssembly.LoadFromDirectory(
             dirPath, patterns, recursiveFolders, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
 
@@ -1740,6 +1777,9 @@ internal static class Program
 
         return 0;
     }
+
+    private static string[] SplitPatterns(string patterns) =>
+        patterns.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static void PrintViewpoints(IReadOnlyList<NwcSavedViewpoint> viewpoints, TextWriter? writer = null)
     {

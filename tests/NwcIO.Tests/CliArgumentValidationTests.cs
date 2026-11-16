@@ -16,6 +16,11 @@ public class CliArgumentValidationTests
     private static string TempModel()
     {
         string path = Path.Combine(Path.GetTempPath(), "cli-val-" + Guid.NewGuid().ToString("N") + ".nwc");
+        WriteModel(path);
+        return path;
+    }
+
+    private static void WriteModel(string path) =>
         new NwcDocumentBuilder().SetFileInfo("test.rvt")
             .AddMesh(new NwcMesh
             {
@@ -26,8 +31,6 @@ public class CliArgumentValidationTests
             })
             .Build()
             .Save(path);
-        return path;
-    }
 
     [Fact]
     public void NoArguments_PrintsUsageAndExits1()
@@ -281,9 +284,11 @@ public class CliArgumentValidationTests
         string output = Path.Combine(Path.GetTempPath(), "cli-asm-" + Guid.NewGuid().ToString("N") + ".glb");
         try
         {
-            var (exit, _, err) = Run(["-i", first, "-i", second, "-o", output]);
+            var (exit, _, err) = Run(["-i", first, "-i", second, "-o", output, "--report"]);
             Assert.Equal(0, exit);
             Assert.True(File.Exists(output), err);
+            Assert.Contains("Models:           2", err);
+            Assert.Contains("Total Meshes:     2", err);
         }
         finally
         {
@@ -389,6 +394,142 @@ public class CliArgumentValidationTests
             var (exit, _, err) = Run([dir, noMeshes, "--no-meshes"]);
             Assert.True(exit == 0, err);
             Assert.Contains("\"totalMeshes\":0", File.ReadAllText(noMeshes).Replace(" ", ""));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void MultipleInputs_SameFileTwice_IsLoadedOnce()
+    {
+        string model = TempModel();
+        string output = Path.Combine(Path.GetTempPath(), "cli-asm-" + Guid.NewGuid().ToString("N") + ".glb");
+        try
+        {
+            var (exit, _, err) = Run(["-i", model, "-i", Path.GetFullPath(model), "-o", output, "--report"]);
+            Assert.Equal(0, exit);
+            Assert.Contains("Models:           1", err);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public void MultipleInputs_InvalidFile_NamesTheFile()
+    {
+        string good = TempModel();
+        string bad = Path.Combine(Path.GetTempPath(), "cli-bad-" + Guid.NewGuid().ToString("N") + ".nwc");
+        File.WriteAllText(bad, "not a navisworks file");
+        string output = Path.Combine(Path.GetTempPath(), "cli-asm-" + Guid.NewGuid().ToString("N") + ".glb");
+        try
+        {
+            var (exit, _, err) = Run(["-i", good, "-i", bad, "-o", output]);
+            Assert.Equal(3, exit);
+            Assert.Contains(bad, err);
+        }
+        finally
+        {
+            if (File.Exists(good)) File.Delete(good);
+            if (File.Exists(bad)) File.Delete(bad);
+        }
+    }
+
+    [Fact]
+    public void RecursiveAndPattern_RequireFolderInput()
+    {
+        string model = TempModel();
+        try
+        {
+            var (exit1, _, err1) = Run([model, "--recursive"]);
+            Assert.Equal(1, exit1);
+            Assert.Contains("only supported for folder input", err1);
+
+            var (exit2, _, err2) = Run([model, "--pattern", "*.nwd"]);
+            Assert.Equal(1, exit2);
+            Assert.Contains("only supported for folder input", err2);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+        }
+    }
+
+    [Fact]
+    public void FolderInput_EmptyPattern_Exits1()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var (exit, _, err) = Run([dir, "--pattern", ";"]);
+            Assert.Equal(1, exit);
+            Assert.Contains("--pattern needs at least one", err);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void FolderInput_RecursiveAndPattern_LoadSubfolderModels()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "sub"));
+        string output = Path.Combine(dir, "out.glb");
+        try
+        {
+            WriteModel(Path.Combine(dir, "a.nwc"));
+            WriteModel(Path.Combine(dir, "sub", "b.nwc"));
+
+            var (exit1, _, err1) = Run([dir, output, "--report"]);
+            Assert.Equal(0, exit1);
+            Assert.Contains("Models:           1", err1);
+
+            var (exit2, _, err2) = Run([dir, output, "--recursive", "--report"]);
+            Assert.Equal(0, exit2);
+            Assert.Contains("Models:           2", err2);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void ManifestInput_IsAnAssembly()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            WriteModel(Path.Combine(dir, "a.nwc"));
+            WriteModel(Path.Combine(dir, "b.nwc"));
+            string manifest = Path.Combine(dir, "fed.v2.nwf.xml");
+            var m = new NwcIO.Model.Clash.NwcNwfManifest("Fed");
+            m.ModelPaths.Add("a.nwc");
+            m.ModelPaths.Add("b.nwc");
+            m.ModelPaths.Add("missing.nwc");
+            m.Save(manifest);
+
+            // Assembly options are accepted, and the default output keeps the dotted name.
+            var (exit, _, err) = Run([manifest, "--clashes"]);
+            Assert.Equal(0, exit);
+            Assert.True(File.Exists(Path.Combine(dir, "fed.v2.glb")), err);
+            Assert.Contains("missing.nwc", err);
+
+            var (exit2, _, err2) = Run([manifest, "--diff", "base.nwc"]);
+            Assert.Equal(1, exit2);
+            Assert.Contains("not supported for folder or .nwf assembly inputs", err2);
+
+            var (exit3, _, err3) = Run([manifest, "--timeliner-simulate", "2026-06-15"]);
+            Assert.Equal(1, exit3);
+            Assert.Contains("not supported for folder or .nwf assembly inputs", err3);
         }
         finally
         {

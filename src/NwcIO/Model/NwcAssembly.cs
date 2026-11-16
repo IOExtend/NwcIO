@@ -231,6 +231,7 @@ public sealed class NwcAssembly
             .SelectMany(pattern => Directory.GetFiles(directoryPath, pattern, searchOption))
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f, StringComparer.Ordinal)
             .ToArray();
         if (files.Length == 0)
         {
@@ -250,7 +251,10 @@ public sealed class NwcAssembly
 
     /// <summary>
     /// Opens a federation manifest (.nwf.xml) and loads the .nwc/.nwd models it lists.
-    /// Paths are resolved as written first and then relative to the manifest folder.
+    /// Relative paths are resolved under the manifest folder; an absolute path is tried as written first
+    /// and then by its trailing segments under the manifest folder. Backslashes in stored paths are read as
+    /// directory separators on every platform. Only the model list is read: viewpoints, sets, appearance
+    /// rules and clash tests of the manifest are not loaded.
     /// Missing and unsupported entries are recorded on <see cref="UnresolvedXRefs"/>
     /// and <see cref="SkippedXRefs"/>.
     /// </summary>
@@ -274,7 +278,7 @@ public sealed class NwcAssembly
 
         foreach (var modelPath in manifest.ModelPaths)
         {
-            var xref = new NwcXRef(modelPath, "");
+            var xref = new NwcXRef(modelPath.Replace('\\', Path.DirectorySeparatorChar), "");
             if (!xref.TryResolve(baseDir, out string resolved))
             {
                 unresolved.Add(xref);

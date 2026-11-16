@@ -495,4 +495,89 @@ public class AssemblyTests
             Directory.Delete(cwdArch, true);
         }
     }
+
+    [Fact]
+    public void OpenManifest_ResolvesRelativePathsDeduplicatesAndReports()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nwcio-manifest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "Arch"));
+        try
+        {
+            CreateComponentModel("A.rvt", 1, 0).Save(Path.Combine(dir, "Arch", "A.nwc"));
+            CreateComponentModel("B.rvt", 2, 100).Save(Path.Combine(dir, "B.nwc"));
+            File.WriteAllText(Path.Combine(dir, "tex.png"), "x");
+
+            var manifest = new NwcIO.Model.Clash.NwcNwfManifest("Fed");
+            manifest.ModelPaths.Add(@"Arch\A.nwc");   // Windows separators
+            manifest.ModelPaths.Add("B.nwc");
+            manifest.ModelPaths.Add("./B.nwc");       // duplicate of B
+            manifest.ModelPaths.Add("gone.nwc");
+            manifest.ModelPaths.Add("tex.png");
+            string path = Path.Combine(dir, "fed.nwf.xml");
+            manifest.Save(path);
+
+            var assembly = NwcAssembly.OpenManifest(path);
+
+            Assert.Equal("fed", assembly.Name);
+            Assert.Equal(2, assembly.Models.Count);
+            Assert.Equal(2, assembly.AllMeshes.Count);
+            Assert.Equal("gone.nwc", Assert.Single(assembly.UnresolvedXRefs).EffectivePath);
+            Assert.EndsWith("tex.png", Assert.Single(assembly.SkippedXRefs).EffectivePath);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void OpenManifest_NothingResolvable_ThrowsFileNotFound()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nwcio-manifest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var manifest = new NwcIO.Model.Clash.NwcNwfManifest("Fed");
+            manifest.ModelPaths.Add("gone.nwc");
+            string path = Path.Combine(dir, "fed.nwf.xml");
+            manifest.Save(path);
+
+            Assert.Throws<FileNotFoundException>(() => NwcAssembly.OpenManifest(path));
+            Assert.Throws<FileNotFoundException>(() => NwcAssembly.OpenManifest(Path.Combine(dir, "none.nwf.xml")));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void LoadFromDirectory_PatternsRecursionAndOrder()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nwcio-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "sub"));
+        try
+        {
+            CreateComponentModel("B.rvt", 2, 100).Save(Path.Combine(dir, "b.nwc"));
+            CreateComponentModel("A.rvt", 1, 0).Save(Path.Combine(dir, "a.nwc"));
+            CreateComponentModel("C.rvt", 3, 200).Save(Path.Combine(dir, "sub", "c.nwc"));
+            CreateComponentModel("D.rvt", 4, 300).Save(Path.Combine(dir, "d.nwd"));
+
+            var top = NwcAssembly.LoadFromDirectory(dir, ["*.nwc", "*.nwc"]);
+            Assert.Equal(2, top.Models.Count);
+
+            var all = NwcAssembly.LoadFromDirectory(dir, ["*.nwc", "*.nwd"], recursive: true);
+            Assert.Equal(4, all.Models.Count);
+            Assert.Equal([0.0, 100.0, 200.0, 300.0], all.AllMeshes.Select(m => m.BoundingBox!.Value.Min.X).OrderBy(x => x));
+            // Path order: a.nwc, b.nwc, d.nwd, sub/c.nwc ("sub" sorts after "d.nwd").
+            Assert.Equal([0.0, 100.0, 300.0, 200.0], all.AllMeshes.Select(m => m.BoundingBox!.Value.Min.X));
+
+            Assert.Throws<ArgumentException>(() => NwcAssembly.LoadFromDirectory(dir, []));
+            Assert.Throws<FileNotFoundException>(() => NwcAssembly.LoadFromDirectory(dir, ["*.xyz"], recursive: true));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }
