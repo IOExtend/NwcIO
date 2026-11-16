@@ -107,6 +107,26 @@ public sealed class NwcSceneReaderTests
         AssertSampleDiagnostics(result);
     }
 
+    [Theory]
+    [InlineData(double.NaN, 6, "lcldrevit_parameter_-1007102", NwcLengthUnit.Feet)]
+    [InlineData(double.PositiveInfinity, 6, "lcldrevit_parameter_-1007102", NwcLengthUnit.Feet)]
+    [InlineData("9.84", 4, "lcldrevit_parameter_-1007102", NwcLengthUnit.Feet)]    // not a length value
+    [InlineData(9.84, 6, "lcldrevit_parameter_-1000010", NwcLengthUnit.Feet)]    // another parameter
+    [InlineData(9.84, 6, "lcldrevit_parameter_-1007102", NwcLengthUnit.Unknown)]
+    public void Read_RevitSample_LevelElevationIsNullWhenNotAFiniteLength(object elevation, int valueType, string internalName, NwcLengthUnit unit)
+    {
+        var doc = Scene(RevitSample.Build(levelElevation: elevation, levelElevationType: valueType, levelElevationName: internalName),
+            new() { ModelKey = "k", LengthUnit = unit }).Document;
+        Assert.Null(Assert.Single(doc.Levels).Elevation);
+    }
+
+    [Fact]
+    public void Read_RevitSample_ConvertsTheLevelElevationToMetres()
+    {
+        var doc = Scene(RevitSample.Build(levelElevation: 10.0), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }).Document;
+        Assert.Equal(10.0, Assert.Single(doc.Levels).Elevation!.Value, precision: 6);
+    }
+
     [Theory]   // the second case has a grid, which only a Revit file reads
     [InlineData(-2000023)]
     [InlineData(-2000220)]

@@ -373,7 +373,8 @@ public static partial class NwcSceneReader
 
     // A grid is a line only when it has one line mesh of one segment that is horizontal within 1e-6 m; otherwise it stays an element.
     private static SceneGridLine? GridLine(NwcNode node, List<NwcMesh> meshes, double metresPerUnit)
-    {        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
+    {
+        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
         {
             return null;
         }
