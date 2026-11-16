@@ -637,6 +637,184 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_Assembly_ConvertsEachDocumentWithUniqueIds()
+    {
+        var assembly = NwcAssembly.Create("Federation",
+            Model("A.nwc", 1, 0),
+            Model("B.nwc", 2, 10));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        Assert.Equal([1, 2], result.Document.Models.Select(m => m.Id));
+        Assert.Equal(["A.nwc", "B.nwc"], result.Document.Models.Select(m => m.Key));
+        Assert.Equal(2, result.Document.Geometries.Count);
+        Assert.Equal([1, 2], result.Document.Geometries.Select(g => g.Id));
+        Assert.Equal(2, result.Document.Instances.Count);
+        Assert.Equal([1, 2], result.Document.Materials.Select(m => m.Id));
+        Assert.Equal(result.Document.Elements.Count, result.Document.Elements.Select(e => e.Id).Distinct().Count());
+        Assert.Equal(2, result.ElementCount);
+        Assert.Equal(1, result.LengthUnit.GetMetresPerUnit());
+        Assert.Empty(result.Document.Validate());
+
+        static NwcDocument Model(string sourcePath, int meshId, double x)
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var child = new NwcNode { Id = 2, Name = "Child", Class = "Model" };
+            root.Children.Add(child);
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Material = new NwcMaterial { Id = meshId, Name = $"Material {meshId}" };
+            mesh.Node = child;
+            child.Mesh = mesh;
+            return NwcDocument.Create(
+                fileInfo: new NwcFileInfo { SourcePath = sourcePath },
+                meshes: [mesh],
+                rootNode: root);
+        }
+    }
+
+    [Fact]
+    public void Read_Assembly_DuplicateFileNamesGetUniqueKeysAndSkipsTheNwfDocument()
+    {
+        var assembly = NwcAssembly.Create("Federation",
+            Model("fed.nwf", 1, 0),
+            Model("model.nwc", 2, 10),
+            Model("model.nwc", 3, 20));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        Assert.Equal(["model.nwc", "model.nwc#2"], result.Document.Models.Select(m => m.Key));
+        Assert.DoesNotContain(result.Document.Models, m => m.Key == "fed.nwf");
+        Assert.Empty(result.Document.Validate());
+
+        static NwcDocument Model(string sourcePath, int meshId, double x)
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var child = new NwcNode { Id = 2, Name = "Child", Class = "Model" };
+            root.Children.Add(child);
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Material = new NwcMaterial { Id = meshId, Name = $"Material {meshId}" };
+            mesh.Node = child;
+            child.Mesh = mesh;
+            return NwcDocument.Create(
+                fileInfo: new NwcFileInfo { SourcePath = sourcePath },
+                meshes: [mesh],
+                rootNode: root);
+        }
+    }
+
+    [Fact]
+    public void Read_AssemblyLoadedFromDirectory_UsesFileNamesForKeysAndPaths()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nwcscene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var fileInfo = new NwcFileInfo { SourcePath = "Tower.rvt", LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" };
+            NwcDocument.Create(fileInfo, rootNode: root).Save(Path.Combine(directory, "Arch.nwc"));
+            NwcDocument.Create(fileInfo, rootNode: root).Save(Path.Combine(directory, "Struct.nwc"));
+
+            var assembly = NwcAssembly.LoadFromDirectory(directory);
+            var result = Valid(NwcSceneReader.Read(assembly));
+
+            Assert.Equal(["Arch.nwc", "Struct.nwc"],
+                result.Document.Models.Select(model => model.Key).OrderBy(key => key, StringComparer.Ordinal));
+            Assert.All(result.Document.Models, model =>
+            {
+                Assert.NotNull(model.Path);
+                Assert.Equal(model.Key, Path.GetFileName(model.Path));
+            });
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void Read_AssemblyOpenedFromNwf_SkipsTheShellAndReportsUnresolvedAndNotLoadedReferences()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nwcscene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            NwcDocument.Create(new NwcFileInfo { SourcePath = "Tower.rvt", LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root)
+                .Save(Path.Combine(directory, "Arch.nwc"));
+            File.WriteAllText(Path.Combine(directory, "tex.png"), "not a model");
+            string nwf = Path.Combine(directory, "fed.nwf");
+            File.WriteAllBytes(nwf, XRefFile("Arch.nwc", "gone/Missing.nwc", "tex.png"));
+
+            var assembly = NwcAssembly.OpenNwf(nwf);
+            var result = Valid(NwcSceneReader.Read(assembly));
+
+            Assert.Equal(["Arch.nwc"], result.Document.Models.Select(m => m.Key));   // the shell is not a model
+            Assert.DoesNotContain(result.Diagnostics, d => d.Code == "xrefs-skipped");
+            var unresolved = Assert.Single(result.Diagnostics, d => d.Code == "xrefs-unresolved");
+            Assert.Equal(SceneSeverity.Warning, unresolved.Severity);
+            Assert.StartsWith("1 external references were not found", unresolved.Message);
+            Assert.Contains("gone/Missing.nwc", unresolved.Message);
+            var notLoaded = Assert.Single(result.Diagnostics, d => d.Code == "xrefs-not-loaded");
+            Assert.Equal(SceneSeverity.Warning, notLoaded.Severity);
+            Assert.Contains("tex.png", notLoaded.Message);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void Read_AssemblyWithoutNwfReferences_GetsNoXRefDiagnostics()
+    {
+        var assembly = NwcAssembly.Create("Federation", ElementWithEmptyMesh("A.nwc", Guid.NewGuid()));
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code.StartsWith("xrefs-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Read_Assembly_KeepsTheSourceIdOfAModelDiagnostic()
+    {
+        var guid = Guid.NewGuid();
+        var assembly = NwcAssembly.Create("Federation", ElementWithEmptyMesh("A.nwc", guid));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        var diagnostic = Assert.Single(result.Diagnostics, d => d.Code == "empty-mesh");
+        Assert.StartsWith("A.nwc: ", diagnostic.Message);
+        Assert.Equal(guid.ToString("D"), diagnostic.SourceId);
+    }
+
+    private static NwcDocument ElementWithEmptyMesh(string sourcePath, Guid guid)
+    {
+        var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+        var child = new NwcNode { Id = 2, Name = "Child", Class = "Model", IsElement = true, ElementGuid = guid };
+        child.Element = child;
+        root.Children.Add(child);
+        var mesh = new NwcMesh { Id = 1, Vertices = [], Indices = [], Node = child };
+        child.Mesh = mesh;
+        return NwcDocument.Create(new NwcFileInfo { SourcePath = sourcePath }, meshes: [mesh], rootNode: root);
+    }
+
+    // A .nwf-like file whose XRef table lists the given paths.
+    private static byte[] XRefFile(params string[] paths) => SyntheticNwcFile.Build(null, null, [], [], extraStreams:
+        [("LcOpXRefTable", System.Text.Encoding.UTF8.GetBytes(
+            "{\"Type\":\"XRefTable\",\"Version\":1,\"SavedFilename\":\"fed.nwf\",\"Table\":["
+            + string.Join(",", paths.Select(p => $"{{\"OriginalPath\":\"{p}\",\"RemappedPath\":\"\"}}")) + "]}"))]);
+
+    [Fact]
     public void Read_SavedViewpointInFeet_ScalesPositionsAndKeepsUpUnitLength()
     {
         var viewpoint = new NwcSavedViewpoint

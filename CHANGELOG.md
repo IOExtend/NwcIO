@@ -5,6 +5,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ## [Unreleased]
 
 ### Added
+- `NwcIO.Scene` converts an `NwcAssembly` into one scene with one `SceneModel` per component document, unique keys from file names, and scene-wide element, geometry and material ids. The `.nwf` document itself is skipped when components exist.
 - `NwcIO.Scene` writes Revit level elevations in metres from the level's `LcRevitData_Parameter` length property; a missing, non-finite or unknown-unit value stays null.
 - `NwcIO.Scene` converts saved viewpoints to `SceneViewpoint`s (camera position, target, up, field of view in radians, near/far in metres and projection).
 - CLI `--scene <file.json>` writes the opened `.nwc`/`.nwd` document as an `IOScene` document through `NwcIO.Scene` (diagnostics go to stderr as `Scene <Severity>: <Code>: ...`); `--scene-length-unit ft|m|cm|mm` sets the unit when the file does not declare one. It is rejected for folder, `.nwf`, `.nwf.xml` and multi-`-i` input and together with `--no-meshes`, `--no-materials`, `--no-transforms` or `--no-tree`.
