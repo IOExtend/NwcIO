@@ -243,6 +243,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
 - **Semantic Classification**:
   - Dynamic mapping of Navisworks elements, categories, and materials to standard IFC entities:
     - `IFCWALL`, `IFCSLAB`, `IFCCOLUMN`, `IFCBEAM`, `IFCREINFORCINGBAR`, `IFCWINDOW`, `IFCDOOR`, `IFCFOOTING`, `IFCSTAIR`, `IFCRAILING`, `IFCROOF`, `IFCPIPESEGMENT`, `IFCDUCTSEGMENT`, falling back to `IFCBUILDINGELEMENTPROXY`.
+    - Attribute lists follow the selected schema (IFC2x3 or IFC4). IFC2x3 requires `NominalDiameter` and `CrossSectionArea` on `IFCREINFORCINGBAR`, which an NWC file does not carry, so the placeholders `1.` and `0.` are written there; IFC4 writes `$`.
 - **Materials & Properties**:
   - Shading styles serialized via `IfcSurfaceStyle`, `IfcSurfaceStyleShading`, and `IfcColourRgb`, assigned to geometry via `IfcStyledItem`.
   - Element metadata and dimensional bounding parameters exported as `IfcPropertySet` containing `IfcPropertySingleValue` linked to elements via `IfcRelDefinesByProperties`.
