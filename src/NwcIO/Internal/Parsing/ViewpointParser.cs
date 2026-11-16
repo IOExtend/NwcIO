@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using NwcIO.Internal.Container;
 using NwcIO.Model;
+using NwcIO.Model.Sectioning;
 
 namespace NwcIO.Internal.Parsing;
 
@@ -46,7 +47,7 @@ internal static class ViewpointParser
         var seenKeys = new HashSet<string>(StringComparer.Ordinal);
 
         int pos = 0;
-        int maxOffset = data.Length - 96;
+        int maxOffset = data.Length - 100;
 
         while (pos <= maxOffset)
         {
@@ -71,11 +72,17 @@ internal static class ViewpointParser
 
                     double aspect = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 68));
                     double focal = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 76));
-                    double height = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 84));
+                    double fieldOfView = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 84));
                     double nearDist = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 92));
 
                     string name = ExtractViewName(data, pos, results.Count + 1);
-                    var comments = ExtractNearbyComments(data, pos);
+                    int nextPos = pos + 100;
+                    var extension = TryReadViewpointExtension(data, nextPos, out int extensionEnd);
+                    var comments = extension is not null ? extension.Comments : ExtractNearbyComments(data, pos);
+                    if (extension is not null)
+                    {
+                        nextPos = extensionEnd;
+                    }
 
                     // De-duplicate if exact match
                     string dedupeKey = FormattableString.Invariant($"{name}:{x:F2}:{y:F2}:{z:F2}:{qx:F3}:{qy:F3}:{qz:F3}:{qw:F3}");
@@ -86,24 +93,26 @@ internal static class ViewpointParser
                             Position = new Vector3d(x, y, z),
                             Rotation = new Quaterniond(qx, qy, qz, qw),
                             FocalDistance = focal > 0 ? focal : 1.0,
-                            FieldOfView = 60.0,
+                            FieldOfView = fieldOfView > 0 ? fieldOfView : 60.0,
                             AspectRatio = aspect > 0 ? aspect : 1.0,
                             NearDistance = nearDist > 0 ? nearDist : 0.1,
-                            FarDistance = focal > 0 ? focal * 10.0 : 10000.0,
-                            Projection = NwcCameraProjection.Perspective,
+                            FarDistance = extension?.FarDistance is > 0 ? extension.FarDistance : focal > 0 ? focal * 10.0 : 10000.0,
+                            Projection = extension?.Projection ?? NwcCameraProjection.Perspective,
                         };
 
                         results.Add(new NwcSavedViewpoint
                         {
-                            Id = null,
+                            Id = extension?.Id,
                             Name = name,
                             Camera = camera,
                             Comments = comments,
+                            SectionPlanes = extension?.SectionPlanes ?? Array.Empty<NwcSectionPlane>(),
+                            SectionBox = extension?.SectionBox,
                         });
                     }
 
                     // Advance past this viewpoint block
-                    pos += 96;
+                    pos = nextPos;
                     continue;
                 }
             }
@@ -173,6 +182,194 @@ internal static class ViewpointParser
         }
 
         return comments;
+    }
+
+    /// <summary>Optional writer trailer after the fixed tag-517 record.</summary>
+    private sealed record ViewpointExtension(
+        double FarDistance,
+        NwcCameraProjection Projection,
+        Guid? Id,
+        IReadOnlyList<string> Comments,
+        IReadOnlyList<NwcSectionPlane> SectionPlanes,
+        NwcSectionBox? SectionBox);
+
+    private static ViewpointExtension? TryReadViewpointExtension(byte[] data, int offset, out int end)
+    {
+        end = offset;
+        if (offset < 0 || offset + 8 > data.Length ||
+            ReadInt32(data, offset) != ViewpointExtensionFormat.Magic)
+        {
+            return null;
+        }
+
+        int length = ReadInt32(data, offset + 4);
+        long payloadStart = offset + 8L;
+        long payloadEnd = payloadStart + length;
+        if (length < 12 || payloadEnd > data.Length)
+        {
+            return null;
+        }
+
+        int p = (int)payloadStart;
+        if (ReadInt32(data, p) != ViewpointExtensionFormat.Magic ||
+            ReadInt32(data, p + 4) != ViewpointExtensionFormat.Version)
+        {
+            return null;
+        }
+
+        p += 8;
+        if (!TryReadDouble(data, ref p, payloadEnd, out double farDistance) ||
+            !TryReadInt32(data, ref p, payloadEnd, out int projectionValue) ||
+            !TryReadInt32(data, ref p, payloadEnd, out int hasId))
+        {
+            return null;
+        }
+
+        Guid? id = null;
+        if (hasId != 0)
+        {
+            if (p + 16 > payloadEnd)
+            {
+                return null;
+            }
+
+            id = new Guid(data.AsSpan(p, 16));
+            p += 16;
+        }
+
+        if (!TryReadInt32(data, ref p, payloadEnd, out int commentCount) || commentCount is < 0 or > 1024)
+        {
+            return null;
+        }
+
+        var comments = new List<string>(commentCount);
+        for (int i = 0; i < commentCount; i++)
+        {
+            if (!TryReadPaddedString(data, ref p, payloadEnd, out string comment))
+            {
+                return null;
+            }
+
+            comments.Add(comment);
+        }
+
+        if (!TryReadInt32(data, ref p, payloadEnd, out int planeCount) || planeCount is < 0 or > 64)
+        {
+            return null;
+        }
+
+        var planes = new List<NwcSectionPlane>(planeCount);
+        for (int i = 0; i < planeCount; i++)
+        {
+            if (!TryReadInt32(data, ref p, payloadEnd, out int index) ||
+                !TryReadInt32(data, ref p, payloadEnd, out int enabled) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double nx) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double ny) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double nz) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double distance) ||
+                !TryReadInt32(data, ref p, payloadEnd, out int alignment))
+            {
+                return null;
+            }
+
+            planes.Add(new NwcSectionPlane
+            {
+                PlaneIndex = index,
+                IsEnabled = enabled != 0,
+                Normal = new Vector3d(nx, ny, nz),
+                Distance = distance,
+                Alignment = Enum.IsDefined(typeof(NwcSectionAlignment), alignment)
+                    ? (NwcSectionAlignment)alignment
+                    : NwcSectionAlignment.Custom,
+            });
+        }
+
+        if (!TryReadInt32(data, ref p, payloadEnd, out int hasBox))
+        {
+            return null;
+        }
+
+        NwcSectionBox? box = null;
+        if (hasBox != 0)
+        {
+            if (!TryReadInt32(data, ref p, payloadEnd, out int boxEnabled) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double minX) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double minY) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double minZ) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double maxX) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double maxY) ||
+                !TryReadDouble(data, ref p, payloadEnd, out double maxZ))
+            {
+                return null;
+            }
+
+            box = new NwcSectionBox(new BoundingBox3d(
+                new Vector3d(minX, minY, minZ),
+                new Vector3d(maxX, maxY, maxZ)), boxEnabled != 0);
+        }
+
+        end = (int)payloadEnd;
+        return new ViewpointExtension(
+            farDistance,
+            Enum.IsDefined(typeof(NwcCameraProjection), projectionValue)
+                ? (NwcCameraProjection)projectionValue
+                : NwcCameraProjection.Perspective,
+            id,
+            comments,
+            planes,
+            box);
+    }
+
+    private static bool TryReadInt32(byte[] data, ref int position, long end, out int value)
+    {
+        value = 0;
+        if (position + 4 > end)
+        {
+            return false;
+        }
+
+        value = ReadInt32(data, position);
+        position += 4;
+        return true;
+    }
+
+    private static bool TryReadDouble(byte[] data, ref int position, long end, out double value)
+    {
+        value = 0;
+        if (position + 8 > end)
+        {
+            return false;
+        }
+
+        value = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(position));
+        position += 8;
+        return true;
+    }
+
+    private static bool TryReadPaddedString(byte[] data, ref int position, long end, out string value)
+    {
+        value = string.Empty;
+        if (position + 4 > end)
+        {
+            return false;
+        }
+
+        int length = ReadInt32(data, position);
+        if (length < 0 || length > 65536 || position + 4L + length > end)
+        {
+            return false;
+        }
+
+        string text = Encoding.UTF8.GetString(data, position + 4, length);
+        position += 4 + length;
+        position += (4 - (length & 3)) & 3;
+        if (position > end)
+        {
+            return false;
+        }
+
+        value = text;
+        return true;
     }
 
     private static string DecodeString(byte[] data, int offset, int length)

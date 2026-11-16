@@ -559,6 +559,8 @@ internal static class NwcStreamSerializer
             vpWriter.Write(cam.FieldOfView > 0 ? cam.FieldOfView : 60.0);
             vpWriter.Write(cam.NearDistance > 0 ? cam.NearDistance : 0.1);
 
+            WriteViewpointExtension(vpWriter, vp, cam);
+
             // Comments
             if (vp.Comments.Count > 0)
             {
@@ -583,6 +585,59 @@ internal static class NwcStreamSerializer
         }
 
         return vpMs.ToArray();
+    }
+
+    private static void WriteViewpointExtension(BinaryWriter w, NwcSavedViewpoint viewpoint, NwcCamera camera)
+    {
+        using var ms = new MemoryStream();
+        using (var ext = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+        {
+            ext.Write(ViewpointExtensionFormat.Magic);
+            ext.Write(ViewpointExtensionFormat.Version);
+            ext.Write(camera.FarDistance);
+            ext.Write((int)camera.Projection);
+
+            ext.Write(viewpoint.Id.HasValue ? 1 : 0);
+            if (viewpoint.Id is { } id)
+            {
+                ext.Write(id.ToByteArray());
+            }
+
+            ext.Write(viewpoint.Comments.Count);
+            foreach (string comment in viewpoint.Comments)
+            {
+                WritePaddedString(ext, comment);
+            }
+
+            ext.Write(viewpoint.SectionPlanes.Count);
+            foreach (var plane in viewpoint.SectionPlanes)
+            {
+                ext.Write(plane.PlaneIndex);
+                ext.Write(plane.IsEnabled ? 1 : 0);
+                ext.Write(plane.Normal.X);
+                ext.Write(plane.Normal.Y);
+                ext.Write(plane.Normal.Z);
+                ext.Write(plane.Distance);
+                ext.Write((int)plane.Alignment);
+            }
+
+            ext.Write(viewpoint.SectionBox is null ? 0 : 1);
+            if (viewpoint.SectionBox is { } box)
+            {
+                ext.Write(box.IsEnabled ? 1 : 0);
+                ext.Write(box.Bounds.Min.X);
+                ext.Write(box.Bounds.Min.Y);
+                ext.Write(box.Bounds.Min.Z);
+                ext.Write(box.Bounds.Max.X);
+                ext.Write(box.Bounds.Max.Y);
+                ext.Write(box.Bounds.Max.Z);
+            }
+        }
+
+        byte[] payload = ms.ToArray();
+        w.Write(ViewpointExtensionFormat.Magic);
+        w.Write(payload.Length);
+        w.Write(payload);
     }
 
     private static void WritePaddedString(BinaryWriter w, string s)
