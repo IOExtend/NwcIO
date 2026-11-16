@@ -263,10 +263,58 @@ public static partial class NwcSceneReader
                 $"{nodesWithPropertiesOutsideTabs} nodes carry properties outside property tabs (the file was not read through its DbCache directory); they are not in the scene."));
         }
 
-        if (document.SavedViewpoints.Count > 0 || document.DbCache?.Find("LcOpSavedViewsElement") is not null)
+        int skippedViewpoints = 0;
+        int approximatedViewpoints = 0;
+        int viewpointContentSkipped = 0;
+        if (metresPerUnit is double viewpointMetres)
+        {
+            foreach (var saved in document.SavedViewpoints)
+            {
+                if (TryMapViewpoint(saved, viewpointMetres, out var viewpoint))
+                {
+                    scene.Viewpoints.Add(viewpoint);
+                    if (saved.IsCameraApproximated)
+                    {
+                        approximatedViewpoints++;
+                    }
+
+                    if (saved.SectionPlanes.Count > 0 || saved.SectionBox is not null ||
+                        saved.Redlines.Count > 0 || saved.Comments.Count > 0)
+                    {
+                        viewpointContentSkipped++;
+                    }
+                }
+                else
+                {
+                    skippedViewpoints++;
+                }
+            }
+        }
+        else
+        {
+            skippedViewpoints = document.SavedViewpoints.Count;
+        }
+
+        bool unreadSavedViews = document.SavedViewpoints.Count == 0
+            && document.DbCache?.Find("LcOpSavedViewsElement") is not null;
+        if (skippedViewpoints > 0 || unreadSavedViews)
         {
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "viewpoints-skipped",
-                "Saved viewpoints are not converted: Navisworks stores no stable viewpoint id."));
+                skippedViewpoints > 0
+                    ? FormattableString.Invariant($"{skippedViewpoints} saved viewpoints could not be converted.")
+                    : "Saved viewpoints could not be read from this file."));
+        }
+
+        if (approximatedViewpoints > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-camera-approximated",
+                FormattableString.Invariant($"{approximatedViewpoints} saved viewpoints have approximated camera parameters: the file does not store a decoded field of view, projection and far distance.")));
+        }
+
+        if (viewpointContentSkipped > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-content-skipped",
+                FormattableString.Invariant($"{viewpointContentSkipped} saved viewpoints carry section planes, a section box, redlines or comments; only their camera is converted.")));
         }
 
         if (document.XRefs is { References.Count: > 0 } xRefs)
@@ -313,6 +361,49 @@ public static partial class NwcSceneReader
     private static bool IsGrid(NwcNode node) =>
         node.PropertyTabs.Any(t => t.InternalName == "LcRevitData_Element"
             && t.Properties.Any(p => p.InternalName == "LcRevitPropertyElementCategoryId" && p.Value == "-2000220"));
+
+    private static bool TryMapViewpoint(
+        NwcSavedViewpoint saved,
+        double metresPerUnit,
+        out SceneViewpoint viewpoint)
+    {
+        var camera = saved.Camera;
+        if (!IsFinite(camera.Position) || !IsFinite(camera.Target) || !IsFinite(camera.Up) ||
+            !double.IsFinite(camera.FieldOfView) || camera.FieldOfView <= 0 || camera.FieldOfView >= 180 ||
+            !double.IsFinite(camera.AspectRatio) || camera.AspectRatio <= 0 ||
+            !double.IsFinite(camera.NearDistance) || !double.IsFinite(camera.FarDistance))
+        {
+            viewpoint = null!;
+            return false;
+        }
+
+        viewpoint = new SceneViewpoint
+        {
+            Id = saved.Id?.ToString(),
+            Name = saved.Name,
+            Camera = new SceneCamera
+            {
+                Position = ToScene(camera.Position, metresPerUnit),
+                Target = ToScene(camera.Target, metresPerUnit),
+                // Up is a direction, not a length: only position, target and clip distances scale.
+                Up = new IOScene.Vector3d(camera.Up.X, camera.Up.Y, camera.Up.Z),
+                FieldOfView = camera.FieldOfView * Math.PI / 180.0,
+                AspectRatio = camera.AspectRatio,
+                NearDistance = camera.NearDistance * metresPerUnit,
+                FarDistance = camera.FarDistance * metresPerUnit,
+                Projection = camera.Projection == NwcCameraProjection.Orthographic
+                    ? SceneProjection.Orthographic
+                    : SceneProjection.Perspective,
+            },
+        };
+        return true;
+    }
+
+    private static IOScene.Vector3d ToScene(NwcIO.Model.Vector3d value, double metresPerUnit) =>
+        new(value.X * metresPerUnit, value.Y * metresPerUnit, value.Z * metresPerUnit);
+
+    private static bool IsFinite(NwcIO.Model.Vector3d value) =>
+        double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
 
     // The level's LcRevitId tab names its element id; the matching LcRevitData_Parameter tab holds the elevation.
     private static string? LevelElementId(NwcNode node, HashSet<string> levelElementIds) =>

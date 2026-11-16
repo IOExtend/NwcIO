@@ -330,6 +330,7 @@ public class WriterTests
         Assert.Equal(2, reopened.SavedViewpoints.Count);
         var a = reopened.SavedViewpoints[0];
         Assert.Equal(id, a.Id);
+        Assert.False(a.IsCameraApproximated);
         Assert.Equal(45, a.Camera.FieldOfView, 6);
         Assert.Equal(500, a.Camera.FarDistance, 6);
         Assert.Equal(NwcCameraProjection.Orthographic, a.Camera.Projection);
