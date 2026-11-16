@@ -1155,6 +1155,33 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       return new Date(tlStart + (val / 1000.0) * tlSpan);
     }
 
+    // The slider ends exactly at the last task end; the end of a task is inclusive (as in
+    // NwcTimeLinerSchedule.GetNodeStateAt), so the last position counts as just after it.
+    function tlEffectiveTime(simDate, sliderValue) {
+      return simDate.getTime() + (sliderValue >= 1000 ? 1 : 0);
+    }
+
+    // The task that drives a node at simTime: one in progress; otherwise the latest completed one
+    // (its type decides what the node looks like after it); otherwise the earliest upcoming one.
+    function computeTlNodeState(tasks, simTime) {
+      let driver = null;
+      let driverState = 'NotStarted';
+      tasks.forEach(t => {
+        const tStart = new Date(t.start).getTime();
+        const tEnd = new Date(t.end).getTime();
+        const state = simTime > tEnd ? 'Completed' : (simTime >= tStart ? 'InProgress' : 'NotStarted');
+        const rank = { InProgress: 2, Completed: 1, NotStarted: 0 };
+        let better = driver === null || rank[state] > rank[driverState];
+        if (!better && state === driverState) {
+          if (state === 'Completed') better = tEnd > new Date(driver.end).getTime();
+          else if (state === 'NotStarted') better = tStart < new Date(driver.start).getTime();
+        }
+        if (better) { driver = t; driverState = state; }
+      });
+      return { type: driver.taskType, state: driverState };
+    }
+    // end tl helpers
+
     function updateTlSimulation() {
       const simDate = getSimDate(parseFloat(tlSlider.value));
       const offsetMs = (modelData.timeliner.offsetMinutes || 0) * 60000;
@@ -1166,7 +1193,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         return;
       }
 
-      const simTime = simDate.getTime();
+      const simTime = tlEffectiveTime(simDate, parseFloat(tlSlider.value));
       const nodeTasks = new Map();
       modelData.timeliner.tasks.forEach(t => {
         (t.nodeIds || []).forEach(nid => {
@@ -1176,20 +1203,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       });
 
       const nodeState = new Map();
-      nodeTasks.forEach((tasks, nid) => {
-        let inProgress = false;
-        let allCompleted = true;
-        tasks.forEach(t => {
-          const tStart = new Date(t.start).getTime();
-          const tEnd = new Date(t.end).getTime();
-          if (simTime > tEnd) return;
-          allCompleted = false;
-          if (simTime >= tStart) inProgress = true;
-        });
-
-        const state = inProgress ? 'InProgress' : (allCompleted ? 'Completed' : 'NotStarted');
-        nodeState.set(nid, { type: tasks[0].taskType, state: state });
-      });
+      nodeTasks.forEach((tasks, nid) => nodeState.set(nid, computeTlNodeState(tasks, simTime)));
 
       gpuMeshes.forEach(gm => {
         const nid = gm.raw.nodeId !== undefined ? gm.raw.nodeId : gm.raw.id;
