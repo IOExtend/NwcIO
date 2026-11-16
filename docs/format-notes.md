@@ -235,7 +235,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - Shading styles serialized via `IfcSurfaceStyle`, `IfcSurfaceStyleShading`, and `IfcColourRgb`, assigned to geometry via `IfcStyledItem`.
   - Element metadata and dimensional bounding parameters exported as `IfcPropertySet` containing `IfcPropertySingleValue` linked to elements via `IfcRelDefinesByProperties`.
 - **Global Identifiers**:
-  - Deterministic 22-character buildingSMART base64 GUIDs generated via UUID/SHA-256 namespace hashing (`IfcGuid`). Element ids prefer the authoring element GUID (`NwcNode.ElementGuid`) and otherwise hash the model source path and mesh id, so equal mesh ids in different models stay distinct; spatial, relationship, property-set and type ids hash fixed role keys. The same input produces the same GlobalIds on repeated exports, and clash/BCF component ids use the same derivation as IFC.
+  - Deterministic 22-character buildingSMART base64 GUIDs generated via UUID/SHA-256 namespace hashing (`IfcGuid`). Element ids hash the model source path and the mesh id, so equal mesh ids in different models stay distinct; spatial, relationship, property-set and type ids hash fixed role keys. The same input produces the same GlobalIds on repeated exports, and clash/BCF component ids use the same derivation as IFC.
 
 ### 2.12 BIM Collaboration Format (BCF 2.1) & Interactive Clash Reports
 - **BCF 2.1 Container Specification**:

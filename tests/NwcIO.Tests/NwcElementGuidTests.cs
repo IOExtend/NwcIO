@@ -20,9 +20,9 @@ public class NwcElementGuidTests
     }
 
     [Fact]
-    public void ForMesh_EmptyAuthoringGuid_FallsBackToTheMeshKey()
+    public void ForMesh_IgnoresTheAuthoringGuid_AndUsesTheMeshKey()
     {
-        var element = new NwcNode { Id = 1, Name = "Door", Class = "LcRevitData_Element", ElementGuid = Guid.Empty };
+        var element = new NwcNode { Id = 1, Name = "Door", Class = "LcRevitData_Element", ElementGuid = Guid.NewGuid() };
         var leaf = new NwcNode { Id = 2, Name = "Panel", Class = "LcRevitData_Element", Element = element };
         var mesh = new NwcMesh { Id = 10, Node = leaf, Vertices = [], Indices = [] };
         var doc = NwcDocument.Create();

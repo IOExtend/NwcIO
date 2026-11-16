@@ -3,9 +3,9 @@ using NwcIO.Model;
 namespace NwcIO.Internal.Export;
 
 /// <summary>
-/// Stable IFC GlobalIds for meshes. The authoring element GUID wins; otherwise the id is derived from the
-/// model's source path and the mesh id, so equal mesh ids in different models stay distinct and repeated
-/// exports of the same input produce the same ids.
+/// Stable IFC GlobalIds for meshes, derived from the model's source path and the mesh id, so equal mesh ids
+/// in different models stay distinct, every fragment of an element keeps its own id, and repeated exports of
+/// the same input produce the same ids.
 /// </summary>
 internal static class NwcElementGuid
 {
@@ -40,18 +40,6 @@ internal static class NwcElementGuid
 
     public static string ForMesh(NwcMesh mesh, NwcDocument document) => ForMesh(mesh, ModelKey(document));
 
-    public static string ForMesh(NwcMesh mesh, string modelKey)
-    {
-        // One element usually owns several fragments (meshes); the element GUID alone would give every
-        // mesh the same GlobalId. Keep the authoring GUID as a stable prefix and add the mesh identity.
-        NwcNode? node = mesh.Node;
-        Guid? authoringGuid = node?.ElementGuid ?? node?.Element?.ElementGuid;
-        string meshId = mesh.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        if (authoringGuid is { } guid && guid != Guid.Empty)
-        {
-            return IfcGuid.FromKey($"{modelKey}:element:{guid:D}:mesh:{meshId}");
-        }
-
-        return IfcGuid.FromKey($"{modelKey}:mesh:{meshId}");
-    }
+    public static string ForMesh(NwcMesh mesh, string modelKey) =>
+        IfcGuid.FromKey($"{modelKey}:mesh:{mesh.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
 }
