@@ -67,7 +67,7 @@ internal static class Program
           --no-materials     Disable material and surface color extraction
           --catalog          Include raw container stream catalog (offsets, sizes, kinds)
           --no-transforms    Exclude 3D transform matrices from JSON export
-          --no-tree          Skip reading the scene tree and exclude it from JSON export (required to open a .nwd with partition nodes or a linked Revit model)
+          --no-tree          Skip reading the scene tree and exclude it from JSON export (required to open a .nwd with partition nodes)
           --no-indent        Write compact JSON instead of pretty-printed indented JSON
           --bvh-stats        Include Bounding Volume Hierarchy (BVH) spatial index statistics
           --raycast <coords> Perform 3D raycast test: "originX,originY,originZ,dirX,dirY,dirZ"
@@ -83,7 +83,7 @@ internal static class Program
           3  Data format error or parsing failure
         """;
 
-    // The reader throws NotSupportedException only for a scene tree it cannot convert (class-32 partition nodes, linked Revit models); --no-tree reads around both.
+    // The reader throws NotSupportedException only for a scene tree it cannot convert (class-32 partition nodes); --no-tree reads around it.
     private const string NoTreeHint = " Use --no-tree to read geometry and placement without the scene tree.";
 
     public static int Main(string[] args) => Run(args, null, null, null);
