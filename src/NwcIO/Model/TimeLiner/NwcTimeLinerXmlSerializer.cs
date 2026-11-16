@@ -207,7 +207,10 @@ public static class NwcTimeLinerXmlSerializer
         if (string.IsNullOrEmpty(endStr) ||
             !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out plannedEnd))
         {
-            plannedEnd = plannedStart.AddDays(7);
+            // A parsed start may sit at DateTimeOffset.MaxValue; AddDays would throw.
+            plannedEnd = plannedStart <= DateTimeOffset.MaxValue.AddDays(-7)
+                ? plannedStart.AddDays(7)
+                : plannedStart;
             schedule.Warnings.Add(
                 $"Task '{id}': planned end '{endStr}' is missing or invalid; using {plannedEnd:o}.");
         }
