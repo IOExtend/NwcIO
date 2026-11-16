@@ -122,6 +122,113 @@ public class ContainerReaderTests
         Assert.Throws<InvalidDataException>(() => NwcContainerReader.Read(invalid));
     }
 
+    [Theory]
+    [InlineData(100_000)]
+    [InlineData(300_000)]
+    public void Read_StreamLongerThanOneBlock_PreservesExactLengthAndFollowingStream(int payloadLength)
+    {
+        var payload = new byte[payloadLength];
+        new Random(42).NextBytes(payload);
+        var compressed = CompressZlib(payload);
+        var nextPayload = System.Text.Encoding.UTF8.GetBytes("second stream");
+        var nextCompressed = CompressZlib(nextPayload);
+
+        using var ms = new MemoryStream();
+        var headerBytes = System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n");
+        ms.Write(headerBytes);
+        ms.Write(compressed);
+        ms.Write(nextCompressed);
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        Assert.Equal(2, container.Streams.Count);
+        Assert.Equal(payload, container.Streams[0].Data);
+        Assert.Equal(headerBytes.Length, container.Streams[0].FileOffset);
+        Assert.Equal(compressed.Length, container.Streams[0].CompressedLength);
+        Assert.Equal((long)headerBytes.Length + compressed.Length, container.Streams[1].FileOffset);
+        Assert.Equal(nextCompressed.Length, container.Streams[1].CompressedLength);
+        Assert.Equal(nextPayload, container.Streams[1].Data);
+        Assert.Equal(0, container.TrailingGap);
+    }
+
+    [Theory]
+    [InlineData(8_182)]
+    [InlineData(8_183)]
+    [InlineData(8_184)]
+    public void Read_TrailerAcrossInflateBlockBoundary_KeepsBothStreams(int payloadLength)
+    {
+        var payload = new byte[payloadLength];
+        new Random(payloadLength).NextBytes(payload);
+        var compressed = CompressZlib(payload);
+        var nextPayload = System.Text.Encoding.UTF8.GetBytes("after boundary");
+        var nextCompressed = CompressZlib(nextPayload);
+
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        ms.Write(compressed);
+        ms.Write(nextCompressed);
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        Assert.Equal(2, container.Streams.Count);
+        Assert.Equal(payload, container.Streams[0].Data);
+        Assert.Equal(compressed.Length, container.Streams[0].CompressedLength);
+        Assert.Equal(nextPayload, container.Streams[1].Data);
+    }
+
+    [Fact]
+    public void Read_ThreeIdenticalStreams_KeepsEachCompressedLength()
+    {
+        var payload = System.Text.Encoding.UTF8.GetBytes("same payload");
+        var compressed = CompressZlib(payload);
+
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        for (int i = 0; i < 3; i++)
+        {
+            ms.Write(compressed);
+        }
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        Assert.Equal(3, container.Streams.Count);
+        Assert.All(container.Streams, s =>
+        {
+            Assert.Equal(compressed.Length, s.CompressedLength);
+            Assert.Equal(payload, s.Data);
+        });
+        Assert.Equal(0, container.TrailingGap);
+    }
+
+    [Fact]
+    public void Read_MemoryStreamAtEnd_DoesNotReadFromTheStart()
+    {
+        var compressed = CompressZlib(System.Text.Encoding.UTF8.GetBytes("payload"));
+        var file = ContainerWith(compressed);
+        // publiclyVisible: true makes TryGetBuffer succeed, so only the Position guard keeps it off the fast path.
+        using var stream = new MemoryStream(file, 0, file.Length, false, true);
+        stream.Position = stream.Length;
+
+        Assert.Throws<InvalidDataException>(() => NwcContainerReader.Read(stream));
+    }
+
+    [Fact]
+    public void Read_SeekableStreamWithSpareCapacity_ReadsOnlyItsContent()
+    {
+        var payload = System.Text.Encoding.UTF8.GetBytes("stream payload");
+        var compressed = CompressZlib(payload);
+        var file = ContainerWith(compressed);
+
+        using var stream = new MemoryStream(file.Length + 1024);
+        stream.Write(file);
+        stream.Position = 0;
+
+        var container = NwcContainerReader.Read(stream);
+
+        Assert.Equal(payload, Assert.Single(container.Streams).Data);
+    }
+
+
     [Fact]
     public void Read_StreamBeyondPerStreamLimit_ThrowsInvalidDataException()
     {
@@ -211,6 +318,7 @@ public class ContainerReaderTests
         ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
         ms.Write(bomb);
         ms.Write(bomb);
+        ms.Write(bomb); // the inflater rejects the checksum on its last read, so each rejected stream charges its earlier 64 KiB chunks
 
         var ex = Assert.Throws<InvalidDataException>(
             () => NwcContainerReader.Read(ms.ToArray(), 1L << 20, 150_000));
