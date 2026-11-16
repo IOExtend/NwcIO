@@ -163,6 +163,7 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 - `.nwd` scene trees with partition nodes are not decoded yet, and linked Revit models (a tree that places one element under two parents) are not supported: open them with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference such files.
 - The `.nwc` writer stores vertex positions and rotation/translation; it rejects scaled transforms, line meshes and meshes whose triangles differ from the single strip the reader rebuilds over the positions.
 - The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property and property-tab references (properties from `LcOaPartitionProps` count toward the property cap), and at most one render vertex or corner per geometry-record byte. Files beyond these limits fail with `InvalidDataException`.
+- The container reader still keeps the whole compressed file and every inflated stream in memory. Seekable inputs larger than 2 GiB are rejected with `IOException` because a single managed array cannot hold them; streaming and on-demand inflation are not implemented yet.
 - Writing native `.nwd` files is not supported (export targets native `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
 
 ## Scope and frozen features

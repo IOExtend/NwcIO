@@ -122,6 +122,59 @@ public class ContainerReaderTests
         Assert.Throws<InvalidDataException>(() => NwcContainerReader.Read(invalid));
     }
 
+    [Theory]
+    [InlineData(100_000)]
+    [InlineData(300_000)]
+    public void Read_StreamLongerThanOneBlock_PreservesExactLengthAndFollowingStream(int payloadLength)
+    {
+        var payload = new byte[payloadLength];
+        new Random(42).NextBytes(payload);
+        var compressed = CompressZlib(payload);
+        var nextPayload = System.Text.Encoding.UTF8.GetBytes("second stream");
+        var nextCompressed = CompressZlib(nextPayload);
+
+        using var ms = new MemoryStream();
+        var headerBytes = System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n");
+        ms.Write(headerBytes);
+        ms.Write(compressed);
+        ms.Write(nextCompressed);
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        Assert.Equal(2, container.Streams.Count);
+        Assert.Equal(payload, container.Streams[0].Data);
+        Assert.Equal(headerBytes.Length, container.Streams[0].FileOffset);
+        Assert.Equal(compressed.Length, container.Streams[0].CompressedLength);
+        Assert.Equal((long)headerBytes.Length + compressed.Length, container.Streams[1].FileOffset);
+        Assert.Equal(nextCompressed.Length, container.Streams[1].CompressedLength);
+        Assert.Equal(nextPayload, container.Streams[1].Data);
+        Assert.Equal(0, container.TrailingGap);
+    }
+
+    [Fact]
+    public void Read_SeekableStreamWithSpareCapacity_ReadsOnlyItsContent()
+    {
+        var payload = System.Text.Encoding.UTF8.GetBytes("stream payload");
+        var compressed = CompressZlib(payload);
+        var file = FileBytes(compressed);
+
+        using var stream = new MemoryStream(file.Length + 1024);
+        stream.Write(file);
+        stream.Position = 0;
+
+        var container = NwcContainerReader.Read(stream);
+
+        Assert.Equal(payload, Assert.Single(container.Streams).Data);
+    }
+
+    private static byte[] FileBytes(byte[] compressedPayload)
+    {
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        ms.Write(compressedPayload);
+        return ms.ToArray();
+    }
+
     private static byte[] CompressZlib(byte[] data)
     {
         using var outMs = new MemoryStream();

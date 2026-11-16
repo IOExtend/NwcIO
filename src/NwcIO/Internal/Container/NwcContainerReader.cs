@@ -31,7 +31,7 @@ public static class NwcContainerReader
                 var header = LcUStreamHeader.Parse(data, pos);
                 sections.Add(header);
                 sectionIndex = sections.Count - 1;
-                pos = header.FileOffset + header.HeaderLength;
+                pos = (int)(header.FileOffset + header.HeaderLength);
                 continue;
             }
 
@@ -99,9 +99,31 @@ public static class NwcContainerReader
 
     public static NwcContainer Read(Stream input)
     {
-        using var ms = new MemoryStream();
-        input.CopyTo(ms);
-        return Read(ms.ToArray());
+        // Avoid copying a caller's own array-backed MemoryStream.
+        if (input is MemoryStream memory &&
+            memory.TryGetBuffer(out ArraySegment<byte> segment) &&
+            segment.Offset == 0 &&
+            segment.Count == segment.Array!.Length)
+        {
+            return Read(segment.Array);
+        }
+
+        if (input.CanSeek)
+        {
+            long remaining = input.Length - input.Position;
+            if (remaining > Array.MaxLength)
+            {
+                throw new IOException($"The container is {remaining} bytes; the in-memory reader supports at most {Array.MaxLength} bytes.");
+            }
+
+            var data = new byte[(int)remaining];
+            input.ReadExactly(data);
+            return Read(data);
+        }
+
+        using var copy = new MemoryStream();
+        input.CopyTo(copy);
+        return Read(copy.ToArray());
     }
 
     public static NwcContainer ReadFile(string path) => Read(File.ReadAllBytes(path));
@@ -131,7 +153,7 @@ public static class NwcContainerReader
     {
         try
         {
-            var feed = new ExactLengthFeed(data, offset);
+            var feed = new BlockFeed(data, offset);
             using var zlib = new ZLibStream(feed, CompressionMode.Decompress);
             using var output = new MemoryStream();
             var buffer = new byte[64 * 1024];
@@ -146,19 +168,20 @@ public static class NwcContainerReader
                 output.Write(buffer, 0, n);
             }
 
-            var compressedLength = (int)feed.BytesServed;
             var payload = output.ToArray();
-            var a = 1u;
-            var b = 0u;
-            foreach (var value in payload)
+            uint adler = ComputeAdler32(payload);
+
+            // The feed may have read a block past the trailer into the next stream. The last served
+            // range still contains the big-endian Adler-32 of the payload; that occurrence marks the
+            // exact end of this zlib stream.
+            if (!feed.TryFindTrailer(adler, out long compressedLength))
             {
-                a = (a + value) % 65521;
-                b = (b + a) % 65521;
+                throw new InvalidDataException($"Invalid or truncated zlib stream at offset {offset}.");
             }
 
             // EOF can end inflation without ZLibStream validating a missing trailer.
             if (compressedLength <= 4 ||
-                BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(offset + compressedLength - 4, 4)) != ((b << 16) | a))
+                BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(offset + (int)compressedLength - 4, 4)) != adler)
             {
                 throw new InvalidDataException($"Invalid or truncated zlib stream at offset {offset}.");
             }
@@ -181,19 +204,45 @@ public static class NwcContainerReader
         }
     }
 
-    /// <summary>
-    /// Serves the underlying buffer one byte at a time so that <see cref="ZLibStream"/>
-    /// never reads past the end of the zlib stream; <see cref="BytesServed"/> then equals
-    /// the exact compressed length. (Byte-wise serving is fast enough for NWC-sized files;
-    /// TOC-driven exact sizes can replace this later.)
-    /// </summary>
-    private sealed class ExactLengthFeed : Stream
+    private static uint ComputeAdler32(ReadOnlySpan<byte> data)
     {
+        const uint Mod = 65521;
+        const int Block = 5552; // largest n with 255n(n+1)/2 + (n+1)(Mod-1) inside uint32
+        uint a = 1;
+        uint b = 0;
+        int i = 0;
+        while (i < data.Length)
+        {
+            int count = Math.Min(Block, data.Length - i);
+            for (int end = i + count; i < end; i++)
+            {
+                a += data[i];
+                b += a;
+            }
+
+            a %= Mod;
+            b %= Mod;
+        }
+
+        return (b << 16) | a;
+    }
+
+    /// <summary>
+    /// Serves the underlying buffer in blocks so the inflater runs at native speed, while recording the
+    /// last block it handed out. The exact compressed length is then found from the Adler-32 trailer inside
+    /// that block instead of limiting every read to one byte.
+    /// </summary>
+    private sealed class BlockFeed : Stream
+    {
+        private const int BlockSize = 64 * 1024;
+
         private readonly byte[] _data;
         private readonly int _start;
         private int _position;
+        private int _lastStart;
+        private int _lastLength;
 
-        public ExactLengthFeed(byte[] data, int start)
+        public BlockFeed(byte[] data, int start)
         {
             _data = data;
             _start = start;
@@ -202,15 +251,82 @@ public static class NwcContainerReader
 
         public long BytesServed => _position - _start;
 
+        /// <summary>
+        /// Finds the last (boundary-adjacent where possible) occurrence of the big-endian trailer in the
+        /// final served block and returns the compressed length that ends right after it.
+        /// </summary>
+        public bool TryFindTrailer(uint adler, out long compressedLength)
+        {
+            compressedLength = 0;
+            if (_lastLength < 4)
+            {
+                return false;
+            }
+
+            byte b0 = (byte)(adler >> 24);
+            byte b1 = (byte)(adler >> 16);
+            byte b2 = (byte)(adler >> 8);
+            byte b3 = (byte)adler;
+
+            int lastMatch = -1;
+            int boundaryMatch = -1;
+            for (int i = 0; i <= _lastLength - 4; i++)
+            {
+                int at = _lastStart + i;
+                if (_data[at] != b0 || _data[at + 1] != b1 || _data[at + 2] != b2 || _data[at + 3] != b3)
+                {
+                    continue;
+                }
+
+                lastMatch = i;
+                int end = at + 4;
+                if (end == _data.Length ||
+                    (end + 1 < _data.Length && IsZlibAt(end)) ||
+                    (end + SectionMarker.Length <= _data.Length && IsMarkerAt(end)))
+                {
+                    boundaryMatch = i;
+                }
+            }
+
+            int match = boundaryMatch >= 0 ? boundaryMatch : lastMatch;
+            if (match < 0)
+            {
+                return false;
+            }
+
+            compressedLength = _lastStart + match + 4L - _start;
+            return true;
+        }
+
+        private bool IsZlibAt(int at) =>
+            _data[at] == 0x78 && _data[at + 1] is 0x01 or 0x5E or 0x9C or 0xDA;
+
+        private bool IsMarkerAt(int at)
+        {
+            for (int i = 0; i < SectionMarker.Length; i++)
+            {
+                if (_data[at + i] != (byte)SectionMarker[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         public override int Read(byte[] buffer, int offset, int count)
         {
-            if (_position >= _data.Length)
+            if (_position >= _data.Length || count <= 0)
             {
                 return 0;
             }
 
-            buffer[offset] = _data[_position++];
-            return 1;
+            int n = Math.Min(Math.Min(count, BlockSize), _data.Length - _position);
+            Array.Copy(_data, _position, buffer, offset, n);
+            _lastStart = _position;
+            _lastLength = n;
+            _position += n;
+            return n;
         }
 
         public override bool CanRead => true;
