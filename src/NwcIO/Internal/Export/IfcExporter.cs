@@ -213,7 +213,7 @@ internal static class IfcExporter
             // Export properties if requested
             if (options.ExportProperties)
             {
-                WriteMeshProperties(w, elemId, owner, mesh, ownerHistoryId, vertices, scale, isIfc4);
+                WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
             }
         }
 
@@ -443,7 +443,7 @@ internal static class IfcExporter
 
                 if (options.ExportProperties)
                 {
-                    WriteMeshProperties(w, elemId, owner, mesh, ownerHistoryId, vertices, scale, isIfc4);
+                    WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
                 }
             }
 
@@ -597,7 +597,6 @@ internal static class IfcExporter
     private static void WriteMeshProperties(
         StepWriter w,
         int elementId,
-        NwcNode? owner,
         NwcMesh mesh,
         int ownerHistoryId,
         IReadOnlyList<Vector3d> vertices,
@@ -645,36 +644,15 @@ internal static class IfcExporter
             propIds.Add(pDimZ);
         }
 
-        // Element properties live on the owning element node; the leaf that holds the fragment may add its own.
-        var writtenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "SourceMeshId", "TriangleCount", "VertexCount", "Material", "Length_X", "Width_Y", "Height_Z",
-        };
-        foreach (var node in SourceNodes(owner, mesh.Node))
-        {
-            foreach (var record in node.Properties)
-            {
-                if (string.IsNullOrWhiteSpace(record.Name) ||
-                    string.IsNullOrWhiteSpace(record.Value) ||
-                    !writtenNames.Add(record.Name))
-                {
-                    continue;
-                }
-
-                propIds.Add(w.Add("IFCPROPERTYSINGLEVALUE",
-                    $"{StepWriter.Str(record.Name)},$,{PropertyNominalValue(record, scale)},$"));
-            }
-        }
-
         int psetId = w.Add("IFCPROPERTYSET",
             $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},'Pset_NwcElementProperties',$,{StepWriter.List(propIds.Select(StepWriter.Ref))}");
 
         w.Add("IFCRELDEFINESBYPROPERTIES",
             $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
 
-        foreach (var node in SourceNodes(owner, mesh.Node))
+        if (mesh.Node?.Hyperlinks is { Count: > 0 } hyperlinks)
         {
-            foreach (var link in node.Hyperlinks)
+            foreach (var link in hyperlinks)
             {
                 string docRefArgs = isIfc4
                     ? $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")},$,$"
@@ -814,45 +792,6 @@ internal static class IfcExporter
                 : w.Add("IFCDOORSTYLE", $"{StepWriter.Str(guid)},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(name)},$,$,$,$,$,.NOTDEFINED.,.NOTDEFINED.,.F.,.F."),
             _ => w.Add("IFCBUILDINGELEMENTPROXYTYPE", $"{prefix},.NOTDEFINED."),
         };
-    }
-
-    /// <summary>The owning element node first, then the leaf that holds the fragment when it is another node.</summary>
-    private static IEnumerable<NwcNode> SourceNodes(NwcNode? owner, NwcNode? leaf)
-    {
-        if (owner is not null)
-        {
-            yield return owner;
-        }
-
-        if (leaf is not null && !ReferenceEquals(leaf, owner))
-        {
-            yield return leaf;
-        }
-    }
-
-    /// <summary>Writes a scene-tree property as the nominal value of an <c>IfcPropertySingleValue</c>.</summary>
-    private static string PropertyNominalValue(NwcPropertyRecord record, double scale)
-    {
-        string value = record.Value!;
-        switch (record.ValueType)
-        {
-            case 2 when int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer):
-                return $"IFCINTEGER({integer.ToString(CultureInfo.InvariantCulture)})";
-            case 6 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var length):
-                return $"IFCLENGTHMEASURE({StepWriter.Real(length * scale)})";
-            case 7 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var angle):
-                return $"IFCPLANEANGLEMEASURE({StepWriter.Real(angle)})";
-            case 10 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var area):
-                return $"IFCAREAMEASURE({StepWriter.Real(area * scale * scale)})";
-            case 11 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var volume):
-                return $"IFCVOLUMEMEASURE({StepWriter.Real(volume * scale * scale * scale)})";
-            case 3:
-                return $"IFCBOOLEAN({(value == "0" ? ".F." : ".T.")})";
-            case 1 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var real):
-                return $"IFCREAL({StepWriter.Real(real)})";
-            default:
-                return $"IFCTEXT({StepWriter.Str(value)})";
-        }
     }
 
     /// <summary>
