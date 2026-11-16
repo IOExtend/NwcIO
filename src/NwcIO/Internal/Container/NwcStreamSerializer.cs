@@ -542,7 +542,7 @@ internal static class NwcStreamSerializer
 
             // Tag 517 record
             vpWriter.Write(517); // tag
-            vpWriter.Write(1);   // subtag
+            vpWriter.Write(cam.Projection == NwcCameraProjection.Orthographic ? 1 : 0); // projection
             vpWriter.Write(0);   // flags
             vpWriter.Write(cam.Position.X);
             vpWriter.Write(cam.Position.Y);

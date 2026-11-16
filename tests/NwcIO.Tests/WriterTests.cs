@@ -174,6 +174,28 @@ public class WriterTests
     }
 
     [Theory]
+    [InlineData(NwcCameraProjection.Perspective)]
+    [InlineData(NwcCameraProjection.Orthographic)]
+    public void Writer_SavedViewpointProjection_Roundtrips(NwcCameraProjection projection)
+    {
+        var viewpoint = new NwcSavedViewpoint
+        {
+            Name = "Projection View",
+            Camera = new NwcCamera
+            {
+                Position = new Vector3d(1, 2, 3),
+                Rotation = Quaterniond.Identity,
+                Projection = projection,
+            },
+        };
+
+        var reopened = NwcDocument.Open(new MemoryStream(
+            NwcDocument.Create(savedViewpoints: [viewpoint]).ToByteArray()));
+
+        Assert.Equal(projection, Assert.Single(reopened.SavedViewpoints).Camera!.Projection);
+    }
+
+    [Theory]
     [InlineData(-1.0)]
     [InlineData(100.0)]
     [InlineData(double.NaN)]
