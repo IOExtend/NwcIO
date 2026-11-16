@@ -567,4 +567,58 @@ public class IfcExportTests
         // The rejected assignment must not have changed the selected schema.
         Assert.Equal(NwcIfcSchemaVersion.Ifc2x3, options.SchemaVersion);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveIfc_LinkedNode_SuppliesElementNameGuidAndProperties(bool assembly)
+    {
+        var guid = Guid.Parse("00112233-4455-6677-8899-aabbccddeeff");
+        string globalId = NwcIO.Internal.Export.IfcGuid.ToIfcGuid(guid);
+        var node = new NwcNode
+        {
+            Id = 7,
+            Name = "Concrete Wall 200",
+            Class = "LcRevitData_Element",
+            ElementGuid = guid,
+            IfcGlobalId = globalId,
+        };
+        node.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 1,
+            Tag = 52,
+            Name = "Fire Rating",
+            Class = "LcRevitPropertyString",
+            ValueType = 4,
+            Value = "2 h",
+        });
+
+        var mesh = new NwcMesh
+        {
+            Id = 42,
+            Name = "Mesh_42",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = node,
+        };
+        node.Meshes.Add(mesh);
+        node.Mesh = mesh;
+
+        var doc = NwcDocument.Create(meshes: [mesh]);
+        using var sw = new StringWriter();
+        if (assembly)
+        {
+            NwcAssembly.Create("Linked node", doc).SaveIfc(sw);
+        }
+        else
+        {
+            doc.SaveIfc(sw);
+        }
+
+        string ifc = sw.ToString();
+        Assert.Contains($"IFCWALL('{globalId}',", ifc);
+        Assert.Contains("'Concrete Wall 200'", ifc);
+        Assert.Contains("IFCPROPERTYSINGLEVALUE('Fire Rating',$,IFCTEXT('2 h'),$)", ifc);
+        Assert.DoesNotContain("Mesh_42", ifc);
+    }
 }

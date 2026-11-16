@@ -185,8 +185,10 @@ internal static class IfcExporter
             int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                 $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-            string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-            string elemGuid = IfcGuid.FromElementId(mesh.Id, "NwcMesh");
+            string elemName = !string.IsNullOrEmpty(mesh.Node?.Name)
+                ? mesh.Node.Name
+                : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+            string elemGuid = mesh.Node?.IfcGlobalId ?? IfcGuid.FromElementId(mesh.Id, "NwcMesh");
             string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
             int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -413,8 +415,11 @@ internal static class IfcExporter
                 int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-                string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-                string elemGuid = IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
+                string elemName = !string.IsNullOrEmpty(mesh.Node?.Name)
+                    ? mesh.Node.Name
+                    : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+                // A federated model's own GlobalId is stable, but a repeated Revit element across models keeps the per-model fallback.
+                string elemGuid = mesh.Node?.IfcGlobalId ?? IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
                 string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -638,6 +643,27 @@ internal static class IfcExporter
             propIds.Add(pDimZ);
         }
 
+        if (mesh.Node is not null)
+        {
+            // Element properties travel with the scene-tree node; the mesh alone carries statistics only.
+            var writtenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "SourceMeshId", "TriangleCount", "VertexCount", "Material", "Length_X", "Width_Y", "Height_Z",
+            };
+            foreach (var record in mesh.Node.Properties)
+            {
+                if (string.IsNullOrWhiteSpace(record.Name) ||
+                    string.IsNullOrWhiteSpace(record.Value) ||
+                    !writtenNames.Add(record.Name))
+                {
+                    continue;
+                }
+
+                propIds.Add(w.Add("IFCPROPERTYSINGLEVALUE",
+                    $"{StepWriter.Str(record.Name)},$,{PropertyNominalValue(record)},$"));
+            }
+        }
+
         int psetId = w.Add("IFCPROPERTYSET",
             $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},'Pset_NwcElementProperties',$,{StepWriter.List(propIds.Select(StepWriter.Ref))}");
 
@@ -786,6 +812,23 @@ internal static class IfcExporter
                 : w.Add("IFCDOORSTYLE", $"{StepWriter.Str(guid)},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(name)},$,$,$,$,$,.NOTDEFINED.,.NOTDEFINED.,.F.,.F."),
             _ => w.Add("IFCBUILDINGELEMENTPROXYTYPE", $"{prefix},.NOTDEFINED."),
         };
+    }
+
+    /// <summary>Writes a scene-tree property as the nominal value of an <c>IfcPropertySingleValue</c>.</summary>
+    private static string PropertyNominalValue(NwcPropertyRecord record)
+    {
+        string value = record.Value!;
+        switch (record.ValueType)
+        {
+            case 2 or 3 when int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer):
+                return $"IFCINTEGER({integer.ToString(CultureInfo.InvariantCulture)})";
+            case 6 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var length):
+                return $"IFCLENGTHMEASURE({StepWriter.Real(length)})";
+            case 1 or 7 or 10 or 11 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var real):
+                return $"IFCREAL({StepWriter.Real(real)})";
+            default:
+                return $"IFCTEXT({StepWriter.Str(value)})";
+        }
     }
 
     private static string CleanTypeName(string elemName, string? matName, string ifcType)

@@ -19,6 +19,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization 
 - Reads scene hierarchy, geometry meshes, transforms, GUID tables, and property categories. Materials are decoded from the file on the strict path (name, colour, alpha) and assigned by heuristics only for files not read through their DbCache directory. Element nodes of model files carry the element's export GUID and IFC GlobalId.
 - Writes native `.nwc` files from code (`NwcWriter`, `NwcDocumentBuilder`).
 - Exports structured JSON (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`) with the file information, property records, GUIDs, transforms, scene tree (each node with its id, name, class, value, element GUID, transform, properties, and hyperlinks), materials, XRefs, DbCache entries, and saved viewpoints, plus optional mesh summaries (id, name, vertex and triangle counts, material, bounding box) and a catalog of the container's sections and streams. The JSON export is core: it grows with the reader.
+- Links geometry to the scene tree when the file is read through its DbCache directory: every mesh points at its element node (`NwcMesh.Node`), the node lists its meshes, and IFC export uses the node's name, IFC GlobalId and properties when present.
 - Converts Navisworks models into `IOScene` scene documents for IOViewer and other consumers through the `NwcIO.Scene` adapter, a separate package.
 
 Frozen extras (bug fixes only, see [Scope and frozen features](https://github.com/IOExtend/NwcIO#scope-and-frozen-features)):
