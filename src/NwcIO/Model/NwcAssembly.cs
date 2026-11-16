@@ -50,6 +50,9 @@ public sealed class NwcAssembly
     /// <summary>Multi-discipline clash coordination matrix associated with the assembly.</summary>
     public Clash.NwcClashMatrix? ClashMatrix { get; set; }
 
+    /// <summary>Diagnostics from contributing models plus assembly-level issues such as unresolved references.</summary>
+    public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
+
     /// <summary>
     /// XRef entries of the opened federation that could not be resolved to an existing file,
     /// so the corresponding component model is missing from <see cref="Models"/>.
@@ -191,7 +194,9 @@ public sealed class NwcAssembly
         };
         rootNode.Children.AddRange(rootChildren);
 
-        return new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints, meshModelIndexes);
+        var assembly = new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints, meshModelIndexes);
+        assembly.Diagnostics = modelList.SelectMany(m => m.Diagnostics).ToList();
+        return assembly;
     }
 
     /// <summary>
@@ -367,6 +372,19 @@ public sealed class NwcAssembly
         var assembly = Create(assemblyName, loadedDocs);
         assembly.UnresolvedXRefs = unresolved;
         assembly.SkippedXRefs = skipped;
+        if (unresolved.Count > 0 || skipped.Count > 0)
+        {
+            var diagnostics = assembly.Diagnostics.ToList();
+            diagnostics.AddRange(unresolved.Select(x => new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "NwfUnresolvedXref",
+                $"Unresolved NWF reference: '{x.EffectivePath}'.")));
+            diagnostics.AddRange(skipped.Select(x => new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "NwfSkippedXref",
+                $"Skipped unsupported NWF reference: '{x.EffectivePath}'.")));
+            assembly.Diagnostics = diagnostics;
+        }
         return assembly;
     }
 

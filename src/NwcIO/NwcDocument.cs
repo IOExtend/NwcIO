@@ -92,6 +92,9 @@ public sealed class NwcDocument
     /// <summary>Configured Clash Detective tests and results for this document.</summary>
     public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
 
+    /// <summary>Reader diagnostics for data that was skipped or substituted.</summary>
+    public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
+
     /// <summary>Spatial grid system (axes and levels) associated with the document.</summary>
     public Model.Grids.NwcGridSystem? GridSystem { get; set; }
 
@@ -275,7 +278,20 @@ public sealed class NwcDocument
             container = container with { Streams = [] };
         }
 
-        return new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        var document = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        if (container.TrailingGap > 0)
+        {
+            document.Diagnostics =
+            [
+                new NwcDiagnostic(
+                    NwcDiagnosticSeverity.Warning,
+                    "ContainerTrailingGap",
+                    $"Unrecognized {container.TrailingGap} byte tail after the last stream.",
+                    ByteOffset: container.FileLength - container.TrailingGap),
+            ];
+        }
+
+        return document;
     }
 
     /// <summary>

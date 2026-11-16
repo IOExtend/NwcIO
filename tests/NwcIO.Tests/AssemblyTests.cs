@@ -366,6 +366,28 @@ public class AssemblyTests
             .Build();
     }
 
+    [Fact]
+    public void OpenNwf_MissingXref_AddsDiagnostic()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nwcio-diag-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string nwf = Path.Combine(dir, "fed.nwf");
+            WriteNwfWithXRefs(nwf, Path.Combine(dir, "missing.nwc"));
+
+            var assembly = NwcAssembly.OpenNwf(nwf);
+
+            var diagnostic = Assert.Single(assembly.Diagnostics, d => d.Code == "NwfUnresolvedXref");
+            Assert.Equal(NwcDiagnosticSeverity.Warning, diagnostic.Severity);
+            Assert.Contains("missing.nwc", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static void WriteNwfWithXRefs(string nwfPath, params string[] effectivePaths)
     {
         string table = string.Join(",", effectivePaths.Select(p =>
@@ -414,6 +436,11 @@ public class AssemblyTests
             Assert.EndsWith("Mech/D.nwc", unresolved.EffectivePath);
             var skipped = Assert.Single(assembly.SkippedXRefs);
             Assert.EndsWith("tex.png", skipped.EffectivePath);
+
+            var skippedDiagnostic = Assert.Single(assembly.Diagnostics, d => d.Code == "NwfSkippedXref");
+            Assert.Equal(NwcDiagnosticSeverity.Warning, skippedDiagnostic.Severity);
+            Assert.Contains("tex.png", skippedDiagnostic.Message, StringComparison.Ordinal);
+            Assert.Single(assembly.Diagnostics, d => d.Code == "NwfUnresolvedXref");
         }
         finally
         {
