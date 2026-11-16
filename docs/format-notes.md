@@ -203,7 +203,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - `Table`: array of external file references (textures, linked `.nwc`/`.nwd` files) with `OriginalPath` and `RemappedPath`.
 
 ### 2.9 Materials, RGBA Colors & glTF 2.0 (GLB)
-- **Strict path**: one material per distinct (class-31 name, diffuse and alpha bytes); shininess is not mapped; see `NwcMesh.Material`. The heuristics below apply only to files read without the DbCache directory.
+- **Strict path**: one material per distinct (class-31 name, diffuse and alpha bytes); shininess is not mapped; see `NwcMesh.Material`. Files read without the DbCache directory take material names and `revit_Color` colours from property records only; materials and meshes without data get a neutral colour marked `NwcMaterial.IsInferred`.
 - **Material Records**:
   - `LcRevitElement` with prefix `Material "Name", #ElementId`: defines material instances.
   - `revit_Color` with property `Color`: stores comma-separated `"R, G, B"` integer triples in $0..255$ range (e.g. `"255, 128, 0"`, `"0, 255, 255"`).

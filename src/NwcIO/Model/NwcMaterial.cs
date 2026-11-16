@@ -24,8 +24,8 @@ public sealed class NwcMaterial
     /// <summary>Optional category or classification name.</summary>
     public string? Category { get; set; }
 
-    /// <summary>True when this is a neutral fallback, not read from the file.</summary>
-    public bool IsInferred { get; init; }
+    /// <summary>True when the colour is a neutral fallback, not read from the file (a material named in the properties without a colour record, or the fallback given to meshes without one).</summary>
+    public bool IsInferred { get; set; }
 
     public override string ToString() => $"{Name} ({Color.ToHex()})";
 }

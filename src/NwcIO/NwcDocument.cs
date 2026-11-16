@@ -65,7 +65,7 @@ public sealed class NwcDocument
     /// <summary>3D polygon meshes extracted from geometry streams and TOC tables.</summary>
     public IReadOnlyList<NwcMesh> Meshes { get; }
 
-    /// <summary>Surface materials, RGBA colors and PBR properties: for model files read through their DbCache directory, the materials decoded from the fragments' appearances (none without the scene tree); for other files, materials assigned by heuristics from properties and categories.</summary>
+    /// <summary>Surface materials, RGBA colors and PBR properties: for model files read through their DbCache directory, the materials decoded from the fragments' appearances (none without the scene tree); for other files, the materials named in property records with their `revit_Color` colours (neutral and `IsInferred` when none) plus one inferred default for meshes without a material.</summary>
     public IReadOnlyList<NwcMaterial> Materials { get; }
 
     /// <summary>Root of the hierarchical scene graph tree (matching Navisworks selection tree).</summary>
