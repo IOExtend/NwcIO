@@ -368,7 +368,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - **Programmatic NWC Generation & Serializer (`NwcWriter`)**:
   - Full reverse-engineered serialization of Autodesk Navisworks `#LcUStream` containers and stream partitions from pure managed C#.
   - Binary partition serialization: `PartitionHeader` (source metadata, loader plugin, timestamp, options), `SceneTree` (hierarchy nodes, tags 52/53, property types), `Transforms` (poses, quaternion rotations, bounding boxes), `Guids` (16-byte raw identifier tables), `Geometry` chunk records (IEEE 754 float vertices, record tags), and `Toc` (Table of Contents record lengths and chunk sizes).
-  - Built-in compression using managed `ZLibStream` producing valid, specification-compliant back-to-back zlib stream containers.
+  - Built-in compression using managed `ZLibStream` producing an `#LcUStream` container with back-to-back zlib streams that NwcIO can read back. Compatibility with Autodesk Navisworks has not been verified.
   - Saved viewpoint and 3D camera serialization (tag 517).
 - **Document Save & Fluent Builder API**:
   - `NwcDocument.Save(string path)` and `NwcDocument.Save(Stream stream)` methods for direct file output.
@@ -378,7 +378,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - **CLI Enhancement (`nwcio`)**:
   - Added `--nwc <output.nwc>` option and automatic `.nwc` extension routing for converting, saving, and merging models and assemblies into `.nwc` files.
 - **Full Verification**:
-  - Comprehensive unit and integration test coverage verifying bit-level roundtripping (`Create -> Save -> Open -> Verify`) across synthetic models and real-world multi-discipline fixtures.
+  - Unit and integration tests verify that NwcIO reopens what it writes (`Create -> Save -> Open -> Verify`) across synthetic models and, for counts and source metadata, real-world multi-discipline fixtures. The output is not opened or validated in Autodesk Navisworks, and the round trip is not byte-exact at the document level.
 
 ## [0.1.1] - 2026-11-10
 

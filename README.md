@@ -165,6 +165,16 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 - The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property and property-tab references (properties from `LcOaPartitionProps` count toward the property cap), and at most one render vertex or corner per geometry-record byte. Files beyond these limits fail with `InvalidDataException`.
 - Writing native `.nwd` files is not supported (export targets native `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
 
+### Writer limitations
+
+`NwcWriter` / `NwcDocument.Save` produce an `#LcUStream` container that NwcIO reads back. The output uses NwcIO's own layout and has not been verified to open in Autodesk Navisworks.
+
+- Geometry is written as one float32 vertex buffer per mesh (no index buffer) in a single TOC chunk; normals and UVs are not stored.
+- `Materials`, `XRefs`, `DbCache`, `AppearanceProfiler`, `ClashTests`, `GridSystem`, and node-level GUID/transform/material/mesh links are not saved; they are silently absent after reopening.
+- The partition header stores a source file size of `0`; a missing source path becomes `Model.rvt`, a missing loader plugin becomes `LcOpRevitExport`, and the container header is fixed to `navisworks:448 lizlib`.
+- Selection sets and TimeLiner schedules are written in NwcIO's own XML/CSV exchange layouts.
+- Only NwcIO reopening the file is tested; no test opens the output in Navisworks.
+
 ## Scope and frozen features
 
 NwcIO reads and writes its own format. These extras are frozen: they receive bug fixes only, with no new features or options.
