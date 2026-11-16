@@ -156,9 +156,13 @@ public static class NwcClashDetector
 
                     var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
-                        Description = test.TestType == NwcClashTestType.Clearance
-                            ? $"Clearance between {item1Name} and {item2Name}"
-                            : $"Hard clash between {item1Name} and {item2Name}",
+                        Description = test.TestType switch
+                        {
+                            NwcClashTestType.Clearance => $"Clearance between {item1Name} and {item2Name}",
+                            NwcClashTestType.Duplicates => $"Duplicate geometry: {item1Name} and {item2Name}",
+                            NwcClashTestType.Conservative => $"Conservative overlap between {item1Name} and {item2Name}",
+                            _ => $"Hard clash between {item1Name} and {item2Name}",
+                        },
                         Viewpoint = vp,
                     };
 
@@ -257,9 +261,13 @@ public static class NwcClashDetector
 
                     var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
-                        Description = test.TestType == NwcClashTestType.Clearance
-                            ? $"Clearance between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})"
-                            : $"Clash between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
+                        Description = test.TestType switch
+                        {
+                            NwcClashTestType.Clearance => $"Clearance between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
+                            NwcClashTestType.Duplicates => $"Duplicate geometry: {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
+                            NwcClashTestType.Conservative => $"Conservative overlap between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
+                            _ => $"Clash between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
+                        },
                         Viewpoint = vp,
                     };
 
@@ -281,38 +289,122 @@ public static class NwcClashDetector
         out Vector3d clashPoint,
         out double distance)
     {
-        if (test.TestType == NwcClashTestType.Clearance)
+        double tolerance = Math.Max(0.0, test.Tolerance);
+        clashPoint = Vector3d.Zero;
+        distance = 0;
+        switch (test.TestType)
         {
-            // MeasureMeshToMesh reports zero distance at the origin for meshes without triangles.
-            if (meshA.Indices.Count < 3 || meshB.Indices.Count < 3)
+            case NwcClashTestType.Clearance:
             {
-                clashPoint = default;
-                distance = 0;
-                return false;
+                // MeasureMeshToMesh reports zero distance at the origin for meshes without triangles.
+                if (meshA.Indices.Count < 3 || meshB.Indices.Count < 3)
+                {
+                    return false;
+                }
+
+                var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
+                clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
+                distance = measurement.Distance;
+                return measurement.Distance <= tolerance;
             }
 
-            var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
-            clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
-            distance = measurement.Distance; // positive for clearance, per NwcClashResult.Distance
-            return measurement.Distance <= Math.Max(0.0, test.Tolerance);
+            case NwcClashTestType.Duplicates:
+                if (!IsDuplicate(meshA, meshB, tolerance))
+                {
+                    distance = 0;
+                    return false;
+                }
+
+                clashPoint = (meshA.GetWorldBoundingBox().Center + meshB.GetWorldBoundingBox().Center) * 0.5;
+                distance = 0;
+                return true;
+
+            case NwcClashTestType.Conservative:
+            {
+                var overlap = meshA.GetWorldBoundingBox().Intersect(meshB.GetWorldBoundingBox());
+                if (overlap.IsEmpty)
+                {
+                    distance = 0;
+                    return false;
+                }
+
+                clashPoint = overlap.Center;
+                distance = -Math.Min(overlap.Size.X, Math.Min(overlap.Size.Y, overlap.Size.Z));
+                return true;
+            }
+
+            default:
+                if (CheckMeshIntersection(meshA, meshB, out clashPoint, out double penetration))
+                {
+                    // A zero-depth AABB overlap is a coplanar or touching surface; it is kept rather than
+                    // classified as a below-tolerance penetration.
+                    if (penetration > 0 && penetration < tolerance)
+                    {
+                        distance = 0;
+                        return false;
+                    }
+
+                    distance = -penetration;
+                    return true;
+                }
+
+                distance = 0;
+                return false;
         }
+    }
 
-        if (CheckMeshIntersection(meshA, meshB, out clashPoint, out double penetration))
+    /// <summary>
+    /// Duplicate geometry: same world vertices within the tolerance and the same triangle/line topology.
+    /// Transform, name, id and material are ignored.
+    /// </summary>
+    internal static bool IsDuplicate(NwcMesh meshA, NwcMesh meshB, double tolerance)
+    {
+        if (ReferenceEquals(meshA, meshB))
         {
-            // A zero-depth AABB overlap is a coplanar or touching surface; it is kept rather than
-            // classified as a below-tolerance penetration.
-            if (penetration > 0 && penetration < Math.Max(0.0, test.Tolerance))
-            {
-                distance = 0;
-                return false;
-            }
-
-            distance = -penetration;
             return true;
         }
 
-        distance = 0;
-        return false;
+        if (meshA.Indices.Count != meshB.Indices.Count ||
+            meshA.LineIndices.Count != meshB.LineIndices.Count)
+        {
+            return false;
+        }
+
+        var verticesA = meshA.GetWorldVertices();
+        var verticesB = meshB.GetWorldVertices();
+        if (verticesA.Count != verticesB.Count)
+        {
+            return false;
+        }
+
+        double toleranceSquared = tolerance * tolerance;
+        for (int i = 0; i < verticesA.Count; i++)
+        {
+            Vector3d delta = verticesA[i] - verticesB[i];
+            // Negated form so a NaN tolerance fails closed.
+            if (!(Vector3d.Dot(delta, delta) <= toleranceSquared))
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < meshA.Indices.Count; i++)
+        {
+            if (meshA.Indices[i] != meshB.Indices[i])
+            {
+                return false;
+            }
+        }
+
+        for (int i = 0; i < meshA.LineIndices.Count; i++)
+        {
+            if (meshA.LineIndices[i] != meshB.LineIndices[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool CheckMeshIntersection(

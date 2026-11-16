@@ -224,6 +224,34 @@ public sealed class NwcClashMatrix
                         penetration = -gap;
                         clashPoint = interBox.IsEmpty ? (boxA.Center + boxB.Center) * 0.5 : interBox.Center;
                     }
+                    else if (cell.TestType == NwcClashTestType.Duplicates)
+                    {
+                        // Same broad phase as NwcClashDetector: empty meshes are never duplicates.
+                        if (boxA.IsEmpty || boxB.IsEmpty)
+                        {
+                            continue;
+                        }
+
+                        double dupTol = Math.Max(0.0, cell.Tolerance);
+                        var expandedA = new BoundingBox3d(boxA.Min - new Vector3d(dupTol, dupTol, dupTol), boxA.Max + new Vector3d(dupTol, dupTol, dupTol));
+                        if (!expandedA.Intersects(boxB) || !NwcClashDetector.IsDuplicate(mA, mB, dupTol))
+                        {
+                            continue;
+                        }
+
+                        penetration = 0;
+                        clashPoint = (boxA.Center + boxB.Center) * 0.5;
+                    }
+                    else if (cell.TestType == NwcClashTestType.Conservative)
+                    {
+                        if (interBox.IsEmpty)
+                        {
+                            continue;
+                        }
+
+                        penetration = Math.Min(interBox.Size.X, Math.Min(interBox.Size.Y, interBox.Size.Z));
+                        clashPoint = interBox.Center;
+                    }
                     else
                     {
                         if (interBox.IsEmpty)
