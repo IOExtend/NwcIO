@@ -36,8 +36,9 @@ public class IfcExportTests
         else
         {
             Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
-            Assert.Contains(",$,.F.,", ifc);
+            Assert.Contains(",$,$,", ifc);
             Assert.DoesNotContain(",$,.T.,", ifc);
+            Assert.DoesNotContain(",$,.F.,", ifc);
         }
     }
 

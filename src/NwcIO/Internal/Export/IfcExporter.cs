@@ -758,7 +758,9 @@ internal static class IfcExporter
         }
         sbIndices.Append(')');
 
-        return w.Add("IFCTRIANGULATEDFACESET", $"{StepWriter.Ref(pointListId)},$,{(closed ? ".T." : ".F.")},{sbIndices},$");
+        // Closed is optional in IFC4: true only when watertightness was proven, otherwise leave it unknown
+        // rather than asserting that a mesh we could not prove closed is definitely open.
+        return w.Add("IFCTRIANGULATEDFACESET", $"{StepWriter.Ref(pointListId)},$,{(closed ? ".T." : "$")},{sbIndices},$");
     }
 
     private static bool HasValidTriangle(IReadOnlyList<int> indices, int vertexCount)
