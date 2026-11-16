@@ -151,6 +151,66 @@ public class ContainerReaderTests
         Assert.Equal(0, container.TrailingGap);
     }
 
+    [Theory]
+    [InlineData(8_182)]
+    [InlineData(8_183)]
+    [InlineData(8_184)]
+    public void Read_TrailerAcrossInflateBlockBoundary_KeepsBothStreams(int payloadLength)
+    {
+        var payload = new byte[payloadLength];
+        new Random(payloadLength).NextBytes(payload);
+        var compressed = CompressZlib(payload);
+        var nextPayload = System.Text.Encoding.UTF8.GetBytes("after boundary");
+        var nextCompressed = CompressZlib(nextPayload);
+
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        ms.Write(compressed);
+        ms.Write(nextCompressed);
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        Assert.Equal(2, container.Streams.Count);
+        Assert.Equal(payload, container.Streams[0].Data);
+        Assert.Equal(compressed.Length, container.Streams[0].CompressedLength);
+        Assert.Equal(nextPayload, container.Streams[1].Data);
+    }
+
+    [Fact]
+    public void Read_ThreeIdenticalStreams_KeepsEachCompressedLength()
+    {
+        var payload = System.Text.Encoding.UTF8.GetBytes("same payload");
+        var compressed = CompressZlib(payload);
+
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.ASCII.GetBytes("#LcUStream-V1.1 binary double release C lizlib\n"));
+        for (int i = 0; i < 3; i++)
+        {
+            ms.Write(compressed);
+        }
+
+        var container = NwcContainerReader.Read(ms.ToArray());
+
+        Assert.Equal(3, container.Streams.Count);
+        Assert.All(container.Streams, s =>
+        {
+            Assert.Equal(compressed.Length, s.CompressedLength);
+            Assert.Equal(payload, s.Data);
+        });
+        Assert.Equal(0, container.TrailingGap);
+    }
+
+    [Fact]
+    public void Read_MemoryStreamAtEnd_DoesNotReadFromTheStart()
+    {
+        var compressed = CompressZlib(System.Text.Encoding.UTF8.GetBytes("payload"));
+        var file = FileBytes(compressed);
+        using var stream = new MemoryStream(file);
+        stream.Position = stream.Length;
+
+        Assert.Throws<InvalidDataException>(() => NwcContainerReader.Read(stream));
+    }
+
     [Fact]
     public void Read_SeekableStreamWithSpareCapacity_ReadsOnlyItsContent()
     {

@@ -99,8 +99,9 @@ public static class NwcContainerReader
 
     public static NwcContainer Read(Stream input)
     {
-        // Avoid copying a caller's own array-backed MemoryStream.
+        // Avoid copying a caller's own array-backed MemoryStream, but only from its current Position.
         if (input is MemoryStream memory &&
+            memory.Position == 0 &&
             memory.TryGetBuffer(out ArraySegment<byte> segment) &&
             segment.Offset == 0 &&
             segment.Count == segment.Array!.Length)
@@ -171,20 +172,29 @@ public static class NwcContainerReader
             var payload = output.ToArray();
             uint adler = ComputeAdler32(payload);
 
-            // The feed may have read a block past the trailer into the next stream. The last served
-            // range still contains the big-endian Adler-32 of the payload; that occurrence marks the
-            // exact end of this zlib stream.
-            if (!feed.TryFindTrailer(adler, out long compressedLength))
+            // The block feed may have read past the trailer. Re-inflate once more, serving blocks up to
+            // the start of the final block and single bytes from there, so BytesServed is the exact
+            // compressed length. This is deterministic and does not rely on finding Adler-32 in data.
+            var exactFeed = new ExactTailFeed(data, offset, feed.LastStart);
+            long exactLength = 0;
+            using (var exact = new ZLibStream(exactFeed, CompressionMode.Decompress))
+            {
+                var sink = new byte[64 * 1024];
+                while (exact.Read(sink, 0, sink.Length) > 0)
+                {
+                }
+
+                exactLength = exactFeed.BytesServed;
+            }
+
+            // EOF can end inflation without ZLibStream validating a missing trailer.
+            if (exactLength <= 4 ||
+                BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(offset + (int)exactLength - 4, 4)) != adler)
             {
                 throw new InvalidDataException($"Invalid or truncated zlib stream at offset {offset}.");
             }
 
-            // EOF can end inflation without ZLibStream validating a missing trailer.
-            if (compressedLength <= 4 ||
-                BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(offset + (int)compressedLength - 4, 4)) != adler)
-            {
-                throw new InvalidDataException($"Invalid or truncated zlib stream at offset {offset}.");
-            }
+            long compressedLength = exactLength;
 
             stream = new LcRawStream
             {
@@ -234,13 +244,11 @@ public static class NwcContainerReader
     /// </summary>
     private sealed class BlockFeed : Stream
     {
-        private const int BlockSize = 64 * 1024;
+        private const int BlockSize = 1024;
 
         private readonly byte[] _data;
         private readonly int _start;
         private int _position;
-        private int _lastStart;
-        private int _lastLength;
 
         public BlockFeed(byte[] data, int start)
         {
@@ -251,68 +259,8 @@ public static class NwcContainerReader
 
         public long BytesServed => _position - _start;
 
-        /// <summary>
-        /// Finds the last (boundary-adjacent where possible) occurrence of the big-endian trailer in the
-        /// final served block and returns the compressed length that ends right after it.
-        /// </summary>
-        public bool TryFindTrailer(uint adler, out long compressedLength)
-        {
-            compressedLength = 0;
-            if (_lastLength < 4)
-            {
-                return false;
-            }
-
-            byte b0 = (byte)(adler >> 24);
-            byte b1 = (byte)(adler >> 16);
-            byte b2 = (byte)(adler >> 8);
-            byte b3 = (byte)adler;
-
-            int lastMatch = -1;
-            int boundaryMatch = -1;
-            for (int i = 0; i <= _lastLength - 4; i++)
-            {
-                int at = _lastStart + i;
-                if (_data[at] != b0 || _data[at + 1] != b1 || _data[at + 2] != b2 || _data[at + 3] != b3)
-                {
-                    continue;
-                }
-
-                lastMatch = i;
-                int end = at + 4;
-                if (end == _data.Length ||
-                    (end + 1 < _data.Length && IsZlibAt(end)) ||
-                    (end + SectionMarker.Length <= _data.Length && IsMarkerAt(end)))
-                {
-                    boundaryMatch = i;
-                }
-            }
-
-            int match = boundaryMatch >= 0 ? boundaryMatch : lastMatch;
-            if (match < 0)
-            {
-                return false;
-            }
-
-            compressedLength = _lastStart + match + 4L - _start;
-            return true;
-        }
-
-        private bool IsZlibAt(int at) =>
-            _data[at] == 0x78 && _data[at + 1] is 0x01 or 0x5E or 0x9C or 0xDA;
-
-        private bool IsMarkerAt(int at)
-        {
-            for (int i = 0; i < SectionMarker.Length; i++)
-            {
-                if (_data[at + i] != (byte)SectionMarker[i])
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
+        /// <summary>Absolute index of the first byte of the last block served.</summary>
+        public int LastStart { get; private set; }
 
         public override int Read(byte[] buffer, int offset, int count)
         {
@@ -323,8 +271,57 @@ public static class NwcContainerReader
 
             int n = Math.Min(Math.Min(count, BlockSize), _data.Length - _position);
             Array.Copy(_data, _position, buffer, offset, n);
-            _lastStart = _position;
-            _lastLength = n;
+            LastStart = _position;
+            _position += n;
+            return n;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _data.Length - _start;
+        public override long Position { get => BytesServed; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// Serves the stream in blocks up to <c>switchAt</c> and one byte at a time from there, so that the
+    /// inflater cannot read past the exact end of the zlib stream and <see cref="BytesServed"/> is precise.
+    /// </summary>
+    private sealed class ExactTailFeed : Stream
+    {
+        private const int BlockSize = 1024;
+
+        private readonly byte[] _data;
+        private readonly int _start;
+        private readonly int _switchAt;
+        private int _position;
+
+        public ExactTailFeed(byte[] data, int start, int switchAt)
+        {
+            _data = data;
+            _start = start;
+            _position = start;
+            _switchAt = Math.Clamp(switchAt, start, data.Length);
+        }
+
+        public long BytesServed => _position - _start;
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_position >= _data.Length || count <= 0)
+            {
+                return 0;
+            }
+
+            int n = _position < _switchAt
+                ? Math.Min(Math.Min(count, BlockSize), _switchAt - _position)
+                : 1;
+            n = Math.Min(n, _data.Length - _position);
+            Array.Copy(_data, _position, buffer, offset, n);
             _position += n;
             return n;
         }
