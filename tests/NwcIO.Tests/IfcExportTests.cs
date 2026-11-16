@@ -599,7 +599,9 @@ public class IfcExportTests
 
         var expected = schema == NwcIfcSchemaVersion.Ifc2x3 ? Ifc2x3AttributeCounts : Ifc4AttributeCounts;
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (entity, args) in ParseStepInstances(sw.ToString()))
+        var instances = ParseStepInstances(sw.ToString()).ToList();
+        var entityById = instances.ToDictionary(i => i.Id, i => i.Entity);
+        foreach (var (_, entity, args) in instances)
         {
             seen.Add(entity);
             Assert.True(expected.TryGetValue(entity, out int count),
@@ -608,7 +610,39 @@ public class IfcExportTests
                 $"{entity} has {CountStepArguments(args)} arguments, expected {count} in {schema}");
         }
 
+        // IfcStyledItem.Styles: IFC2x3 only accepts IfcPresentationStyleAssignment, IFC4 takes the IfcSurfaceStyle directly.
+        string expectedStyleTarget = schema == NwcIfcSchemaVersion.Ifc2x3 ? "IFCPRESENTATIONSTYLEASSIGNMENT" : "IFCSURFACESTYLE";
+        var styledItems = instances.Where(i => i.Entity == "IFCSTYLEDITEM").ToList();
+        Assert.NotEmpty(styledItems);
+        foreach (var item in styledItems)
+        {
+            var styleRef = System.Text.RegularExpressions.Regex.Match(item.Args, @"^#\d+,\(#(\d+)\),");
+            Assert.True(styleRef.Success, $"Unexpected IFCSTYLEDITEM arguments: {item.Args}");
+            Assert.Equal(expectedStyleTarget, entityById[int.Parse(styleRef.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)]);
+        }
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            // NominalDiameter and CrossSectionArea are mandatory in IFC2x3, so a rebar must never carry '$' there.
+            var rebars = instances.Where(i => i.Entity == "IFCREINFORCINGBAR").ToList();
+            Assert.NotEmpty(rebars);
+            Assert.All(rebars, r => Assert.EndsWith(",$,1.,0.,$,.NOTDEFINED.,$", r.Args));
+        }
+        else
+        {
+            Assert.DoesNotContain("IFCPRESENTATIONSTYLEASSIGNMENT", seen);
+        }
+
         // The document exercises every entity family the exporter writes for classified products.
+        string[] typeEntities = schema == NwcIfcSchemaVersion.Ifc2x3
+            ? ["IFCDOORSTYLE", "IFCWINDOWSTYLE"]
+            : ["IFCDOORTYPE", "IFCWINDOWTYPE", "IFCREINFORCINGBARTYPE"];
+        foreach (string typeEntity in typeEntities)
+        {
+            Assert.Contains(typeEntity, seen);
+        }
+
+        Assert.Contains("IFCSURFACESTYLESHADING", seen);
         Assert.Contains(schema == NwcIfcSchemaVersion.Ifc2x3 ? "IFCFLOWSEGMENT" : "IFCPIPESEGMENT", seen);
         Assert.Contains("IFCBUILDING", seen);
         Assert.Contains("IFCBUILDINGSTOREY", seen);
@@ -672,12 +706,13 @@ public class IfcExportTests
         ["IFCBUILDINGELEMENTPROXYTYPE"] = 10, ["IFCDOORTYPE"] = 13, ["IFCWINDOWTYPE"] = 13,
     };
 
-    private static IEnumerable<(string Entity, string Args)> ParseStepInstances(string ifc)
+    private static IEnumerable<(int Id, string Entity, string Args)> ParseStepInstances(string ifc)
     {
         foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
-            ifc, @"^#\d+=([A-Z0-9]+)\((.*)\);\r?$", System.Text.RegularExpressions.RegexOptions.Multiline))
+            ifc, @"^#(\d+)=([A-Z0-9]+)\((.*)\);\r?$", System.Text.RegularExpressions.RegexOptions.Multiline))
         {
-            yield return (match.Groups[1].Value, match.Groups[2].Value);
+            yield return (int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+                match.Groups[2].Value, match.Groups[3].Value);
         }
     }
 

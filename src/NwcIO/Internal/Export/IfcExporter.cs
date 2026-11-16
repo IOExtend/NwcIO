@@ -590,6 +590,8 @@ internal static class IfcExporter
             "IFCCOLUMN" => w.Add("IFCCOLUMN", isIfc4 ? $"{commonArgs},.NOTDEFINED." : commonArgs),
             "IFCBEAM" => w.Add("IFCBEAM", isIfc4 ? $"{commonArgs},.NOTDEFINED." : commonArgs),
             // 14 values: SteelGrade, NominalDiameter, CrossSectionArea, BarLength, BarRole/PredefinedType, BarSurface.
+            // IFC2x3 makes NominalDiameter and CrossSectionArea mandatory and the NWC file has no such data, so the
+            // placeholders 1 and 0 are written there (IFC4 leaves them '$'); see docs/format-notes.md.
             "IFCREINFORCINGBAR" => w.Add("IFCREINFORCINGBAR", isIfc4
                 ? $"{commonArgs},$,$,$,$,$,$"
                 : $"{commonArgs},$,{StepWriter.Real(1)},{StepWriter.Real(0)},$,.NOTDEFINED.,$"),
