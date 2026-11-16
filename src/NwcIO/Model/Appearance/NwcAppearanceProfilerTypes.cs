@@ -66,20 +66,27 @@ public sealed class NwcAppearanceProfiler
         ArgumentNullException.ThrowIfNull(document);
         int matchedCount = 0;
 
+        // One material per rule, reused by every matched element instead of allocating one per node.
+        var ruleMaterials = new NwcMaterial[Rules.Count];
+        for (int i = 0; i < Rules.Count; i++)
+        {
+            var rule = Rules[i];
+            float alpha = Math.Clamp(1.0f - rule.Transparency, 0.0f, 1.0f);
+            ruleMaterials[i] = new NwcMaterial
+            {
+                Id = document.Materials.Count + 1 + i,
+                Name = $"Profiler_{rule.Name}",
+                Color = new RgbaColor(rule.Color.R, rule.Color.G, rule.Color.B, alpha),
+            };
+        }
+
         void Traverse(NwcNode node)
         {
-            foreach (var rule in Rules)
+            for (int ruleIndex = 0; ruleIndex < Rules.Count; ruleIndex++)
             {
-                if (rule.Matches(node))
+                if (Rules[ruleIndex].Matches(node))
                 {
-                    float alpha = Math.Clamp(1.0f - rule.Transparency, 0.0f, 1.0f);
-                    var newColor = new RgbaColor(rule.Color.R, rule.Color.G, rule.Color.B, alpha);
-                    var mat = new NwcMaterial
-                    {
-                        Id = document.Materials.Count + 1,
-                        Name = $"Profiler_{rule.Name}",
-                        Color = newColor,
-                    };
+                    var mat = ruleMaterials[ruleIndex];
 
                     node.Material = mat;
                     foreach (var nodeMesh in node.Meshes)
@@ -120,18 +127,11 @@ public sealed class NwcAppearanceProfiler
                     Mesh = mesh,
                 };
 
-                foreach (var rule in Rules)
+                for (int ruleIndex = 0; ruleIndex < Rules.Count; ruleIndex++)
                 {
-                    if (rule.Matches(pseudoNode))
+                    if (Rules[ruleIndex].Matches(pseudoNode))
                     {
-                        float alpha = Math.Clamp(1.0f - rule.Transparency, 0.0f, 1.0f);
-                        var newColor = new RgbaColor(rule.Color.R, rule.Color.G, rule.Color.B, alpha);
-                        mesh.Material = new NwcMaterial
-                        {
-                            Id = document.Materials.Count + 1,
-                            Name = $"Profiler_{rule.Name}",
-                            Color = newColor,
-                        };
+                        mesh.Material = ruleMaterials[ruleIndex];
                         matchedCount++;
                         break;
                     }
