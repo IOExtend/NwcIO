@@ -6,6 +6,65 @@ namespace NwcIO.Tests;
 
 public class IfcExportTests
 {
+    [Fact]
+    public void SaveIfc_SameInputTwice_ProducesIdenticalOutput()
+    {
+        var doc = CreateSyntheticDocument("Стена монолитная", "Бетон В25");
+        var options = new NwcIfcExportOptions { SchemaVersion = NwcIfcSchemaVersion.Ifc4, UseTessellationInIfc4 = true };
+
+        Assert.Equal(doc.ToIfcString(options), doc.ToIfcString(options));
+    }
+
+    [Fact]
+    public void SaveIfc_Assembly_EqualMeshIdsInDifferentModels_GetDistinctGlobalIds()
+    {
+        NwcDocument Model(string sourcePath, int meshId)
+        {
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Name = "Element",
+                Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                Indices = [0, 1, 2],
+            };
+            return NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = sourcePath }, meshes: [mesh]);
+        }
+
+        var first = Model("first.rvt", 5);
+        var second = Model("second.rvt", 5);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        using var writer = new StringWriter();
+        assembly.SaveIfc(writer);
+        string ifc = writer.ToString();
+
+        string firstGuid = NwcIO.Internal.Export.NwcElementGuid.ForMesh(first.Meshes[0], first);
+        string secondGuid = NwcIO.Internal.Export.NwcElementGuid.ForMesh(second.Meshes[0], second);
+        Assert.NotEqual(firstGuid, secondGuid);
+        Assert.Contains($"'{firstGuid}'", ifc);
+        Assert.Contains($"'{secondGuid}'", ifc);
+    }
+
+    [Fact]
+    public void SaveIfc_ClashGlobalIds_MatchTheAssemblyExport()
+    {
+        var firstSource = CreateSyntheticDocument("Wall A", null);
+        var secondSource = CreateSyntheticDocument("Wall B", null);
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.rvt" }, meshes: firstSource.Meshes);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.rvt" }, meshes: secondSource.Meshes);
+        var clash = new NwcClash(first, first.Meshes[0], second, second.Meshes[0],
+            new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(1, 1, 1)));
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        using var writer = new StringWriter();
+        assembly.SaveIfc(writer);
+        string ifc = writer.ToString();
+
+        Assert.Contains($"'{clash.IfcGuidA}'", ifc);
+        Assert.Contains($"'{clash.IfcGuidB}'", ifc);
+        Assert.NotEqual(clash.IfcGuidA, clash.IfcGuidB);
+    }
+
     [Theory]
     [InlineData(true, "((1,3,2),(3,4,2))")]
     [InlineData(false, "((1,2,3),(3,2,4))")]

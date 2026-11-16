@@ -28,10 +28,10 @@ public sealed record NwcClash(
     public Vector3d Center => IntersectionBox.Center;
 
     /// <summary>Gets the 22-character buildingSMART IFC GlobalId of the first clashing element.</summary>
-    public string IfcGuidA => IfcGuid.FromElementId(MeshA.Id, "NwcMesh");
+    public string IfcGuidA => NwcElementGuid.ForMesh(MeshA, ModelA);
 
     /// <summary>Gets the 22-character buildingSMART IFC GlobalId of the second clashing element.</summary>
-    public string IfcGuidB => IfcGuid.FromElementId(MeshB.Id, "NwcMesh");
+    public string IfcGuidB => NwcElementGuid.ForMesh(MeshB, ModelB);
 
     /// <summary>Display name of ModelA.</summary>
     public string ModelAName => Path.GetFileNameWithoutExtension(ModelA.FileInfo.SourcePath ?? "ModelA");

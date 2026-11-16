@@ -84,26 +84,26 @@ internal static class IfcExporter
         string storeyName = options.StoreyName ?? "Level 1";
 
         int projectId = w.Add("IFCPROJECT",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(projectName)},$,$,$,$,({StepWriter.Ref(mainContextId)}),{StepWriter.Ref(unitAssignmentId)}");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:project"))},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(projectName)},$,$,$,$,({StepWriter.Ref(mainContextId)}),{StepWriter.Ref(unitAssignmentId)}");
 
         int sitePlacementId = w.Add("IFCLOCALPLACEMENT", $"$,{StepWriter.Ref(worldPlacement3dId)}");
         int siteId = w.Add("IFCSITE",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},'Site',$,$,{StepWriter.Ref(sitePlacementId)},$,$,.ELEMENT.,$,$,$,$,$");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:site"))},{StepWriter.Ref(ownerHistoryId)},'Site',$,$,{StepWriter.Ref(sitePlacementId)},$,$,.ELEMENT.,$,$,$,$,$");
 
         int buildingPlacementId = w.Add("IFCLOCALPLACEMENT", $"{StepWriter.Ref(sitePlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
         int buildingId = w.Add("IFCBUILDING",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(buildingName)},$,$,{StepWriter.Ref(buildingPlacementId)},$,$,.ELEMENT.,$,$,$,$");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:building"))},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(buildingName)},$,$,{StepWriter.Ref(buildingPlacementId)},$,$,.ELEMENT.,$,$,$,$");
 
         int storeyPlacementId = w.Add("IFCLOCALPLACEMENT", $"{StepWriter.Ref(buildingPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
         int storeyId = w.Add("IFCBUILDINGSTOREY",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(storeyName)},$,$,{StepWriter.Ref(storeyPlacementId)},$,$,.ELEMENT.,{StepWriter.Real(0)}");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:storey"))},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(storeyName)},$,$,{StepWriter.Ref(storeyPlacementId)},$,$,.ELEMENT.,{StepWriter.Real(0)}");
 
         w.Add("IFCRELAGGREGATES",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(projectId)},({StepWriter.Ref(siteId)})");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:project-site"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(projectId)},({StepWriter.Ref(siteId)})");
         w.Add("IFCRELAGGREGATES",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(siteId)},({StepWriter.Ref(buildingId)})");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:site-building"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(siteId)},({StepWriter.Ref(buildingId)})");
         w.Add("IFCRELAGGREGATES",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},({StepWriter.Ref(storeyId)})");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:building-storey"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},({StepWriter.Ref(storeyId)})");
 
         // 4. Materials & Styles Cache
         var styleCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -125,7 +125,6 @@ internal static class IfcExporter
         var elementIds = new List<int>(doc.Meshes.Count);
 
         var typeMap = new Dictionary<string, (int TypeId, List<int> ElementIds)>(StringComparer.OrdinalIgnoreCase);
-        int typeIdSeed = 1000;
 
         var activePlanes = new List<NwcSectionPlane>();
         if (options.SectionPlanes is not null)
@@ -186,7 +185,7 @@ internal static class IfcExporter
                 $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
             string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-            string elemGuid = IfcGuid.FromElementId(mesh.Id, "NwcMesh");
+            string elemGuid = NwcElementGuid.ForMesh(mesh, doc);
             string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
             int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -199,7 +198,7 @@ internal static class IfcExporter
                 string typeKey = $"{ifcType}::{typeName}";
                 if (!typeMap.TryGetValue(typeKey, out var entry))
                 {
-                    string typeGuid = IfcGuid.FromElementId(typeIdSeed++, "IfcType");
+                    string typeGuid = IfcGuid.FromKey($"ifc:type:{ifcType}:{typeName}");
                     int typeId = AddIfcTypeProduct(w, ifcType, typeGuid, ownerHistoryId, typeName, isIfc4);
                     entry = (typeId, new List<int>());
                     typeMap[typeKey] = entry;
@@ -222,7 +221,7 @@ internal static class IfcExporter
                 if (elemIds.Count > 0)
                 {
                     w.Add("IFCRELDEFINESBYTYPE",
-                        $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
+                        $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:type:{typeId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
                 }
             }
         }
@@ -231,7 +230,7 @@ internal static class IfcExporter
         if (elementIds.Count > 0)
         {
             w.Add("IFCRELCONTAINEDINSPATIALSTRUCTURE",
-                $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
+                $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:contained:{storeyId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
         }
 
         // 8. Write complete STEP physical file
@@ -306,20 +305,20 @@ internal static class IfcExporter
         string buildingName = options.BuildingName ?? assembly.Name;
 
         int projectId = w.Add("IFCPROJECT",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(projectName)},$,$,$,$,({StepWriter.Ref(mainContextId)}),{StepWriter.Ref(unitAssignmentId)}");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:project"))},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(projectName)},$,$,$,$,({StepWriter.Ref(mainContextId)}),{StepWriter.Ref(unitAssignmentId)}");
 
         int sitePlacementId = w.Add("IFCLOCALPLACEMENT", $"$,{StepWriter.Ref(worldPlacement3dId)}");
         int siteId = w.Add("IFCSITE",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},'Site',$,$,{StepWriter.Ref(sitePlacementId)},$,$,.ELEMENT.,$,$,$,$,$");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:site"))},{StepWriter.Ref(ownerHistoryId)},'Site',$,$,{StepWriter.Ref(sitePlacementId)},$,$,.ELEMENT.,$,$,$,$,$");
 
         int buildingPlacementId = w.Add("IFCLOCALPLACEMENT", $"{StepWriter.Ref(sitePlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
         int buildingId = w.Add("IFCBUILDING",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(buildingName)},$,$,{StepWriter.Ref(buildingPlacementId)},$,$,.ELEMENT.,$,$,$,$");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:building"))},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(buildingName)},$,$,{StepWriter.Ref(buildingPlacementId)},$,$,.ELEMENT.,$,$,$,$");
 
         w.Add("IFCRELAGGREGATES",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(projectId)},({StepWriter.Ref(siteId)})");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:project-site"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(projectId)},({StepWriter.Ref(siteId)})");
         w.Add("IFCRELAGGREGATES",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(siteId)},({StepWriter.Ref(buildingId)})");
+            $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:site-building"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(siteId)},({StepWriter.Ref(buildingId)})");
 
         // 4. Materials Cache
         var styleCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -341,7 +340,6 @@ internal static class IfcExporter
         var storeyIds = new List<int>();
 
         var typeMap = new Dictionary<string, (int TypeId, List<int> ElementIds)>(StringComparer.OrdinalIgnoreCase);
-        int typeIdSeed = 5000;
 
         for (int modelIdx = 0; modelIdx < assembly.Models.Count; modelIdx++)
         {
@@ -352,7 +350,7 @@ internal static class IfcExporter
 
             int storeyPlacementId = w.Add("IFCLOCALPLACEMENT", $"{StepWriter.Ref(buildingPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
             int storeyId = w.Add("IFCBUILDINGSTOREY",
-                $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(subStoreyName)},$,$,{StepWriter.Ref(storeyPlacementId)},$,$,.ELEMENT.,{StepWriter.Real(0)}");
+                $"{StepWriter.Str(IfcGuid.FromKey($"ifc:storey:{modelIdx.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},{StepWriter.Str(subStoreyName)},$,$,{StepWriter.Ref(storeyPlacementId)},$,$,.ELEMENT.,{StepWriter.Real(0)}");
             storeyIds.Add(storeyId);
 
             var modelElementIds = new List<int>(model.Meshes.Count);
@@ -414,7 +412,7 @@ internal static class IfcExporter
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
                 string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-                string elemGuid = IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
+                string elemGuid = NwcElementGuid.ForMesh(mesh, model);
                 string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -427,7 +425,7 @@ internal static class IfcExporter
                     string typeKey = $"{ifcType}::{typeName}";
                     if (!typeMap.TryGetValue(typeKey, out var entry))
                     {
-                        string typeGuid = IfcGuid.FromElementId(typeIdSeed++, "IfcType");
+                        string typeGuid = IfcGuid.FromKey($"ifc:type:{ifcType}:{typeName}");
                         int typeId = AddIfcTypeProduct(w, ifcType, typeGuid, ownerHistoryId, typeName, isIfc4);
                         entry = (typeId, new List<int>());
                         typeMap[typeKey] = entry;
@@ -444,7 +442,7 @@ internal static class IfcExporter
             if (modelElementIds.Count > 0)
             {
                 w.Add("IFCRELCONTAINEDINSPATIALSTRUCTURE",
-                    $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(modelElementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
+                    $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:contained:{storeyId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(modelElementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
             }
         }
 
@@ -455,7 +453,7 @@ internal static class IfcExporter
                 if (elemIds.Count > 0)
                 {
                     w.Add("IFCRELDEFINESBYTYPE",
-                        $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
+                        $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:type:{typeId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
                 }
             }
         }
@@ -463,7 +461,7 @@ internal static class IfcExporter
         if (storeyIds.Count > 0)
         {
             w.Add("IFCRELAGGREGATES",
-                $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},{StepWriter.List(storeyIds.Select(StepWriter.Ref))}");
+                $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:building-storeys"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},{StepWriter.List(storeyIds.Select(StepWriter.Ref))}");
         }
 
         w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
@@ -639,10 +637,10 @@ internal static class IfcExporter
         }
 
         int psetId = w.Add("IFCPROPERTYSET",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},'Pset_NwcElementProperties',$,{StepWriter.List(propIds.Select(StepWriter.Ref))}");
+            $"{StepWriter.Str(IfcGuid.FromKey($"ifc:pset:{elementId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},'Pset_NwcElementProperties',$,{StepWriter.List(propIds.Select(StepWriter.Ref))}");
 
         w.Add("IFCRELDEFINESBYPROPERTIES",
-            $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
+            $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:props:{elementId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
 
         if (mesh.Node?.Hyperlinks is { Count: > 0 } hyperlinks)
         {
@@ -653,7 +651,7 @@ internal static class IfcExporter
                     : $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")}";
                 int docRefId = w.Add("IFCDOCUMENTREFERENCE", docRefArgs);
                 w.Add("IFCRELASSOCIATESDOCUMENT",
-                    $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(docRefId)}");
+                    $"{StepWriter.Str(IfcGuid.FromKey($"ifc:reldoc:{elementId.ToString(CultureInfo.InvariantCulture)}:{link.Url}"))},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(docRefId)}");
             }
         }
     }
