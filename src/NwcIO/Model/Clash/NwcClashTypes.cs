@@ -36,12 +36,19 @@ public enum NwcClashTestType
 /// </summary>
 public enum NwcClashRuleType
 {
+    /// <summary>Ignore a pair on the same named parent layer; a missing layer is never "the same".</summary>
     IgnoreSameLayer,
+    /// <summary>Ignore a pair whose nodes share the same parent node.</summary>
     IgnoreSameGroup,
+    /// <summary>Ignore a pair from the same model/file.</summary>
     IgnoreSameFile,
+    /// <summary>Declared for compatibility; not evaluated by <see cref="NwcClashRule.ShouldIgnore"/>. Use selection set names instead.</summary>
     IgnoreSpecifiedSets,
+    /// <summary>Ignore a pair whose absolute result distance is below <see cref="NwcClashRule.Threshold"/>. Meant for penetration tests (Hard, Conservative): Duplicates report distance 0 and Clearance a gap, so they are dropped too.</summary>
     IgnoreMinPenetration,
+    /// <summary>Ignore a pair whose nodes both carry the configured property and value.</summary>
     IgnoreSpecifiedProperty,
+    /// <summary>Ignore a pair for which <see cref="NwcClashRule.CustomPredicate"/> returns true.</summary>
     Custom,
 }
 
@@ -88,6 +95,10 @@ public sealed class NwcClashRule
     /// <summary>
     /// Evaluates whether a detected clash should be ignored according to this rule.
     /// </summary>
+    /// <remarks>
+    /// <see cref="NwcClashRuleType.IgnoreSpecifiedSets"/> is not evaluated here because a result does not carry
+    /// the source documents; use <see cref="NwcClashSelection.SetNames"/> to restrict the test instead.
+    /// </remarks>
     public bool ShouldIgnore(NwcClashResult clash)
     {
         if (!Enabled) return false;
@@ -98,6 +109,10 @@ public sealed class NwcClashRule
                 !string.IsNullOrEmpty(clash.Item1.Layer) &&
                 string.Equals(clash.Item1.Layer, clash.Item2.Layer, StringComparison.OrdinalIgnoreCase),
 
+            NwcClashRuleType.IgnoreSameGroup =>
+                clash.Item1.Node?.Parent is not null &&
+                ReferenceEquals(clash.Item1.Node.Parent, clash.Item2.Node?.Parent),
+
             NwcClashRuleType.IgnoreSameFile =>
                 !string.IsNullOrEmpty(clash.Item1.ModelName) &&
                 string.Equals(clash.Item1.ModelName, clash.Item2.ModelName, StringComparison.OrdinalIgnoreCase),
@@ -105,11 +120,35 @@ public sealed class NwcClashRule
             NwcClashRuleType.IgnoreMinPenetration =>
                 Math.Abs(clash.Distance) < Threshold,
 
+            NwcClashRuleType.IgnoreSpecifiedProperty =>
+                !string.IsNullOrEmpty(PropertyName) &&
+                HasProperty(clash.Item1.Node, PropertyName, PropertyValue) &&
+                HasProperty(clash.Item2.Node, PropertyName, PropertyValue),
+
             NwcClashRuleType.Custom =>
                 CustomPredicate?.Invoke(clash) ?? false,
 
             _ => false,
         };
+    }
+
+    private static bool HasProperty(NwcNode? node, string name, string? value)
+    {
+        if (node is null)
+        {
+            return false;
+        }
+
+        foreach (var property in node.Properties)
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase) &&
+                (value is null || string.Equals(property.Value, value, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 
