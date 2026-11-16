@@ -76,12 +76,15 @@ public sealed class ExportCancellationTests
     {
         var assembly = NwcAssembly.Create("Fed", Document());
         string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, "keep me");
         using var cancellation = new CancellationTokenSource();
         var progress = new CancellingProgress(cancellation);
         try
         {
             Assert.Throws<OperationCanceledException>(() =>
                 assembly.SaveJson(path, null, progress, cancellation.Token));
+
+            Assert.Equal("keep me", File.ReadAllText(path));
         }
         finally
         {

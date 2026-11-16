@@ -810,7 +810,22 @@ public sealed class NwcAssembly
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         cancellationToken.ThrowIfCancellationRequested();
-        using var fs = File.Create(path);
-        SaveJson(fs, options, progress, cancellationToken);
+        string temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var fs = File.Create(temp))
+            {
+                SaveJson(fs, options, progress, cancellationToken);
+            }
+
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
     }
 }
