@@ -1,9 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Local runs use one TFM; CI and the release gate exercise both shipped runtimes. -->
-    <TargetFrameworks>net10.0</TargetFrameworks>
-    <TargetFrameworks Condition="'$(CI)' == 'true' Or '$(GITHUB_ACTIONS)' == 'true'">net8.0;net10.0</TargetFrameworks>
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
