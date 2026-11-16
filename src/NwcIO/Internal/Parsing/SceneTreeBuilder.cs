@@ -28,8 +28,10 @@ public static class SceneTreeBuilder
         NwcNode? currentFamily = null;
         NwcNode? currentType = null;
         NwcNode currentActive = root;
+        var nodeMap = new Dictionary<int, NwcNode>();
 
         string? pendingNodeName = null;
+        int? pendingParentId = null;
 
         for (int i = 0; i < records.Count; i++)
         {
@@ -38,6 +40,7 @@ public static class SceneTreeBuilder
             if (record.Tag == 53)
             {
                 pendingNodeName = record.Name;
+                pendingParentId = record.ParentId;
                 continue;
             }
 
@@ -45,6 +48,44 @@ public static class SceneTreeBuilder
             {
                 string name = !string.IsNullOrEmpty(pendingNodeName) ? pendingNodeName : record.Name;
                 pendingNodeName = null;
+                int? parentId = pendingParentId;
+                pendingParentId = null;
+
+                if (parentId == 0 && record.FirstInt == 0)
+                {
+                    root.Name = name;
+                    if (!string.IsNullOrEmpty(record.Class))
+                    {
+                        root.Class = record.Class;
+                    }
+
+                    nodeMap[0] = root;
+                    currentActive = root;
+                    continue;
+                }
+
+                if (parentId is { } explicitParentId)
+                {
+                    NwcNode? explicitParent = nodeMap.TryGetValue(explicitParentId, out var mappedParent)
+                        ? mappedParent
+                        : explicitParentId == 0 ? root : null;
+                    if (explicitParent is not null)
+                    {
+                        var treeNode = new NwcNode
+                        {
+                            Id = record.FirstInt,
+                            Name = name,
+                            Class = record.Class,
+                            Tag = record.Tag,
+                            Value = record.Value,
+                            Parent = explicitParent,
+                        };
+                        explicitParent.Children.Add(treeNode);
+                        nodeMap[treeNode.Id] = treeNode;
+                        currentActive = treeNode;
+                        continue;
+                    }
+                }
 
                 if (record.Class == "LcRevitLayer")
                 {
@@ -57,6 +98,7 @@ public static class SceneTreeBuilder
                         Parent = root,
                     };
                     root.Children.Add(layer);
+                    nodeMap[layer.Id] = layer;
                     currentLayer = layer;
                     currentCategory = null;
                     currentFamily = null;
@@ -105,6 +147,7 @@ public static class SceneTreeBuilder
                     }
 
                     currentActive = collection;
+                    nodeMap[collection.Id] = collection;
                 }
                 else if (record.Class == "LcRevitComposite")
                 {
@@ -119,6 +162,7 @@ public static class SceneTreeBuilder
                         Parent = parent,
                     };
                     parent.Children.Add(composite);
+                    nodeMap[composite.Id] = composite;
                     currentActive = composite;
                 }
                 else if (record.Class == "LcRevitData_Element")
@@ -134,6 +178,7 @@ public static class SceneTreeBuilder
                         Parent = parent,
                     };
                     parent.Children.Add(elemNode);
+                    nodeMap[elemNode.Id] = elemNode;
                     currentActive = elemNode;
                 }
                 else

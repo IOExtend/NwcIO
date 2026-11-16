@@ -173,6 +173,45 @@ public class WriterTests
         Assert.Equal(viewpoints.Select(v => v.Name), reopened.SavedViewpoints.Select(v => v.Name));
     }
 
+    [Fact]
+    public void Writer_BuilderRootNode_RoundtripsHierarchyNamesAndPropertyValueTypes()
+    {
+        var root = new NwcNode { Id = 1, Name = "Site", Class = "LcTestGroup" };
+        var building = new NwcNode { Id = 2, Name = "Building", Class = "LcTestGroup", Parent = root };
+        var wall = new NwcNode { Id = 3, Name = "Wall-1", Class = "LcRevitData_Element", Parent = building };
+        wall.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 3,
+            Tag = 52,
+            Name = "Length",
+            Class = "Dimensions",
+            ValueType = 6,
+            Value = "3.5",
+        });
+        root.Children.Add(building);
+        building.Children.Add(wall);
+
+        var doc = NwcDocument.Create(rootNode: root);
+        var reopened = NwcDocument.Open(new MemoryStream(doc.ToByteArray()));
+
+        var model = reopened.RootNode!;
+        Assert.Equal("Site", model.Name);
+        Assert.Equal("LcTestGroup", model.Class);
+
+        var buildingNode = Assert.Single(model.Children);
+        Assert.Equal("Building", buildingNode.Name);
+        Assert.Equal("LcTestGroup", buildingNode.Class);
+
+        var wallNode = Assert.Single(buildingNode.Children);
+        Assert.Equal("Wall-1", wallNode.Name);
+        Assert.Equal("LcRevitData_Element", wallNode.Class);
+        var property = Assert.Single(wallNode.Properties);
+        Assert.Equal("Length", property.Name);
+        Assert.Equal(6, property.ValueType);
+        Assert.Equal("3.5", property.Value);
+        Assert.Empty(wallNode.Children);
+    }
+
     [Theory]
     [InlineData(-1.0)]
     [InlineData(100.0)]
@@ -666,6 +705,7 @@ public class WriterTests
 
         var reopened = NwcDocument.Open(ms);
         Assert.NotNull(reopened.RootNode);
+        Assert.Equal("Element 1", reopened.RootNode.Name);
         var prop = Assert.Single(reopened.RootNode.Properties, p => p.Name == "Phase Status");
         Assert.Equal("Phase Status", prop.Name);
         Assert.Equal((int)NwcVariantDataType.NamedConstant, prop.ValueType);

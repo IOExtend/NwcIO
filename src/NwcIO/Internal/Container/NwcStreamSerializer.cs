@@ -305,7 +305,7 @@ internal static class NwcStreamSerializer
         }
         else if (rootNode is not null)
         {
-            FlattenNode(w, rootNode);
+            FlattenRoot(w, rootNode);
         }
 
         return ms.ToArray();
@@ -384,18 +384,58 @@ internal static class NwcStreamSerializer
         }
     }
 
-    private static void FlattenNode(BinaryWriter w, NwcNode node)
+    private static void FlattenRoot(BinaryWriter w, NwcNode rootNode)
     {
-        // Emit Tag 53 (node name)
+        // The root becomes the model root itself: its name and properties are written as records for id 0,
+        // children follow with parent marker 0.
+        w.Write(0);
+        w.Write(53);
+        WritePaddedString(w, rootNode.Name);
+        w.Write(-2);
+        w.Write(0);
+
+        w.Write(0);
+        w.Write(52);
+        WritePaddedString(w, rootNode.Name);
+        WritePaddedString(w, !string.IsNullOrEmpty(rootNode.Class) ? rootNode.Class : "Model");
+        w.Write(0);
+        w.Write(0);
+
+        foreach (var prop in rootNode.Properties)
+        {
+            w.Write(0);
+            w.Write(52);
+            WritePaddedString(w, prop.Name);
+            WritePaddedString(w, prop.Class);
+            int vType = prop.ValueType != 0 ? prop.ValueType : 4;
+            w.Write(vType);
+            WritePropertyValue(w, vType, prop.Value);
+        }
+
+        foreach (var child in rootNode.Children)
+        {
+            FlattenNode(w, child, 0);
+        }
+    }
+
+    private static void FlattenNode(BinaryWriter w, NwcNode node, int? parentId)
+    {
+        // Emit Tag 53 (node name). A -2 marker followed by the parent id keeps the hierarchy;
+        // readers without parent support still consume just the name.
         w.Write(node.Id);
         w.Write(53);
         WritePaddedString(w, node.Name);
+        if (parentId.HasValue)
+        {
+            w.Write(-2);
+            w.Write(parentId.Value);
+        }
 
         // Emit Tag 52 (identity record)
         w.Write(node.Id);
         w.Write(52);
         WritePaddedString(w, node.Name);
-        WritePaddedString(w, !string.IsNullOrEmpty(node.Class) ? node.Class : "LcRevitElement");
+        WritePaddedString(w, !string.IsNullOrEmpty(node.Class) ? node.Class : "LcRevitData_Element");
         w.Write(0); // valueType 0
         w.Write(node.Id);
 
@@ -413,7 +453,7 @@ internal static class NwcStreamSerializer
 
         foreach (var child in node.Children)
         {
-            FlattenNode(w, child);
+            FlattenNode(w, child, node.Id);
         }
     }
 
