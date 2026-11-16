@@ -39,4 +39,28 @@ public sealed class NwcReaderOptions
 
     /// <summary>Keep the stream catalog (offsets, sizes, kinds) in the document (default: true).</summary>
     public bool KeepStreamCatalog { get; set; } = true;
+
+    /// <summary>
+    /// Override the document length unit when the source unit is known. Null (default) infers feet for the Revit
+    /// loader/exporter and leaves the unit Unknown for everything else. Exposed as <see cref="NwcDocument.LengthUnit"/>.
+    /// </summary>
+    public NwcLengthUnit? LengthUnit { get; set; }
+
+    /// <summary>
+    /// Cap on the decompressed size of one container stream (default: 512 MiB). Exceeding it makes
+    /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
+    /// </summary>
+    public long MaxDecompressedStreamBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxDecompressedStreamBytes;
+
+    /// <summary>
+    /// Cap on the decompressed size of all container streams together (default: 2 GiB). Exceeding it makes
+    /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
+    /// </summary>
+    public long MaxTotalDecompressedBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxTotalDecompressedBytes;
+
+    /// <summary>
+    /// Cap on the vertices of one geometry record on the lenient reader path (default: 200,000). Larger records are skipped.
+    /// Model files read through their DbCache directory use the strict geometry parser and its own bounds.
+    /// </summary>
+    public int MaxMeshVertices { get; set; } = Internal.Parsing.MeshParser.MaxPlausibleVertices;
 }

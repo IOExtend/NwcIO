@@ -6,6 +6,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner construction simulation schedules
 /// to and from Primavera P6 XER format (.xer).
+/// XER has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerPrimaveraXerSerializer
 {
@@ -46,7 +47,10 @@ public static class NwcTimeLinerPrimaveraXerSerializer
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(encoding);
 
-        using var writer = new StreamWriter(stream, encoding, bufferSize: 4096, leaveOpen: true);
+        // A character the encoding cannot represent must fail, not become '?'.
+        var strict = (Encoding)encoding.Clone();
+        strict.EncoderFallback = EncoderFallback.ExceptionFallback;
+        using var writer = new StreamWriter(stream, strict, bufferSize: 4096, leaveOpen: true);
 
         // 1. Primavera XER Header
         string exportDate = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -54,7 +58,7 @@ public static class NwcTimeLinerPrimaveraXerSerializer
 
         // 2. PROJECT Table
         var overallStart = schedule.OverallStart ?? DateTimeOffset.UtcNow;
-        var overallEnd = schedule.OverallEnd ?? overallStart.AddDays(30);
+        var overallEnd = schedule.OverallEnd ?? NwcTimeLinerDates.AddDays(overallStart, 30);
 
         writer.WriteLine("%T\tPROJECT");
         writer.WriteLine("%F\tproj_id\tproj_short_name\tplan_start_date\tplan_end_date\tstatus_code");
@@ -159,11 +163,14 @@ public static class NwcTimeLinerPrimaveraXerSerializer
         string? currentTable = null;
         string[]? fieldNames = null;
         int taskRow = 0;
+        bool hasNwcioTaskType = false;
+        bool hasReplacementChar = false;
 
         string? line;
         while ((line = reader.ReadLine()) is not null)
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
+            hasReplacementChar |= line.Contains('\uFFFD');
 
             string[] tokens = line.Split('\t');
             if (tokens.Length == 0) continue;
@@ -178,6 +185,7 @@ public static class NwcTimeLinerPrimaveraXerSerializer
             else if (recordType == "%F" && currentTable is not null)
             {
                 fieldNames = tokens.Skip(1).Select(f => f.Trim().ToLowerInvariant()).ToArray();
+                if (currentTable == "TASK" && fieldNames.Contains("nwcio_task_type")) hasNwcioTaskType = true;
             }
             else if (recordType == "%R" && currentTable is not null && fieldNames is not null)
             {
@@ -219,21 +227,20 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                     }
                     string name = rowMap.GetValueOrDefault("task_name") ?? "Task";
 
-                    DateTimeOffset start;
-                    if (!rowMap.TryGetValue("target_start_date", out var startStr) ||
-                        string.IsNullOrWhiteSpace(startStr) ||
-                        !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out start))
+                    rowMap.TryGetValue("target_start_date", out var startStr);
+                    rowMap.TryGetValue("target_end_date", out var endStr);
+                    bool hasStart = DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var start);
+                    bool hasEnd = DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var end);
+                    if (!hasStart)
                     {
-                        start = DateTimeOffset.UnixEpoch;
+                        // A valid end pins the task; only with no dates at all does the epoch placeholder remain.
+                        start = hasEnd ? NwcTimeLinerDates.AddDays(end, -1) : DateTimeOffset.UnixEpoch;
                         warnings.Add($"Task '{id}': target start '{startStr}' is missing or invalid; using {start:o}.");
                     }
 
-                    DateTimeOffset end;
-                    if (!rowMap.TryGetValue("target_end_date", out var endStr) ||
-                        string.IsNullOrWhiteSpace(endStr) ||
-                        !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out end))
+                    if (!hasEnd)
                     {
-                        end = start.AddDays(1);
+                        end = NwcTimeLinerDates.AddDays(start, 1);
                         warnings.Add($"Task '{id}': target end '{endStr}' is missing or invalid; using {end:o}.");
                     }
 
@@ -289,23 +296,57 @@ public static class NwcTimeLinerPrimaveraXerSerializer
             }
         }
 
-        // Rebuild NwcTimeLinerTask.Children from PROJWBS parent_wbs_id and each
-        // task's wbs_id. Tasks without a known parent stay at the top level.
+        // Rebuild Children only for files NwcIO wrote (one PROJWBS row per task, marked by
+        // the nwcio_task_type column). In a foreign P6 file many activities share a wbs_id,
+        // so a WBS node cannot stand for one task and the tasks stay flat.
         var byWbsId = new Dictionary<string, NwcTimeLinerTask>(StringComparer.Ordinal);
-        foreach (var (task, wbsId) in parsedTasks)
+        bool nest = hasNwcioTaskType;
+        if (!hasNwcioTaskType && wbsNodes.Count > 0 && parsedTasks.Count > 0)
         {
-            if (!string.IsNullOrEmpty(wbsId))
-            {
-                byWbsId[wbsId] = task;
-            }
+            warnings.Add("PROJWBS hierarchy is not applied: the file has no nwcio_task_type column, so WBS nodes cannot be matched to single tasks; tasks stay flat.");
         }
 
         foreach (var (task, wbsId) in parsedTasks)
         {
-            string? parentWbsId = wbsNodes.TryGetValue(wbsId, out var node) ? node.ParentId : null;
-            if (!string.IsNullOrEmpty(parentWbsId) &&
-                byWbsId.TryGetValue(parentWbsId, out var parent) &&
-                !ReferenceEquals(parent, task))
+            if (!nest || string.IsNullOrEmpty(wbsId)) continue;
+            if (!byWbsId.TryAdd(wbsId, task))
+            {
+                warnings.Add($"wbs_id '{wbsId}' is shared by several tasks; hierarchy is not applied and tasks stay flat.");
+                nest = false;
+            }
+        }
+
+        var parentOf = new Dictionary<NwcTimeLinerTask, NwcTimeLinerTask>();
+        if (nest)
+        {
+            foreach (var (task, wbsId) in parsedTasks)
+            {
+                string? parentWbsId = wbsNodes.TryGetValue(wbsId, out var node) ? node.ParentId : null;
+                if (!string.IsNullOrEmpty(parentWbsId) &&
+                    byWbsId.TryGetValue(parentWbsId, out var parent) &&
+                    !ReferenceEquals(parent, task))
+                {
+                    parentOf[task] = parent;
+                }
+            }
+
+            // Break parent cycles: a task whose chain loops back to itself stays at the top level.
+            foreach (var (task, _) in parsedTasks)
+            {
+                var seen = new HashSet<NwcTimeLinerTask> { task };
+                for (var p = task; parentOf.TryGetValue(p, out var up); p = up)
+                {
+                    if (seen.Add(up)) continue;
+                    parentOf.Remove(p);
+                    warnings.Add($"Task '{p.Id}': parent_wbs_id forms a cycle; the task is kept at the top level.");
+                    break;
+                }
+            }
+        }
+
+        foreach (var (task, _) in parsedTasks)
+        {
+            if (parentOf.TryGetValue(task, out var parent))
             {
                 parent.Children.Add(task);
             }
@@ -313,6 +354,11 @@ public static class NwcTimeLinerPrimaveraXerSerializer
             {
                 tasks.Add(task);
             }
+        }
+
+        if (hasReplacementChar)
+        {
+            warnings.Add("The file contains undecodable characters (U+FFFD); check that the encoding passed to Read matches the file.");
         }
 
         var schedule = new NwcTimeLinerSchedule(scheduleName, tasks);
