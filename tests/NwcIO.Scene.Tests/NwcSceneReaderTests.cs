@@ -529,6 +529,64 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_DocumentWithSavedViewpoints_MapsCameraToSceneViewpoints()
+    {
+        var id = Guid.Parse("11111111-2222-4333-8444-555555555555");
+        var doc = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "model.nwc" },
+            savedViewpoints:
+            [
+                new NwcSavedViewpoint
+                {
+                    Id = id,
+                    Name = "Plan",
+                    Camera = new NwcCamera
+                    {
+                        Position = new NwcIO.Model.Vector3d(10, 20, 30),
+                        Rotation = Quaterniond.Identity,
+                        FocalDistance = 10,
+                        FieldOfView = 90,
+                        AspectRatio = 1.5,
+                        NearDistance = 1,
+                        FarDistance = 500,
+                    },
+                },
+                new NwcSavedViewpoint
+                {
+                    Name = "Elevation",
+                    Camera = new NwcCamera
+                    {
+                        Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                        Rotation = Quaterniond.Identity,
+                        FocalDistance = 4,
+                        Projection = NwcCameraProjection.Orthographic,
+                    },
+                },
+            ],
+            rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = NwcSceneReader.Read(doc, new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        });
+
+        Assert.Equal(2, result.Document.Viewpoints.Count);
+        var plan = result.Document.Viewpoints[0];
+        Assert.Equal(id.ToString(), plan.Id);
+        Assert.Equal("Plan", plan.Name);
+        Assert.Equal(10, plan.Camera.Position.X, 6);
+        Assert.Equal(20, plan.Camera.Position.Y, 6);
+        Assert.Equal(30, plan.Camera.Position.Z, 6);
+        Assert.Equal(Math.PI / 2, plan.Camera.FieldOfView, 6);
+        Assert.Equal(1.5, plan.Camera.AspectRatio, 6);
+        Assert.Equal(500, plan.Camera.FarDistance, 6);
+        Assert.Equal(SceneProjection.Perspective, plan.Camera.Projection);
+        Assert.Equal(SceneProjection.Orthographic, result.Document.Viewpoints[1].Camera.Projection);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoints-skipped");
+    }
+
+    [Fact]
     public void Read_FileWithSavedViews_SkipsThemWithAWarning()
     {
         var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));

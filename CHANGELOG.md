@@ -5,6 +5,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ## [Unreleased]
 
 ### Added
+- `NwcIO.Scene` converts saved viewpoints to `SceneViewpoint`s (camera position, target, up, field of view in radians, near/far in metres and projection), and writes Revit level elevations in metres.
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 
 ### Changed
