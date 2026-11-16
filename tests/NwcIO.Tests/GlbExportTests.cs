@@ -379,4 +379,663 @@ public class GlbExportTests
             }
         }
     }
+
+    [Fact]
+    public void GlbExporter_LineMesh_ExportsLinesPrimitiveWithMode1()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 5,
+            Name = "LineSegment",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 2, 3)],
+            Indices = [],
+            LineIndices = [0, 1],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var meshes = root.GetProperty("meshes");
+        Assert.Equal(1, meshes.GetArrayLength());
+
+        var primitives = meshes[0].GetProperty("primitives");
+        Assert.Equal(1, primitives.GetArrayLength());
+
+        var prim = primitives[0];
+        Assert.Equal(1, prim.GetProperty("mode").GetInt32()); // 1 = LINES
+        Assert.True(prim.GetProperty("attributes").TryGetProperty("POSITION", out _));
+        Assert.False(prim.GetProperty("attributes").TryGetProperty("NORMAL", out _));
+        Assert.True(prim.TryGetProperty("indices", out var idxAccessor));
+        Assert.True(idxAccessor.GetInt32() >= 0);
+    }
+
+    [Fact]
+    public void GlbExporter_LineMeshWithColors_ExportsColor0Attribute()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 6,
+            Name = "ColoredLine",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(5, 5, 5)],
+            Indices = [],
+            LineIndices = [0, 1],
+            LineColors = [new RgbaColor(1f, 0f, 0f, 1f), new RgbaColor(0f, 1f, 0f, 1f)],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var prim = root.GetProperty("meshes")[0].GetProperty("primitives")[0];
+        Assert.Equal(1, prim.GetProperty("mode").GetInt32());
+        Assert.True(prim.GetProperty("attributes").TryGetProperty("COLOR_0", out var colAccIdx));
+
+        var accessors = root.GetProperty("accessors");
+        var colAcc = accessors[colAccIdx.GetInt32()];
+        Assert.Equal("VEC4", colAcc.GetProperty("type").GetString());
+        Assert.Equal(5126, colAcc.GetProperty("componentType").GetInt32()); // FLOAT
+    }
+
+    [Fact]
+    public void GlbExporter_MixedMesh_ExportsBothTrianglesAndLinesPrimitives()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 7,
+            Name = "MixedMesh",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineIndices = [0, 1],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var primitives = root.GetProperty("meshes")[0].GetProperty("primitives");
+        Assert.Equal(2, primitives.GetArrayLength());
+
+        // First primitive: TRIANGLES (mode 4) with NORMAL
+        var triPrim = primitives[0];
+        Assert.Equal(4, triPrim.GetProperty("mode").GetInt32());
+        Assert.True(triPrim.GetProperty("attributes").TryGetProperty("NORMAL", out _));
+
+        // Second primitive: LINES (mode 1)
+        var linePrim = primitives[1];
+        Assert.Equal(1, linePrim.GetProperty("mode").GetInt32());
+        Assert.False(linePrim.GetProperty("attributes").TryGetProperty("NORMAL", out _));
+    }
+
+    [Fact]
+    public void GlbExporter_TransparentLineColors_SetsMaterialAlphaModeBlend()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 8,
+            Name = "TransparentLines",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(10, 10, 10)],
+            Indices = [],
+            LineIndices = [0, 1],
+            LineColors = [new RgbaColor(1f, 0f, 0f, 0.5f), new RgbaColor(0f, 1f, 0f, 0.5f)],
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var prim = root.GetProperty("meshes")[0].GetProperty("primitives")[0];
+        Assert.Equal(1, prim.GetProperty("mode").GetInt32());
+        Assert.True(prim.TryGetProperty("material", out var matIdx));
+
+        var materials = root.GetProperty("materials");
+        var mat = materials[matIdx.GetInt32()];
+        Assert.Equal("BLEND", mat.GetProperty("alphaMode").GetString());
+    }
+
+    [Fact]
+    public void GlbExporter_TransparentMaterial_SetsAlphaModeBlend()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 9,
+            Name = "GlassMesh",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = new NwcMaterial
+            {
+                Id = 1,
+                Name = "Glass",
+                Color = new RgbaColor(0.8f, 0.8f, 0.9f, 0.3f),
+            }
+        };
+
+        using var ms = new MemoryStream();
+        GlbExporter.Write([mesh], [mesh.Material], ms, worldCoordinates: false);
+
+        using var doc = ReadGlbJson(ms.ToArray());
+        var root = doc.RootElement;
+
+        var materials = root.GetProperty("materials");
+        var mat = materials[0];
+        Assert.Equal("BLEND", mat.GetProperty("alphaMode").GetString());
+    }
+
+    [Fact]
+    public void GlbExporter_ColoredLine_BlackMaterial_RendersTheLineColor()
+    {
+        var black = new NwcMaterial { Id = 1, Name = "Black", Color = RgbaColor.Black };
+        var red = new RgbaColor(1f, 0f, 0f, 1f);
+
+        var glb = ExportGlb([LineMesh(1, black, [red, red])], black);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        Assert.True(line.GetProperty("attributes").TryGetProperty("COLOR_0", out _));
+        Assert.All(EffectiveColors(glb, root, line), color => AssertColor([1f, 0f, 0f, 1f], color));
+        Assert.Equal("OPAQUE", AlphaModeOf(root, line));
+    }
+
+    [Fact]
+    public void GlbExporter_ColoredLine_TintedMaterial_RendersTheLineColorNotTheProduct()
+    {
+        var tint = new NwcMaterial { Id = 1, Name = "Tint", Color = new RgbaColor(0.2f, 0.4f, 0.6f, 1f) };
+        var orange = new RgbaColor(1f, 0.5f, 0f, 1f);
+        var green = new RgbaColor(0f, 1f, 0f, 1f);
+
+        var glb = ExportGlb([LineMesh(1, tint, [orange, green])], tint);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([1f, 0.5f, 0f, 1f], colors[0]);
+        AssertColor([0f, 1f, 0f, 1f], colors[1]);
+        Assert.Equal("OPAQUE", AlphaModeOf(root, line));
+        Assert.DoesNotContain(root.GetProperty("materials").EnumerateArray(), material => material.TryGetProperty("alphaMode", out _));
+    }
+
+    [Fact]
+    public void GlbExporter_MixedMesh_TransparentLineColors_TrianglesKeepTheSourceMaterial()
+    {
+        var tint = new NwcMaterial { Id = 1, Name = "Tint", Color = new RgbaColor(0.2f, 0.4f, 0.6f, 1f) };
+        var mixed = new NwcMesh
+        {
+            Id = 10,
+            Name = "MixedTinted",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineIndices = [0, 1],
+            LineColors = [new RgbaColor(1f, 0f, 0f, 0.25f), new RgbaColor(0f, 1f, 0f, 0.25f), new RgbaColor(0f, 0f, 1f, 0.25f)],
+            Material = tint,
+        };
+
+        var glb = ExportGlb([mixed], tint);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var triangles = PrimitiveOf(root, 0, TrianglesMode);
+        var line = PrimitiveOf(root, 0, LinesMode);
+
+        // Both primitives share the position accessor; only the line carries COLOR_0 (one entry per vertex).
+        Assert.Equal(triangles.GetProperty("attributes").GetProperty("POSITION").GetInt32(), line.GetProperty("attributes").GetProperty("POSITION").GetInt32());
+        Assert.False(triangles.GetProperty("attributes").TryGetProperty("COLOR_0", out _));
+        Assert.True(line.GetProperty("attributes").TryGetProperty("COLOR_0", out var colorAccessor));
+        Assert.Equal(3, root.GetProperty("accessors")[colorAccessor.GetInt32()].GetProperty("count").GetInt32());
+
+        // The triangles keep the tint and stay opaque.
+        AssertColor([0.2f, 0.4f, 0.6f, 1f], BaseColorOf(root, triangles));
+        Assert.Equal("OPAQUE", AlphaModeOf(root, triangles));
+
+        // The line shows its own colours, translucent.
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([1f, 0f, 0f, 0.25f], colors[0]);
+        AssertColor([0f, 1f, 0f, 0.25f], colors[1]);
+        Assert.Equal("BLEND", AlphaModeOf(root, line));
+        Assert.NotEqual(triangles.GetProperty("material").GetInt32(), line.GetProperty("material").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void GlbExporter_TransparentLineColors_DoNotBlendTheMaterialSharedWithTriangles(bool triangleMeshFirst)
+    {
+        var white = new NwcMaterial { Id = 1, Name = "White", Color = RgbaColor.White };
+        var half = new RgbaColor(1f, 0f, 0f, 0.5f);
+        var triangleMesh = TriangleMesh(1, white);
+        var lineMesh = LineMesh(2, white, [half, half]);
+        NwcMesh[] meshes = triangleMeshFirst ? [triangleMesh, lineMesh] : [lineMesh, triangleMesh];
+
+        var glb = ExportGlb(meshes, white);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var triangles = PrimitiveOf(root, triangleMeshFirst ? 0 : 1, TrianglesMode);
+        var line = PrimitiveOf(root, triangleMeshFirst ? 1 : 0, LinesMode);
+
+        Assert.Equal("OPAQUE", AlphaModeOf(root, triangles));
+        AssertColor([1f, 1f, 1f, 1f], BaseColorOf(root, triangles));
+        Assert.Equal("BLEND", AlphaModeOf(root, line));
+        Assert.NotEqual(triangles.GetProperty("material").GetInt32(), line.GetProperty("material").GetInt32());
+        AssertColor([1f, 0f, 0f, 0.5f], EffectiveColors(glb, root, line)[0]);
+        Assert.Single(root.GetProperty("materials").EnumerateArray(), material => material.TryGetProperty("alphaMode", out _));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorCountDifferentFromVertexCount_KeepsSourceMaterialAndWritesNoColor()
+    {
+        var tint = new NwcMaterial { Id = 1, Name = "Tint", Color = new RgbaColor(0.2f, 0.4f, 0.6f, 1f) };
+        var translucent = new RgbaColor(1f, 0f, 0f, 0.25f);
+        var mixed = new NwcMesh
+        {
+            Id = 1,
+            Name = "Mixed",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineIndices = [0, 1],
+            LineColors = [translucent, translucent],
+            Material = tint,
+        };
+        var pure = LineMesh(2, tint, [translucent, translucent, translucent]);
+
+        var glb = ExportGlb([mixed, pure], tint);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var materials = root.GetProperty("materials");
+        Assert.Equal(1, materials.GetArrayLength());
+        Assert.DoesNotContain(materials.EnumerateArray(), material => material.TryGetProperty("alphaMode", out _));
+        foreach (var primitive in new[] { PrimitiveOf(root, 0, TrianglesMode), PrimitiveOf(root, 0, LinesMode), PrimitiveOf(root, 1, LinesMode) })
+        {
+            Assert.False(primitive.GetProperty("attributes").TryGetProperty("COLOR_0", out _));
+            Assert.Equal(0, primitive.GetProperty("material").GetInt32());
+            AssertColor([0.2f, 0.4f, 0.6f, 1f], EffectiveColors(glb, root, primitive)[0]);
+        }
+    }
+
+    [Fact]
+    public void GlbExporter_TranslucentSourceMaterial_OpaqueLineColors_LineColorReplacesMaterialColor()
+    {
+        var glass = new NwcMaterial { Id = 1, Name = "Glass", Color = new RgbaColor(0.8f, 0.8f, 0.9f, 0.5f) };
+        var green = new RgbaColor(0f, 1f, 0f, 1f);
+
+        var glb = ExportGlb([TriangleMesh(1, glass), LineMesh(2, glass, [green, green])], glass);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var triangles = PrimitiveOf(root, 0, TrianglesMode);
+        var line = PrimitiveOf(root, 1, LinesMode);
+        AssertColor([0.8f, 0.8f, 0.9f, 0.5f], BaseColorOf(root, triangles));
+        Assert.Equal("BLEND", AlphaModeOf(root, triangles));
+        Assert.All(EffectiveColors(glb, root, line), color => AssertColor([0f, 1f, 0f, 1f], color));
+        Assert.Equal("OPAQUE", AlphaModeOf(root, line));
+    }
+
+    [Fact]
+    public void GlbExporter_TranslucentColorOfAnUnusedVertex_DoesNotBlendTheLine()
+    {
+        var white = new NwcMaterial { Id = 1, Name = "White", Color = RgbaColor.White };
+        var opaque = new RgbaColor(1f, 0f, 0f, 1f);
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Mixed",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineIndices = [0, 1],
+            LineColors = [opaque, opaque, new RgbaColor(0f, 0f, 1f, 0.5f)],
+            Material = white,
+        };
+
+        var glb = ExportGlb([mesh], white);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        Assert.DoesNotContain(root.GetProperty("materials").EnumerateArray(), material => material.TryGetProperty("alphaMode", out _));
+        Assert.Equal("OPAQUE", AlphaModeOf(root, PrimitiveOf(root, 0, LinesMode)));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorsOutsideUnitRange_AreClampedInColor0()
+    {
+        var start = new RgbaColor(2f, -1f, 0.5f, 1f);
+        var end = new RgbaColor(0f, 0.25f, 1.5f, 3f);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([1f, 0f, 0.5f, 1f], colors[0]);
+        AssertColor([0f, 0.25f, 1f, 1f], colors[1]);
+        Assert.Equal("OPAQUE", AlphaModeOf(root, line));
+    }
+
+    [Fact]
+    public void GlbExporter_NonFiniteLineColorComponents_AreWrittenAsZero()
+    {
+        var start = new RgbaColor(float.NaN, float.PositiveInfinity, float.NegativeInfinity, 1f);
+        var end = new RgbaColor(0.5f, 0.5f, 0.5f, float.NaN);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([0f, 0f, 0f, 1f], colors[0]);
+        AssertColor([0.5f, 0.5f, 0.5f, 0f], colors[1]);
+        Assert.All(colors.SelectMany(color => color), component => Assert.True(float.IsFinite(component)));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorsClampEveryComponentOnBothSides()
+    {
+        var below = new RgbaColor(-1f, -1f, -1f, -1f);
+        var above = new RgbaColor(5f, 5f, 5f, 5f);
+        var largest = new RgbaColor(float.MaxValue, float.MinValue, float.MaxValue, float.MinValue);
+
+        var glb = ExportGlb([LineMesh(1, null, [below, above]), LineMesh(2, null, [largest, largest])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var first = EffectiveColors(glb, root, PrimitiveOf(root, 0, LinesMode));
+        AssertColor([0f, 0f, 0f, 0f], first[0]);
+        AssertColor([1f, 1f, 1f, 1f], first[1]);
+        var second = EffectiveColors(glb, root, PrimitiveOf(root, 1, LinesMode));
+        Assert.All(second, color => AssertColor([1f, 0f, 1f, 0f], color));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorOfAnUnusedVertex_IsSanitisedToo()
+    {
+        var opaque = new RgbaColor(1f, 0f, 0f, 1f);
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Mixed",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [],
+            LineIndices = [0, 1],
+            LineColors = [opaque, opaque, new RgbaColor(float.NaN, 5f, -5f, float.NaN)],
+        };
+
+        var glb = ExportGlb([mesh]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        AssertColor([0f, 1f, 0f, 0f], EffectiveColors(glb, root, line)[2]);
+        Assert.Equal("OPAQUE", AlphaModeOf(root, line));
+    }
+
+    [Fact]
+    public void GlbExporter_LineColorsInUnitRange_AreWrittenExactly()
+    {
+        var start = new RgbaColor(100f / 255f, 37f / 255f, 211f / 255f, 128f / 255f);
+        var end = new RgbaColor(0.123456789f, 1f, 0f, 1f);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var colors = EffectiveColors(glb, root, PrimitiveOf(root, 0, LinesMode));
+        float[][] expected = [[start.R, start.G, start.B, start.A], [end.R, end.G, end.B, end.A]];
+        for (int v = 0; v < expected.Length; v++)
+        {
+            Assert.Equal(expected[v], colors[v]);
+        }
+    }
+
+    [Theory]
+    [InlineData(-0.5f, 0f, "BLEND")]
+    [InlineData(float.NaN, 0f, "BLEND")]
+    [InlineData(1.5f, 1f, "OPAQUE")]
+    [InlineData(float.PositiveInfinity, 0f, "BLEND")]
+    [InlineData(float.NegativeInfinity, 0f, "BLEND")]
+    public void GlbExporter_LineColorAlphaOutsideUnitRange_BlendsOnTheWrittenAlpha(float alpha, float expectedWrittenAlpha, string expectedAlphaMode)
+    {
+        var color = new RgbaColor(1f, 0f, 0f, alpha);
+
+        var glb = ExportGlb([LineMesh(1, null, [color, color])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        Assert.Equal(expectedAlphaMode, AlphaModeOf(root, line));
+        Assert.Equal(expectedWrittenAlpha, EffectiveColors(glb, root, line)[0][3]);
+    }
+
+    [Theory]
+    [InlineData(1f, 0.5f)]
+    [InlineData(0.5f, 1f)]
+    public void GlbExporter_LineSegmentWithOneTranslucentEndpoint_BlendsTheLine(float startAlpha, float endAlpha)
+    {
+        var start = new RgbaColor(1f, 0f, 0f, startAlpha);
+        var end = new RgbaColor(0f, 0f, 1f, endAlpha);
+
+        var glb = ExportGlb([LineMesh(1, null, [start, end])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var line = PrimitiveOf(root, 0, LinesMode);
+        Assert.Equal("BLEND", AlphaModeOf(root, line));
+        var colors = EffectiveColors(glb, root, line);
+        AssertColor([1f, 0f, 0f, startAlpha], colors[0]);
+        AssertColor([0f, 0f, 1f, endAlpha], colors[1]);
+    }
+
+    [Fact]
+    public void GlbExporter_LaterTranslucentSegment_BlendsTheLine()
+    {
+        var opaque = new RgbaColor(1f, 0f, 0f, 1f);
+        var half = new RgbaColor(0f, 0f, 1f, 0.5f);
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "TwoSegments",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(2, 0, 0), new Vector3d(3, 0, 0)],
+            Indices = [],
+            LineIndices = [0, 1, 2, 3],
+            LineColors = [opaque, opaque, half, half],
+        };
+
+        var glb = ExportGlb([mesh]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        Assert.Equal("BLEND", AlphaModeOf(root, PrimitiveOf(root, 0, LinesMode)));
+    }
+
+    [Fact]
+    public void GlbExporter_LineMaterials_AreSharedPerSourceMaterialAndKind()
+    {
+        var tint = new NwcMaterial { Id = 1, Name = "Tint", Color = new RgbaColor(0.2f, 0.4f, 0.6f, 1f) };
+        var red = new RgbaColor(1f, 0f, 0f, 1f);
+        var halfGreen = new RgbaColor(0f, 1f, 0f, 0.5f);
+        var blue = new RgbaColor(0f, 0f, 1f, 1f);
+        var halfYellow = new RgbaColor(1f, 1f, 0f, 0.5f);
+        NwcMesh[] meshes =
+        [
+            TriangleMesh(1, tint),
+            LineMesh(2, tint, [red, red]),
+            LineMesh(3, tint, [halfGreen, halfGreen]),
+            LineMesh(4, tint, [blue, blue]),
+            LineMesh(5, tint, [halfYellow, halfYellow]),
+        ];
+
+        var glb = ExportGlb(meshes, tint);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var triangles = PrimitiveOf(root, 0, TrianglesMode);
+        var lines = Enumerable.Range(1, 4).Select(m => PrimitiveOf(root, m, LinesMode)).ToArray();
+        int[] materialOf = [.. lines.Select(line => line.GetProperty("material").GetInt32())];
+
+        // The source material, one opaque line material and one translucent line material.
+        Assert.Equal(3, root.GetProperty("materials").GetArrayLength());
+        Assert.Equal(materialOf[0], materialOf[2]);
+        Assert.Equal(materialOf[1], materialOf[3]);
+        Assert.NotEqual(materialOf[0], materialOf[1]);
+        Assert.DoesNotContain(materialOf, index => index == triangles.GetProperty("material").GetInt32());
+        Assert.Equal("OPAQUE", AlphaModeOf(root, triangles));
+        AssertColor([0.2f, 0.4f, 0.6f, 1f], BaseColorOf(root, triangles));
+
+        RgbaColor[] expected = [red, halfGreen, blue, halfYellow];
+        for (int i = 0; i < lines.Length; i++)
+        {
+            AssertColor([expected[i].R, expected[i].G, expected[i].B, expected[i].A], EffectiveColors(glb, root, lines[i])[0]);
+            Assert.Equal(expected[i].A < 1f ? "BLEND" : "OPAQUE", AlphaModeOf(root, lines[i]));
+        }
+    }
+
+    [Fact]
+    public void GlbExporter_TransparentLineColorsWithoutMaterial_ShareOneBlendMaterial()
+    {
+        var half = new RgbaColor(0f, 0f, 1f, 0.5f);
+
+        var glb = ExportGlb([LineMesh(1, null, [half, half]), LineMesh(2, null, [half, half])]);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var first = PrimitiveOf(root, 0, LinesMode);
+        var second = PrimitiveOf(root, 1, LinesMode);
+        Assert.Equal(1, root.GetProperty("materials").GetArrayLength());
+        Assert.Equal(first.GetProperty("material").GetInt32(), second.GetProperty("material").GetInt32());
+        Assert.Equal("BLEND", AlphaModeOf(root, first));
+        AssertColor([0f, 0f, 1f, 0.5f], EffectiveColors(glb, root, first)[1]);
+    }
+
+    [Fact]
+    public void GlbExporter_TriangleMeshWithLineColorsAndNoLines_WritesNoLineData()
+    {
+        var white = new NwcMaterial { Id = 1, Name = "White", Color = RgbaColor.White };
+        var half = new RgbaColor(1f, 0f, 0f, 0.5f);
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Triangle",
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            LineColors = [half, half, half],
+            Material = white,
+        };
+
+        var glb = ExportGlb([mesh], white);
+
+        using var doc = ReadGlbJson(glb);
+        var root = doc.RootElement;
+        var primitive = Assert.Single(root.GetProperty("meshes")[0].GetProperty("primitives").EnumerateArray());
+        Assert.Equal(TrianglesMode, primitive.GetProperty("mode").GetInt32());
+        Assert.False(primitive.GetProperty("attributes").TryGetProperty("COLOR_0", out _));
+        Assert.Equal(1, root.GetProperty("materials").GetArrayLength());
+        Assert.Equal("OPAQUE", AlphaModeOf(root, primitive));
+        Assert.Equal(3, root.GetProperty("accessors").GetArrayLength()); // positions, normals, triangle indices
+    }
+
+    [Fact]
+    public void GlbExporter_LineScene_IsDeterministic()
+    {
+        var tint = new NwcMaterial { Id = 1, Name = "Tint", Color = new RgbaColor(0.2f, 0.4f, 0.6f, 1f) };
+        var other = new NwcMaterial { Id = 2, Name = "Other", Color = RgbaColor.White };
+        var half = new RgbaColor(1f, 0f, 0f, 0.5f);
+        var red = new RgbaColor(1f, 0f, 0f, 1f);
+        NwcMesh[] Scene() =>
+        [
+            TriangleMesh(1, tint),
+            LineMesh(2, tint, [half, half]),
+            LineMesh(3, other, [red, red]),
+            LineMesh(4, null, [half, half]),
+            LineMesh(5, tint, [red, red]),
+            LineMesh(6, tint, null),
+        ];
+
+        Assert.Equal(ExportGlb(Scene(), tint, other), ExportGlb(Scene(), tint, other));
+    }
+
+    private const int LinesMode = 1;
+    private const int TrianglesMode = 4;
+
+    private static byte[] ExportGlb(IReadOnlyList<NwcMesh> meshes, params NwcMaterial[] materials)
+    {
+        using var output = new MemoryStream();
+        GlbExporter.Write(meshes, materials, output, worldCoordinates: false);
+        return output.ToArray();
+    }
+
+    private static NwcMesh TriangleMesh(int id, NwcMaterial? material) => new()
+    {
+        Id = id,
+        Name = $"Triangle{id}",
+        Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+        Indices = [0, 1, 2],
+        Material = material,
+    };
+
+    private static NwcMesh LineMesh(int id, NwcMaterial? material, RgbaColor[]? colors) => new()
+    {
+        Id = id,
+        Name = $"Line{id}",
+        Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0)],
+        Indices = [],
+        LineIndices = [0, 1],
+        LineColors = colors,
+        Material = material,
+    };
+
+    private static JsonElement PrimitiveOf(JsonElement root, int mesh, int mode) =>
+        root.GetProperty("meshes")[mesh].GetProperty("primitives").EnumerateArray().Single(p => p.GetProperty("mode").GetInt32() == mode);
+
+    // A primitive without a material uses the glTF default material: white and OPAQUE.
+    private static JsonElement? MaterialOf(JsonElement root, JsonElement primitive) =>
+        primitive.TryGetProperty("material", out var index) ? root.GetProperty("materials")[index.GetInt32()] : null;
+
+    private static string AlphaModeOf(JsonElement root, JsonElement primitive) =>
+        MaterialOf(root, primitive) is { } material && material.TryGetProperty("alphaMode", out var mode) ? mode.GetString()! : "OPAQUE";
+
+    private static float[] BaseColorOf(JsonElement root, JsonElement primitive) =>
+        MaterialOf(root, primitive) is { } material
+            ? [.. material.GetProperty("pbrMetallicRoughness").GetProperty("baseColorFactor").EnumerateArray().Select(c => c.GetSingle())]
+            : [1f, 1f, 1f, 1f];
+
+    // The colour glTF renders at each vertex of a primitive: baseColorFactor times COLOR_0, component-wise.
+    private static float[][] EffectiveColors(byte[] glb, JsonElement root, JsonElement primitive)
+    {
+        var factor = BaseColorOf(root, primitive);
+        var attributes = primitive.GetProperty("attributes");
+        int count = root.GetProperty("accessors")[attributes.GetProperty("POSITION").GetInt32()].GetProperty("count").GetInt32();
+        if (!attributes.TryGetProperty("COLOR_0", out var colorIndex))
+        {
+            return [.. Enumerable.Repeat(factor, count)];
+        }
+
+        var accessor = root.GetProperty("accessors")[colorIndex.GetInt32()];
+        Assert.Equal("VEC4", accessor.GetProperty("type").GetString());
+        Assert.Equal(5126, accessor.GetProperty("componentType").GetInt32());
+        Assert.Equal(count, accessor.GetProperty("count").GetInt32());
+        var view = root.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+        int start = 28 + (int)BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12))
+            + view.GetProperty("byteOffset").GetInt32() + accessor.GetProperty("byteOffset").GetInt32();
+        return [.. Enumerable.Range(0, count).Select(v =>
+            Enumerable.Range(0, 4).Select(c => factor[c] * BitConverter.ToSingle(glb, start + v * 16 + c * 4)).ToArray())];
+    }
+
+    private static void AssertColor(float[] expected, float[] actual)
+    {
+        Assert.Equal(4, actual.Length);
+        for (int c = 0; c < 4; c++)
+        {
+            Assert.Equal(expected[c], actual[c], 4);
+        }
+    }
 }

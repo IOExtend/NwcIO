@@ -66,16 +66,19 @@ public static class GlbExporter
             matIndexMap[materialTable[i]] = i;
         }
 
+        // Copies of a source material made for line primitives that export COLOR_0, one per source material and blend flag.
+        var materialsWithBlend = new HashSet<int>();
+        var lineMaterialMap = new Dictionary<(int? Source, bool Blend), int>();
+
         for (int m = 0; m < meshes.Count; m++)
         {
             var mesh = meshes[m];
             var vertices = worldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
-            if (vertices.Count < 3 || mesh.Indices.Count < 3)
+            int vCount = vertices.Count;
+            if (vCount < 2 || (mesh.Indices.Count < 3 && mesh.LineIndices.Count < 2))
             {
                 continue;
             }
-
-            int vCount = vertices.Count;
 
             if (vertices.Any(position =>
                 !float.IsFinite((float)position.X) ||
@@ -103,13 +106,25 @@ public static class GlbExporter
                 indices.Add(i2);
             }
 
-            if (indices.Count == 0)
+            // Keep only valid line segments that reference existing vertices.
+            var lineIndices = new List<int>();
+            for (int i = 0; i <= mesh.LineIndices.Count - 2; i += 2)
+            {
+                int i0 = mesh.LineIndices[i];
+                int i1 = mesh.LineIndices[i + 1];
+                if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount)
+                {
+                    continue;
+                }
+
+                lineIndices.Add(i0);
+                lineIndices.Add(i1);
+            }
+
+            if (indices.Count == 0 && lineIndices.Count == 0)
             {
                 continue;
             }
-
-            // Compute vertex normals
-            var normals = ComputeNormals(vertices, indices);
 
             // A. Vertex Positions
             AlignStream(binMs, 4);
@@ -156,69 +171,154 @@ public static class GlbExporter
                 [(float)minX, (float)minY, (float)minZ],
                 [(float)maxX, (float)maxY, (float)maxZ]));
 
-            // B. Normals
-            AlignStream(binMs, 4);
-            int normOffset = (int)binMs.Position;
-            var normSpan = new byte[vCount * 12];
-            for (int v = 0; v < vCount; v++)
+            // B. Triangle Normals (if triangles exist)
+            int? normAccessorIdx = null;
+            if (indices.Count > 0)
             {
-                var n = normals[v];
-                BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12), n.X);
-                BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 4), n.Y);
-                BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 8), n.Z);
-            }
-
-            binMs.Write(normSpan);
-            int normViewIdx = bufferViews.Count;
-            bufferViews.Add(new BufferViewDef(normOffset, normSpan.Length, TargetArrayBuffer));
-
-            int normAccessorIdx = accessors.Count;
-            accessors.Add(new AccessorDef(
-                normViewIdx,
-                0,
-                ComponentTypeFloat,
-                vCount,
-                "VEC3",
-                null,
-                null));
-
-            // C. Indices
-            AlignStream(binMs, 4);
-            int idxOffset = (int)binMs.Position;
-            int idxCount = indices.Count;
-            bool useShort = vCount <= 65535;
-
-            byte[] idxSpan;
-            if (useShort)
-            {
-                idxSpan = new byte[idxCount * 2];
-                for (int i = 0; i < idxCount; i++)
+                var normals = ComputeNormals(vertices, indices);
+                AlignStream(binMs, 4);
+                int normOffset = (int)binMs.Position;
+                var normSpan = new byte[vCount * 12];
+                for (int v = 0; v < vCount; v++)
                 {
-                    BinaryPrimitives.WriteUInt16LittleEndian(idxSpan.AsSpan(i * 2), (ushort)indices[i]);
+                    var n = normals[v];
+                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12), n.X);
+                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 4), n.Y);
+                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 8), n.Z);
                 }
+
+                binMs.Write(normSpan);
+                int normViewIdx = bufferViews.Count;
+                bufferViews.Add(new BufferViewDef(normOffset, normSpan.Length, TargetArrayBuffer));
+
+                normAccessorIdx = accessors.Count;
+                accessors.Add(new AccessorDef(
+                    normViewIdx,
+                    0,
+                    ComponentTypeFloat,
+                    vCount,
+                    "VEC3",
+                    null,
+                    null));
             }
-            else
+
+            // C. Line Colors (if line colors exist and match vertex count)
+            var lineColors = lineIndices.Count > 0 && mesh.LineColors is { Count: > 0 } storedColors && storedColors.Count == vCount
+                ? storedColors
+                : null;
+            int? colAccessorIdx = null;
+            if (lineColors is not null)
             {
-                idxSpan = new byte[idxCount * 4];
-                for (int i = 0; i < idxCount; i++)
+                AlignStream(binMs, 4);
+                int colOffset = (int)binMs.Position;
+                var colSpan = new byte[vCount * 16];
+                for (int v = 0; v < vCount; v++)
                 {
-                    BinaryPrimitives.WriteUInt32LittleEndian(idxSpan.AsSpan(i * 4), (uint)indices[i]);
+                    var c = lineColors[v];
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16), ColorComponent(c.R));
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 4), ColorComponent(c.G));
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 8), ColorComponent(c.B));
+                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 12), ColorComponent(c.A));
                 }
+
+                binMs.Write(colSpan);
+                int colViewIdx = bufferViews.Count;
+                bufferViews.Add(new BufferViewDef(colOffset, colSpan.Length, TargetArrayBuffer));
+
+                colAccessorIdx = accessors.Count;
+                accessors.Add(new AccessorDef(
+                    colViewIdx,
+                    0,
+                    ComponentTypeFloat,
+                    vCount,
+                    "VEC4",
+                    null,
+                    null));
             }
 
-            binMs.Write(idxSpan);
-            int idxViewIdx = bufferViews.Count;
-            bufferViews.Add(new BufferViewDef(idxOffset, idxSpan.Length, TargetElementArrayBuffer));
+            // D. Triangle Indices
+            int? triIdxAccessor = null;
+            if (indices.Count > 0)
+            {
+                AlignStream(binMs, 4);
+                int idxOffset = (int)binMs.Position;
+                int idxCount = indices.Count;
+                bool useShort = vCount <= 65535;
 
-            int idxAccessorIdx = accessors.Count;
-            accessors.Add(new AccessorDef(
-                idxViewIdx,
-                0,
-                useShort ? ComponentTypeUnsignedShort : ComponentTypeUnsignedInt,
-                idxCount,
-                "SCALAR",
-                null,
-                null));
+                byte[] idxSpan;
+                if (useShort)
+                {
+                    idxSpan = new byte[idxCount * 2];
+                    for (int i = 0; i < idxCount; i++)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(idxSpan.AsSpan(i * 2), (ushort)indices[i]);
+                    }
+                }
+                else
+                {
+                    idxSpan = new byte[idxCount * 4];
+                    for (int i = 0; i < idxCount; i++)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(idxSpan.AsSpan(i * 4), (uint)indices[i]);
+                    }
+                }
+
+                binMs.Write(idxSpan);
+                int idxViewIdx = bufferViews.Count;
+                bufferViews.Add(new BufferViewDef(idxOffset, idxSpan.Length, TargetElementArrayBuffer));
+
+                triIdxAccessor = accessors.Count;
+                accessors.Add(new AccessorDef(
+                    idxViewIdx,
+                    0,
+                    useShort ? ComponentTypeUnsignedShort : ComponentTypeUnsignedInt,
+                    idxCount,
+                    "SCALAR",
+                    null,
+                    null));
+            }
+
+            // E. Line Indices
+            int? lineIdxAccessor = null;
+            if (lineIndices.Count > 0)
+            {
+                AlignStream(binMs, 4);
+                int idxOffset = (int)binMs.Position;
+                int idxCount = lineIndices.Count;
+                bool useShort = vCount <= 65535;
+
+                byte[] idxSpan;
+                if (useShort)
+                {
+                    idxSpan = new byte[idxCount * 2];
+                    for (int i = 0; i < idxCount; i++)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(idxSpan.AsSpan(i * 2), (ushort)lineIndices[i]);
+                    }
+                }
+                else
+                {
+                    idxSpan = new byte[idxCount * 4];
+                    for (int i = 0; i < idxCount; i++)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(idxSpan.AsSpan(i * 4), (uint)lineIndices[i]);
+                    }
+                }
+
+                binMs.Write(idxSpan);
+                int idxViewIdx = bufferViews.Count;
+                bufferViews.Add(new BufferViewDef(idxOffset, idxSpan.Length, TargetElementArrayBuffer));
+
+                lineIdxAccessor = accessors.Count;
+                accessors.Add(new AccessorDef(
+                    idxViewIdx,
+                    0,
+                    useShort ? ComponentTypeUnsignedShort : ComponentTypeUnsignedInt,
+                    idxCount,
+                    "SCALAR",
+                    null,
+                    null));
+            }
 
             // Material assignment
             int? matIdx = null;
@@ -234,12 +334,64 @@ public static class GlbExporter
                 matIdx = foundIdx;
             }
 
-            gltfMeshes.Add(new MeshDef(
-                mesh.Name,
-                posAccessorIdx,
-                normAccessorIdx,
-                idxAccessorIdx,
-                matIdx));
+            // glTF multiplies COLOR_0 by baseColorFactor, but a stored line colour replaces the material colour, so a line
+            // that exports COLOR_0 gets a white copy of its source material and shows only its own colours. The copy is BLEND
+            // only when a segment colour is translucent. The source material, shared with the triangles and the lines
+            // without COLOR_0, keeps its own colour and alphaMode.
+            int? lineMatIdx = matIdx;
+            if (lineColors is not null)
+            {
+                bool blend = lineIndices.Any(i => ColorComponent(lineColors[i].A) < 1.0f);
+                if (matIdx.HasValue || blend)
+                {
+                    if (!lineMaterialMap.TryGetValue((matIdx, blend), out int lineMaterialIdx))
+                    {
+                        var source = mesh.Material;
+                        lineMaterialIdx = materialTable.Count;
+                        materialTable.Add(new NwcMaterial
+                        {
+                            Id = -materialTable.Count - 1,
+                            Name = source is null ? "LineColors_Blend" : source.Name + (blend ? "_LineBlend" : "_Line"),
+                            Color = RgbaColor.White,
+                            DoubleSided = source?.DoubleSided ?? true,
+                            Metallic = source?.Metallic ?? 0f,
+                            Roughness = source?.Roughness ?? 1f
+                        });
+                        lineMaterialMap[(matIdx, blend)] = lineMaterialIdx;
+                        if (blend)
+                        {
+                            materialsWithBlend.Add(lineMaterialIdx);
+                        }
+                    }
+
+                    lineMatIdx = lineMaterialIdx;
+                }
+            }
+
+            var primitives = new List<PrimitiveDef>();
+            if (triIdxAccessor.HasValue && normAccessorIdx.HasValue)
+            {
+                primitives.Add(new PrimitiveDef(
+                    posAccessorIdx,
+                    normAccessorIdx.Value,
+                    null,
+                    triIdxAccessor.Value,
+                    matIdx,
+                    4)); // TRIANGLES
+            }
+
+            if (lineIdxAccessor.HasValue)
+            {
+                primitives.Add(new PrimitiveDef(
+                    posAccessorIdx,
+                    null,
+                    colAccessorIdx,
+                    lineIdxAccessor.Value,
+                    lineMatIdx,
+                    1)); // LINES
+            }
+
+            gltfMeshes.Add(new MeshDef(mesh.Name, primitives));
         }
 
         // Align BIN chunk to 4 bytes
@@ -254,7 +406,8 @@ public static class GlbExporter
             bufferViews,
             binData.Length,
             generatorName ?? "NwcIO glTF 2.0 Exporter",
-            viewpoints);
+            viewpoints,
+            materialsWithBlend);
 
         // Align JSON chunk to 4 bytes with 0x20 spaces as per glTF spec
         int jsonPadding = (4 - (jsonData.Length % 4)) % 4;
@@ -297,7 +450,8 @@ public static class GlbExporter
         List<BufferViewDef> bufferViews,
         int binByteLength,
         string generator,
-        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
+        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null,
+        HashSet<int>? materialsWithBlend = null)
     {
         using var ms = new MemoryStream();
         using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = false }))
@@ -417,21 +571,30 @@ public static class GlbExporter
                 writer.WriteStartObject();
                 writer.WriteString("name", m.Name);
                 writer.WriteStartArray("primitives");
-                writer.WriteStartObject();
-
-                writer.WriteStartObject("attributes");
-                writer.WriteNumber("POSITION", m.PositionAccessor);
-                writer.WriteNumber("NORMAL", m.NormalAccessor);
-                writer.WriteEndObject();
-
-                writer.WriteNumber("indices", m.IndicesAccessor);
-                if (m.MaterialIndex is { } matIdx)
+                foreach (var p in m.Primitives)
                 {
-                    writer.WriteNumber("material", matIdx);
-                }
+                    writer.WriteStartObject();
+                    writer.WriteStartObject("attributes");
+                    writer.WriteNumber("POSITION", p.PositionAccessor);
+                    if (p.NormalAccessor is { } normAcc)
+                    {
+                        writer.WriteNumber("NORMAL", normAcc);
+                    }
+                    if (p.ColorAccessor is { } colAcc)
+                    {
+                        writer.WriteNumber("COLOR_0", colAcc);
+                    }
+                    writer.WriteEndObject();
 
-                writer.WriteNumber("mode", 4); // TRIANGLES
-                writer.WriteEndObject();
+                    writer.WriteNumber("indices", p.IndicesAccessor);
+                    if (p.MaterialIndex is { } matIdx)
+                    {
+                        writer.WriteNumber("material", matIdx);
+                    }
+
+                    writer.WriteNumber("mode", p.Mode);
+                    writer.WriteEndObject();
+                }
                 writer.WriteEndArray();
                 writer.WriteEndObject();
             }
@@ -446,6 +609,11 @@ public static class GlbExporter
                 writer.WriteStartObject();
                 writer.WriteString("name", mat.Name);
                 writer.WriteBoolean("doubleSided", mat.DoubleSided);
+
+                if ((materialsWithBlend != null && materialsWithBlend.Contains(i)) || mat.Color.A < 1.0f)
+                {
+                    writer.WriteString("alphaMode", "BLEND");
+                }
 
                 writer.WriteStartObject("pbrMetallicRoughness");
                 writer.WriteStartArray("baseColorFactor");
@@ -584,6 +752,10 @@ public static class GlbExporter
     private static double PositiveOr(double value, double fallback) =>
         double.IsFinite(value) && value > 0 ? value : fallback;
 
+    // glTF requires COLOR_0 floats to be finite and within [0,1]. A non-finite component is written as 0, as the
+    // material factors are; the written alpha is also the one that decides BLEND.
+    private static float ColorComponent(float value) => float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : 0f;
+
     private static void WriteSafeFloatValue(Utf8JsonWriter writer, float val)
     {
         writer.WriteNumberValue(float.IsFinite(val) ? val : 0.0f);
@@ -618,10 +790,15 @@ public static class GlbExporter
         float[]? Min,
         float[]? Max);
 
+    private readonly record struct PrimitiveDef(
+        int PositionAccessor,
+        int? NormalAccessor,
+        int? ColorAccessor,
+        int IndicesAccessor,
+        int? MaterialIndex,
+        int Mode);
+
     private readonly record struct MeshDef(
         string Name,
-        int PositionAccessor,
-        int NormalAccessor,
-        int IndicesAccessor,
-        int? MaterialIndex);
+        IReadOnlyList<PrimitiveDef> Primitives);
 }
