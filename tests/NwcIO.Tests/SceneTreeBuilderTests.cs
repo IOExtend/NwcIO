@@ -191,7 +191,7 @@ public class SceneTreeBuilderTests
     }
 
     [Fact]
-    public void Build_RepeatedFamilyMarker_StaysUnderTheSameCategory()
+    public void Build_UnknownMarkersAfterKnownCategory_StayBelowIt()
     {
         var records = new List<NwcPropertyRecord>
         {
@@ -199,14 +199,14 @@ public class SceneTreeBuilderTests
             new() { FirstInt = 2, Tag = 53, Name = "Walls", Class = "Node" },
             new() { FirstInt = 3, Tag = 52, Name = "Kategorie", Class = "LcRevitCollection" },
             new() { FirstInt = 4, Tag = 53, Name = "Basic Wall", Class = "Node" },
-            new() { FirstInt = 5, Tag = 52, Name = "Familie", Class = "LcRevitCollection" },
+            new() { FirstInt = 5, Tag = 52, Name = "Aile", Class = "LcRevitCollection" },
             new() { FirstInt = 6, Tag = 53, Name = "Generic 200", Class = "Node" },
-            new() { FirstInt = 7, Tag = 52, Name = "Typ", Class = "LcRevitCollection" },
+            new() { FirstInt = 7, Tag = 52, Name = "Tur", Class = "LcRevitCollection" },
             new() { FirstInt = 8, Tag = 52, Name = "Wall 1", Class = "LcRevitData_Element" },
             new() { FirstInt = 9, Tag = 53, Name = "Basic Wall 2", Class = "Node" },
-            new() { FirstInt = 10, Tag = 52, Name = "Familie", Class = "LcRevitCollection" },
+            new() { FirstInt = 10, Tag = 52, Name = "Aile", Class = "LcRevitCollection" },
             new() { FirstInt = 11, Tag = 53, Name = "Generic 300", Class = "Node" },
-            new() { FirstInt = 12, Tag = 52, Name = "Typ", Class = "LcRevitCollection" },
+            new() { FirstInt = 12, Tag = 52, Name = "Tur", Class = "LcRevitCollection" },
             new() { FirstInt = 13, Tag = 52, Name = "Wall 2", Class = "LcRevitData_Element" },
         };
 
@@ -219,6 +219,38 @@ public class SceneTreeBuilderTests
         var secondType = Assert.Single(secondFamily.Children);
         Assert.Equal("Generic 300", secondType.Name);
         Assert.Equal("Wall 2", Assert.Single(secondType.Children).Name);
+    }
+
+    // Family before Category can only be told apart from record order when the table is consulted.
+    [Theory]
+    [InlineData("категория", "семейство", "тип")]
+    [InlineData("Category", "Family", "Type")]
+    [InlineData("Kategorie", "Familie", "Typ")]
+    [InlineData("Catégorie", "Famille", "Type")]
+    [InlineData("Categoría", "Familia", "Tipo")]
+    [InlineData("Categoria", "Famiglia", "Tipo")]
+    [InlineData("Categoria", "Família", "Tipo")]
+    [InlineData("Kategoria", "Rodzina", "Typ")]
+    [InlineData("カテゴリ", "ファミリ", "タイプ")]
+    [InlineData("类别", "族", "类型")]
+    [InlineData("類別", "族", "類型")]
+    [InlineData("카테고리", "패밀리", "유형")]
+    public void Build_LocalizedMarkers_UseTheTableNotRecordOrder(string category, string family, string type)
+    {
+        var records = new List<NwcPropertyRecord>
+        {
+            new() { FirstInt = 1, Tag = 52, Name = "Level 1", Class = "LcRevitLayer" },
+            new() { FirstInt = 2, Tag = 52, Name = family, Class = "LcRevitCollection" },
+            new() { FirstInt = 3, Tag = 52, Name = category, Class = "LcRevitCollection" },
+            new() { FirstInt = 4, Tag = 52, Name = type, Class = "LcRevitCollection" },
+        };
+
+        var root = SceneTreeBuilder.Build("TestModel", records);
+
+        var layer = Assert.Single(root.Children);
+        Assert.Equal(2, layer.Children.Count);
+        Assert.Empty(layer.Children[0].Children);
+        Assert.Single(layer.Children[1].Children);
     }
 
     [Fact]

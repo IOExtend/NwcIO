@@ -42,6 +42,8 @@ public static class SceneTreeBuilder
         ["familie"] = FamilyLevel,
         ["famille"] = FamilyLevel,
         ["familia"] = FamilyLevel,
+        ["famiglia"] = FamilyLevel,
+        ["família"] = FamilyLevel,
         ["rodzina"] = FamilyLevel,
         ["ファミリ"] = FamilyLevel,
         ["族"] = FamilyLevel,
@@ -221,23 +223,29 @@ public static class SceneTreeBuilder
         Dictionary<string, int> markerLevels)
     {
         string marker = storedName?.Trim() ?? string.Empty;
-        if (marker.Length > 0 && CollectionLevels.TryGetValue(marker, out int level))
+        int level;
+        if (marker.Length > 0 && CollectionLevels.TryGetValue(marker, out level))
         {
+            // Remember it so an unknown marker that follows is placed below the levels already taken.
+            markerLevels[marker] = level;
             return level;
         }
 
         // Real files repeat the stored marker for every collection of one level. Reuse the level of a
-        // marker seen before; the first three distinct markers in a layer are Category, Family and Type.
+        // marker seen before; a new marker takes the level below the deepest one seen in this layer.
         if (marker.Length > 0 && markerLevels.TryGetValue(marker, out level))
         {
             return level;
         }
 
-        if (marker.Length > 0 && markerLevels.Count < TypeLevel + 1)
+        if (marker.Length > 0)
         {
-            level = markerLevels.Count;
-            markerLevels[marker] = level;
-            return level;
+            level = markerLevels.Count == 0 ? CategoryLevel : markerLevels.Values.Max() + 1;
+            if (level <= TypeLevel)
+            {
+                markerLevels[marker] = level;
+                return level;
+            }
         }
 
         if (currentCategory is null)
