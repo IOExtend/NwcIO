@@ -7,6 +7,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner construction simulation schedules
 /// to and from Microsoft Project XML format (.xml).
+/// Project XML has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerMsProjectXmlSerializer
 {
@@ -40,8 +41,8 @@ public static class NwcTimeLinerMsProjectXmlSerializer
 
         var root = new XElement(Ns + "Project",
             new XElement(Ns + "Name", schedule.Name),
-            new XElement(Ns + "StartDate", (schedule.OverallStart ?? DateTimeOffset.UtcNow).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
-            new XElement(Ns + "FinishDate", (schedule.OverallEnd ?? DateTimeOffset.UtcNow).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)));
+            new XElement(Ns + "StartDate", (schedule.OverallStart ?? DateTimeOffset.UtcNow).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
+            new XElement(Ns + "FinishDate", (schedule.OverallEnd ?? DateTimeOffset.UtcNow).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)));
 
         var tasksElem = new XElement(Ns + "Tasks");
         root.Add(tasksElem);
@@ -77,8 +78,8 @@ public static class NwcTimeLinerMsProjectXmlSerializer
                 new XElement(Ns + "OutlineLevel", outlineLevel),
                 new XElement(Ns + "OutlineNumber", outlineNum),
                 new XElement(Ns + "WBS", string.IsNullOrEmpty(task.Id) ? outlineNum : task.Id),
-                new XElement(Ns + "Start", task.PlannedStart.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
-                new XElement(Ns + "Finish", task.PlannedEnd.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
+                new XElement(Ns + "Start", task.PlannedStart.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
+                new XElement(Ns + "Finish", task.PlannedEnd.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
                 new XElement(Ns + "Duration", string.Create(CultureInfo.InvariantCulture, $"PT{(int)Math.Max(0, task.PlannedDuration.TotalHours)}H0M0S")),
                 new XElement(Ns + "PercentComplete", (int)Math.Round(Math.Clamp(task.Progress, 0.0, 1.0) * 100)));
 
@@ -89,12 +90,12 @@ public static class NwcTimeLinerMsProjectXmlSerializer
 
             if (task.ActualStart.HasValue)
             {
-                taskElem.Add(new XElement(Ns + "ActualStart", task.ActualStart.Value.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)));
+                taskElem.Add(new XElement(Ns + "ActualStart", task.ActualStart.Value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)));
             }
 
             if (task.ActualEnd.HasValue)
             {
-                taskElem.Add(new XElement(Ns + "ActualFinish", task.ActualEnd.Value.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)));
+                taskElem.Add(new XElement(Ns + "ActualFinish", task.ActualEnd.Value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)));
             }
 
             if (task.ActualCost.HasValue)

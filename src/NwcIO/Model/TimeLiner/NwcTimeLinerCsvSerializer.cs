@@ -6,6 +6,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner schedules to/from CSV format.
 /// Fully compatible with Navisworks TimeLiner "Import/Export Tasks to CSV", Microsoft Project, and Primavera P6.
+/// CSV has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerCsvSerializer
 {
@@ -36,10 +37,10 @@ public static class NwcTimeLinerCsvSerializer
                 EscapeCsv(task.Id),
                 EscapeCsv(task.Name),
                 task.TaskType.ToString(),
-                task.PlannedStart.ToString(DateFormat, CultureInfo.InvariantCulture),
-                task.PlannedEnd.ToString(DateFormat, CultureInfo.InvariantCulture),
-                task.ActualStart?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
-                task.ActualEnd?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
+                task.PlannedStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture),
+                task.PlannedEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture),
+                task.ActualStart?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
+                task.ActualEnd?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
                 task.PlannedCost?.ToString("F2", CultureInfo.InvariantCulture) ?? string.Empty,
                 task.ActualCost?.ToString("F2", CultureInfo.InvariantCulture) ?? string.Empty,
                 EscapeCsv(task.AttachedSelectionSetName ?? string.Empty),
