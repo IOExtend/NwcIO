@@ -255,9 +255,12 @@ internal static class ViewpointParser
             innerUppercase = 0;
         }
 
+        char previous = ' ';
         foreach (char raw in text)
         {
             char c = char.ToLowerInvariant(raw);
+            char before = previous;
+            previous = raw;
             if (c is >= 'а' and <= 'я')
             {
                 score += RussianLetterFrequency(c);
@@ -291,6 +294,13 @@ internal static class ViewpointParser
             else if (c is >= '\u2500' and <= '\u259F')
             {
                 score -= 12;
+                EndWord();
+            }
+            else if (c == '\u00B0' && !char.IsDigit(before))
+            {
+                // A degree sign is legitimate after a number ("45\u00B0"); elsewhere it is what CP1251
+                // lowercase '\u0448' looks like when read as CP866.
+                score -= 6;
                 EndWord();
             }
             else if (c is '\u2219' or '\u00A4' or '\u00A9' or '\u00AE' or '\u00B7')

@@ -173,6 +173,11 @@ public class ViewpointTests
     [InlineData("ВЕНТИЛЯЦИЯ")]
     [InlineData("шахты")]
     [InlineData("тур")]
+    [InlineData("шум")]
+    [InlineData("ЦЕХ")]
+    [InlineData("Узел №1")]
+    [InlineData("Вид 45°")]
+    [InlineData("Plan A1")]
     public void ViewpointParser_DecodesLegacyCyrillicNamesInBothCodePages(string name)
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
