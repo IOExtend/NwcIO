@@ -87,12 +87,14 @@ public class SceneTreeBuilderTests
         }
     }
 
-    [Fact]
-    public void Build_DeepChainWithTransform_ThrowsBeforeRecursiveAttachment()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Build_DeepChainWithTransformOrGuid_ThrowsBeforeRecursiveAttachment(bool useGuid)
     {
-        // The old order attached transforms recursively before checking depth, so a crafted chain
-        // overflowed the stack. The depth check must run first.
-        const int depth = 20_000;
+        // The depth check must run before the recursive transform/GUID passes, otherwise a crafted
+        // chain overflows the stack (uncatchable) instead of throwing.
+        const int depth = 200_000;
         var records = new List<NwcPropertyRecord>(depth * 2);
         for (int id = 1; id <= depth; id++)
         {
@@ -100,10 +102,9 @@ public class SceneTreeBuilderTests
             records.Add(new NwcPropertyRecord { FirstInt = id, Tag = 52, Name = "n", Class = "LcTestGroup" });
         }
 
-        var transform = new NwcTransform { Id = 1 };
-
-        Assert.Throws<InvalidDataException>(() =>
-            SceneTreeBuilder.Build("root", records, transforms: [transform]));
+        Assert.Throws<InvalidDataException>(() => useGuid
+            ? SceneTreeBuilder.Build("root", records, guids: [Guid.NewGuid()])
+            : SceneTreeBuilder.Build("root", records, transforms: [new NwcTransform { Id = 1 }]));
     }
 
     [Fact]
