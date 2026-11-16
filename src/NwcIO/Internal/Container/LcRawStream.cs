@@ -26,6 +26,8 @@ public enum NwcStreamKind
     SelectionSets,
     /// <summary>4D TimeLiner construction schedule and tasks.</summary>
     TimeLiner,
+    /// <summary>Writer-side per-mesh transform ids ("NWTL").</summary>
+    TransformLinks,
 }
 
 /// <summary>

@@ -157,6 +157,8 @@ public class WriterTests
             new NwcTransform { Id = 100, Translation = new(1, 2, 3) },
             new NwcTransform { Id = 101, Translation = new(4, 5, 6) },
         };
+        meshes[0].Transform = transforms[0];
+        meshes[1].Transform = transforms[1];
         var doc = NwcDocument.Create(meshes: meshes, propertyRecords: records, savedViewpoints: viewpoints, transforms: transforms);
         using var input = new MemoryStream(doc.ToByteArray("#LcUStream custom é\nextra header\n"));
         var reopened = NwcDocument.Open(input);
@@ -172,6 +174,55 @@ public class WriterTests
             reopened.PropertyRecords.Select(r => (r.FirstInt, r.Tag, r.Name, r.Class, r.Value)));
         Assert.Equal(viewpoints.Select(v => v.Name), reopened.SavedViewpoints.Select(v => v.Name));
     }
+
+    [Fact]
+    public void Writer_TransformRoundtrip_PreservesIdsAndPerMeshBindings()
+    {
+        int meshId = 0;
+        NwcMesh MakeMesh(NwcTransform? transform) => new()
+        {
+            Id = meshId++,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(1, 1, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2, 2, 1, 3],
+            Transform = transform,
+        };
+
+        var transformA = new NwcTransform { Id = 5, Translation = new Vector3d(10, 0, 0) };
+        var transformB = new NwcTransform { Id = 100, Translation = new Vector3d(20, 0, 0) };
+        var transformOrphan = new NwcTransform { Id = 7, Translation = new Vector3d(99, 0, 0) };
+
+        var root = new NwcNode { Id = 1, Name = "Root", Class = "LcRevitLayer" };
+        var element = new NwcNode { Id = 5, Name = "E", Class = "LcRevitData_Element", Parent = root };
+        root.Children.Add(element);
+
+        var doc = NwcDocument.Create(
+            meshes: [MakeMesh(transformB), MakeMesh(transformOrphan), MakeMesh(null)],
+            transforms: [transformA, transformB],
+            rootNode: root);
+
+        var reopened = NwcDocument.Open(new MemoryStream(doc.ToByteArray()));
+
+        Assert.Equal([5, 100, 7], reopened.Transforms.Select(t => t.Id));
+        Assert.Equal(20, reopened.Meshes[0].Transform!.Translation.X);
+        Assert.Equal(99, reopened.Meshes[1].Transform!.Translation.X);
+        Assert.Null(reopened.Meshes[2].Transform);
+
+        var elementNode = Preorder(reopened.RootNode!).Single(n => n.Id == 5);
+        Assert.Equal(10, elementNode.Transform!.Translation.X);
+    }
+
+    [Fact]
+    public void Writer_DuplicateTransformIdsWithDifferentValues_Rejects()
+    {
+        var first = new NwcTransform { Id = 7, Translation = new Vector3d(1, 0, 0) };
+        var second = new NwcTransform { Id = 7, Translation = new Vector3d(2, 0, 0) };
+        var doc = NwcDocument.Create(transforms: [first, second]);
+
+        Assert.Contains("Transform id 7", Assert.Throws<ArgumentException>(() => doc.ToByteArray()).Message);
+    }
+
+    private static IEnumerable<NwcNode> Preorder(NwcNode node) =>
+        [node, .. node.Children.SelectMany(Preorder)];
 
     [Theory]
     [InlineData(-1.0)]
@@ -411,6 +462,7 @@ public class WriterTests
             Rotation = new Quaterniond(0, 0, 0, 1),
             BoundingBox = new BoundingBox3d(new Vector3d(-10, -10, 0), new Vector3d(10, 10, 20))
         };
+        mesh.Transform = transform;
 
         var viewpoint = new NwcSavedViewpoint
         {

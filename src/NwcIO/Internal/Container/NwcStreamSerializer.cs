@@ -30,10 +30,16 @@ internal static class NwcStreamSerializer
             streams.Add(sceneTree);
         }
 
-        // 3. Transforms stream
-        if (doc.Transforms.Count > 0)
+        // 3. Transforms stream and the writer-side mesh-to-transform links
+        var transforms = CollectTransforms(doc);
+        if (transforms.Count > 0)
         {
-            streams.Add(BuildTransformsStream(doc.Transforms));
+            streams.Add(BuildTransformsStream(transforms));
+        }
+
+        if (doc.Meshes.Count > 0)
+        {
+            streams.Add(BuildTransformLinksStream(doc.Meshes));
         }
 
         // 4. Guids stream
@@ -422,13 +428,13 @@ internal static class NwcStreamSerializer
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
 
+        w.Write(TransformStreamFormat.TransformsMagic);
         w.Write(transforms.Count);
 
         for (int i = 0; i < transforms.Count; i++)
         {
             var t = transforms[i];
-            int recId = (i == 0) ? 100 : (t.Id != 0 ? t.Id : 100 + i);
-            w.Write(recId);
+            w.Write(t.Id);
             w.Write(13); // TagTransform
 
             w.Write(1);  // inner id
@@ -456,6 +462,70 @@ internal static class NwcStreamSerializer
 
         return ms.ToArray();
     }
+
+    public static byte[] BuildTransformLinksStream(IReadOnlyList<NwcMesh> meshes)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        w.Write(TransformStreamFormat.LinksMagic);
+        w.Write(meshes.Count);
+        foreach (var mesh in meshes)
+        {
+            w.Write(mesh.Transform?.Id ?? -1);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static List<NwcTransform> CollectTransforms(NwcDocument doc)
+    {
+        var byId = new Dictionary<int, NwcTransform>();
+        var result = new List<NwcTransform>();
+        var seen = new HashSet<NwcTransform>(ReferenceEqualityComparer.Instance);
+
+        void Add(NwcTransform transform)
+        {
+            if (!seen.Add(transform) && byId.ContainsKey(transform.Id))
+            {
+                return;
+            }
+
+            if (byId.TryGetValue(transform.Id, out var existing))
+            {
+                if (!SamePlacement(existing, transform))
+                {
+                    throw new ArgumentException($"Transform id {transform.Id} appears twice with different values.", nameof(doc));
+                }
+
+                return;
+            }
+
+            byId[transform.Id] = transform;
+            result.Add(transform);
+        }
+
+        foreach (var transform in doc.Transforms)
+        {
+            Add(transform);
+        }
+
+        foreach (var mesh in doc.Meshes)
+        {
+            if (mesh.Transform is { } transform)
+            {
+                Add(transform);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool SamePlacement(NwcTransform a, NwcTransform b) =>
+        a.Translation == b.Translation &&
+        a.Rotation == b.Rotation &&
+        a.Scale == b.Scale &&
+        (a.Matrix ?? []).SequenceEqual(b.Matrix ?? []) &&
+        Nullable.Equals(a.BoundingBox, b.BoundingBox);
 
     public static byte[] BuildGuidsStream(IReadOnlyList<Guid> guids)
     {

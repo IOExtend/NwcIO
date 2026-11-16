@@ -24,7 +24,7 @@ public static class TransformParser
             return transforms;
         }
 
-        int pos = 4;
+        int pos = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(0)) == TransformStreamFormat.TransformsMagic ? 8 : 4;
         while (pos + 8 <= data.Length)
         {
             int recId = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(pos));
