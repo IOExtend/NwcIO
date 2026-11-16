@@ -48,9 +48,13 @@ public static class StreamClassifier
             return NwcStreamKind.PartitionHeader;
         }
 
-        // Scene tree / property records: starts with [100][86] or contains LcRevit signatures.
+        // Scene tree / property records: starts with [100][86] or contains a node class signature.
+        // Revit exports write LcRevit*; other loaders write LcOa* object classes.
         if ((ReadInt32(data, 0) == 100 && ReadInt32(data, 4) == 86) ||
-            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcRevit"))
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcRevit") ||
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcOaNode") ||
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcOaGroup") ||
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcOaScene"))
         {
             return NwcStreamKind.SceneTree;
         }

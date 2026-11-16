@@ -42,7 +42,7 @@ public sealed record LcRawStream
     public required long FileOffset { get; init; }
 
     /// <summary>Compressed (zlib) byte length in the file.</summary>
-    public required int CompressedLength { get; init; }
+    public required long CompressedLength { get; init; }
 
     /// <summary>Bytes skipped in the file right before this stream (framing/section text).</summary>
     public required int GapBefore { get; init; }
@@ -65,5 +65,5 @@ public sealed record NwcContainer
     public required long FileLength { get; init; }
 
     /// <summary>Bytes at the file tail that could not be attributed to any stream.</summary>
-    public required int TrailingGap { get; init; }
+    public required long TrailingGap { get; init; }
 }
