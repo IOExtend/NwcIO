@@ -641,6 +641,28 @@ public sealed class NwcAssembly
         writer.WriteString("size", BoundingBox.Size.ToString());
         writer.WriteEndObject();
 
+        if (Diagnostics.Count > 0)
+        {
+            writer.WriteStartArray("diagnostics");
+            foreach (var diagnostic in Diagnostics)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("severity", diagnostic.Severity.ToString());
+                writer.WriteString("code", diagnostic.Code);
+                writer.WriteString("message", diagnostic.Message);
+                if (diagnostic.StreamIndex is int streamIndex)
+                {
+                    writer.WriteNumber("streamIndex", streamIndex);
+                }
+                if (diagnostic.ByteOffset is long byteOffset)
+                {
+                    writer.WriteNumber("byteOffset", byteOffset);
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
+
         writer.WriteStartArray("models");
         foreach (var m in Models)
         {

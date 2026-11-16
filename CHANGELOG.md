@@ -5,6 +5,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ## [Unreleased]
 
 ### Added
+- Reader diagnostics now cover property-scanner failures (`property-scan-stopped`, Error) and are written to document and assembly JSON. `NwcReaderOptions.Strict` throws `InvalidDataException` when an error-level diagnostic is recorded.
 - Reader diagnostics are printed by `nwcio --report`: skipped geometry records (`meshes-skipped`), an unrecognized container tail (`ContainerTrailingGap`), and unresolved/skipped NWF references. `NwcDocument.Diagnostics` and `NwcAssembly.Diagnostics` expose the same entries to callers.
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 

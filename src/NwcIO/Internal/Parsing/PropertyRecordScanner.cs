@@ -182,12 +182,14 @@ public sealed class PropertyRecordScanner
         value = null;
         if (pos + 4 > _data.Length)
         {
+            FailureReason ??= $"A length-prefixed string at byte {pos} runs past the end of the stream.";
             return false;
         }
 
         int len = ReadInt32At(pos);
         if (len is < 0 or > 65536 || pos + 4 + len > _data.Length)
         {
+            FailureReason ??= $"A length-prefixed string at byte {pos} has invalid length {len}.";
             return false;
         }
 

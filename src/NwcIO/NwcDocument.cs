@@ -156,6 +156,7 @@ public sealed class NwcDocument
 
         string rootName = Path.GetFileNameWithoutExtension(fileInfo.SourcePath ?? fallbackName ?? "Model");
 
+        var diagnostics = new List<NwcDiagnostic>();
         var records = new List<NwcPropertyRecord>();
         if (options.ReadPropertyRecords)
         {
@@ -163,6 +164,15 @@ public sealed class NwcDocument
             {
                 var scanner = new PropertyRecordScanner(s.Data);
                 records.AddRange(scanner.Scan());
+                if (scanner.FailureReason is not null)
+                {
+                    diagnostics.Add(new NwcDiagnostic(
+                        NwcDiagnosticSeverity.Error,
+                        "property-scan-stopped",
+                        $"{scanner.FailureReason} Stopped at byte {scanner.StoppedAt}.",
+                        s.Index,
+                        scanner.StoppedAt));
+                }
             }
         }
 
@@ -269,7 +279,6 @@ public sealed class NwcDocument
             container = container with { Streams = [] };
         }
 
-        var diagnostics = new List<NwcDiagnostic>();
         if (skippedMeshRecords > 0)
         {
             diagnostics.Add(new NwcDiagnostic(
@@ -284,6 +293,15 @@ public sealed class NwcDocument
                 NwcDiagnosticSeverity.Warning,
                 "ContainerTrailingGap",
                 $"Unrecognized {container.TrailingGap} byte tail after the last stream."));
+        }
+
+        if (options.Strict)
+        {
+            var errors = diagnostics.Where(d => d.Severity == NwcDiagnosticSeverity.Error).ToList();
+            if (errors.Count > 0)
+            {
+                throw new InvalidDataException(string.Join(" ", errors.Select(d => d.Message)));
+            }
         }
 
         var doc = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);

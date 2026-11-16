@@ -39,4 +39,10 @@ public sealed class NwcReaderOptions
 
     /// <summary>Keep the stream catalog (offsets, sizes, kinds) in the document (default: true).</summary>
     public bool KeepStreamCatalog { get; set; } = true;
+
+    /// <summary>
+    /// Throw <see cref="InvalidDataException"/> when the reader records an error-level diagnostic
+    /// (default: false, diagnostics are only recorded).
+    /// </summary>
+    public bool Strict { get; set; }
 }
