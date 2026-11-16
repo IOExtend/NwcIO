@@ -4,7 +4,7 @@ title: Public API
 
 # Public API Surface
 
-The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here and the `NwcIO.Scene` package. The `NwcIO.Scene` package (`NwcSceneReader`, `NwcSceneOptions`, `NwcSceneResult`) is documented on the [scene adapter](scene.md) page. The `NwcIO.Internal.*` types (chunk decoders, byte streamers, container reader/writer, JSON/GLB/OBJ/IFC exporters) are also compiled as `public` — the tests and the CLI consume them directly — but they are implementation details: **they are not covered by compatibility guarantees and may change in any release.** Making them `internal` is tracked separately (#103).
+The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here and the `NwcIO.Scene` package. The `NwcIO.Scene` package (`NwcSceneReader`, `NwcSceneOptions`, `NwcSceneResult`) is documented on the [scene adapter](scene.md) page. The `NwcIO.Internal.*` types (chunk decoders, byte streamers, container reader/writer, JSON/GLB/OBJ/IFC exporters) are `internal` implementation details: they are not part of the package API and are not covered by compatibility guarantees.
 
 ## Core Document & Hierarchy (`NwcIO`, `NwcIO.Model`)
 
@@ -78,13 +78,3 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 | `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. Frozen: bug fixes only. |
 | `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). Frozen: bug fixes only. |
 | `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). |
-| `GlbExporter` & `ObjExporter` (`NwcIO.Internal.Export`) | Low-level public static exporters the `Save*` entry points delegate to; implementation surface, not covered by compatibility guarantees. |
-
-## Container & Parsing (`NwcIO.Internal.*` — public but unsupported)
-
-| Type | Description |
-|---|---|
-| `NwcContainerReader` / `NwcContainerWriter` | `#LcUStream-V1.1` section/chunk reader and writer. |
-| `NwcContainer`, `LcRawStream`, `LcUStreamHeader`, `NwcStreamKind` | Decompressed stream records and their best-effort classification. |
-| `StreamClassifier`, `PartitionHeaderParser`, `PropertyRecordScanner`, `SceneTreeBuilder`, `GuidTableParser`, `TransformParser`, `MeshParser`, `MaterialParser`, `DbCacheParser`, `XRefTableParser` | Stream classifiers and format decoders. |
-| `JsonExporter` | Low-level JSON export helper. (The IFC and clash-report exporters are `internal`.) |

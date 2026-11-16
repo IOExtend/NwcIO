@@ -7,8 +7,10 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ### Added
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 
+### Breaking
+- `NwcIO.Internal.*` types are now `internal`; only the documented public surface ships in the package. `NwcJsonExportOptions` remains public. Package validation runs on `dotnet pack` against the 0.12.1 baseline, with `CompatibilitySuppressions.xml` recording the intentional type removals.
+
 ### Changed
-- `NwcIO.Internal.*` types are now `internal`; only the documented public surface ships in the package. `NwcJsonExportOptions` remains public. Package validation now runs on `dotnet pack` against the 0.12.0 baseline.
 - The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
 
 ### Fixed
