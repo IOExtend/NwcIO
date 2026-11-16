@@ -179,6 +179,22 @@ internal static class HierarchyParser
                 // Keep it in the tree; the adapter can put each placement in its own scene model.
                 occurrence.Element = first;
                 occurrence.IsLinkPlacement = true;
+                // Mark one model root for the whole placed subtree: the element itself when it is a
+                // direct child, otherwise the highest group below the linking element or the root.
+                NwcNode linkRoot = parent;
+                while (linkRoot.Parent is not null && linkRoot.Parent.Id != 0 && !linkRoot.Parent.IsElement)
+                {
+                    linkRoot = linkRoot.Parent;
+                }
+
+                if (ReferenceEquals(linkRoot, parent) && (parent.Id == 0 || parent.IsElement))
+                {
+                    occurrence.IsLinkRoot = true;
+                }
+                else
+                {
+                    linkRoot.IsLinkRoot = true;
+                }
             }
 
             parent.Children.Add(occurrence);

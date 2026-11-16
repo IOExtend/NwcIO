@@ -726,6 +726,41 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_SharedLinkedSubtree_BecomesOneModel()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true };
+        first.Element = first;
+        var shared = new NwcNode { Id = 2, Name = "Shared model", Class = "LcOpModelFile", IsLinkRoot = true };
+        for (int i = 0; i < 3; i++)
+        {
+            shared.Children.Add(new NwcNode
+            {
+                Id = 10 + i,
+                Name = $"Part {i + 1}",
+                Class = "LcRevitData_Element",
+                Element = first,
+                IsLinkPlacement = true,
+            });
+        }
+
+        root.Children.Add(first);
+        root.Children.Add(shared);
+
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Equal(2, result.Document.Models.Count);
+        var linkModel = result.Document.Models[1];
+        Assert.Equal("Shared model", linkModel.Key);
+        Assert.All(result.Document.Elements.Where(element => element.Name.StartsWith("Part ", StringComparison.Ordinal)),
+            element => Assert.Equal(linkModel.Id, element.ModelId));
+    }
+
+    [Fact]
     public void Read_LinkedSubtreesWithTheSameName_GetOneModelPerRoot()
     {
         var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };

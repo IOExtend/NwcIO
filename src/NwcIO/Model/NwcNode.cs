@@ -51,6 +51,9 @@ public sealed class NwcNode
     /// </summary>
     public bool IsLinkPlacement { get; set; }
 
+    /// <summary>Root of a repeatedly placed (linked) subtree; only this node starts a scene model.</summary>
+    public bool IsLinkRoot { get; set; }
+
     /// <summary>On a Revit element node: the GlobalId the Revit IFC export gives the element, its valid <c>IFC_GUID</c> parameter (tab <c>LcRevitData_Element</c>), else <see cref="ElementGuid"/> in the IFC base-64 form; null on other nodes.</summary>
     public string? IfcGlobalId { get; set; }
 

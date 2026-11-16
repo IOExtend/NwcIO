@@ -303,7 +303,7 @@ public static partial class NwcSceneReader
             }
 
             bool isLinkRoot = false;
-            if (node.IsLinkPlacement && parent is not null && linkModelId is null)
+            if ((node.IsLinkRoot || node.IsLinkPlacement) && parent is not null && linkModelId is null)
             {
                 if (++linkModels > MaxLinkModels)
                 {

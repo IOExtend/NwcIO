@@ -23,6 +23,7 @@ public class HierarchyParserTests
         Assert.True(first.IsElement);
         Assert.False(linked.IsElement);
         Assert.True(linked.IsLinkPlacement);
+        Assert.True(linked.Parent!.IsLinkRoot);
         Assert.Same(first, linked.Element);
         Assert.NotSame(first.Parent, linked.Parent);
         Assert.Equal([first, linked], nodes[0].Children.SelectMany(g => g.Children));
