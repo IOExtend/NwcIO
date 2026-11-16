@@ -154,6 +154,10 @@ internal static class NwcStreamSerializer
             if (record.Tag is 52 or 53)
             {
                 ValidateRecord(record.FirstInt, record.Name, record.Class, record.Tag == 52);
+                if (record.Tag == 52)
+                {
+                    ValidatePropertyValue(record, record.ValueType);
+                }
             }
         }
 
@@ -193,12 +197,26 @@ internal static class NwcStreamSerializer
         }
     }
 
+    private static void ValidatePropertyValue(NwcPropertyRecord record, int valueType)
+    {
+        if (valueType is < 0 or > 13)
+        {
+            throw new ArgumentException($"Property '{record.Name}' (record {record.FirstInt}) has unsupported value type {valueType}; the .nwc writer stores types 0..13.");
+        }
+
+        if (valueType is 0 or 2 or 3 && record.IntValue is < int.MinValue or > int.MaxValue)
+        {
+            throw new ArgumentException($"Property '{record.Name}' (record {record.FirstInt}) has IntValue {record.IntValue}, outside the 32-bit range of value type {valueType}.");
+        }
+    }
+
     private static void ValidateNode(NwcNode node)
     {
         ValidateRecord(node.Id, node.Name, node.Class, true);
         foreach (var property in node.Properties)
         {
             ValidateRecord(property.FirstInt, property.Name, property.Class, true);
+            ValidatePropertyValue(property, property.ValueType != 0 ? property.ValueType : 4);
         }
 
         foreach (var child in node.Children)
@@ -334,7 +352,7 @@ internal static class NwcStreamSerializer
                     WritePaddedString(w, r.Name);
                     WritePaddedString(w, r.Class);
                     w.Write(r.ValueType);
-                    WritePropertyValue(w, r.ValueType, r.Value);
+                    WritePropertyValue(w, r.ValueType, r.Value, r.IntValue, r.DoubleValue, r.ReferenceId, r.ReferenceTag, r.ReferenceClass);
                 }
             }
         }
@@ -346,7 +364,15 @@ internal static class NwcStreamSerializer
         return ms.ToArray();
     }
 
-    private static void WritePropertyValue(BinaryWriter w, int valueType, string? value)
+    private static void WritePropertyValue(
+        BinaryWriter w,
+        int valueType,
+        string? value,
+        long? intValue = null,
+        double? doubleValue = null,
+        int? referenceId = null,
+        int? referenceTag = null,
+        string? referenceClass = null)
     {
         switch (valueType)
         {
@@ -357,18 +383,20 @@ internal static class NwcStreamSerializer
             case 0:
             case 2:
             case 3:
-                w.Write(int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var iv) ? iv : 0);
+                w.Write(checked((int)(intValue
+                    ?? (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var iv) ? iv : 0))));
                 break;
             case 1:
             case 6:
             case 7:
             case 10:
             case 11:
-                w.Write(double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv) ? dv : 0.0);
+                w.Write(doubleValue
+                    ?? (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv) ? dv : 0.0));
                 break;
             case 5:
-                long unixSec = 0L;
-                if (value is not null)
+                long unixSec = intValue ?? 0L;
+                if (intValue is null && value is not null)
                 {
                     if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto))
                     {
@@ -382,10 +410,10 @@ internal static class NwcStreamSerializer
                 w.Write(unixSec);
                 break;
             case 8:
-                w.Write(0);
-                w.Write(0);
+                w.Write(referenceId ?? 0);
+                w.Write(referenceTag ?? 0);
                 WritePaddedString(w, value ?? string.Empty);
-                WritePaddedString(w, string.Empty);
+                WritePaddedString(w, referenceClass ?? string.Empty);
                 break;
             case 12:
                 WritePointDoubles(w, value, 3);
@@ -394,8 +422,7 @@ internal static class NwcStreamSerializer
                 WritePointDoubles(w, value, 2);
                 break;
             default:
-                w.Write(0);
-                break;
+                throw new NotSupportedException($"Unsupported property value type {valueType}.");
         }
     }
 
@@ -444,7 +471,7 @@ internal static class NwcStreamSerializer
             WritePaddedString(w, prop.Class);
             int vType = prop.ValueType != 0 ? prop.ValueType : 4;
             w.Write(vType);
-            WritePropertyValue(w, vType, prop.Value);
+            WritePropertyValue(w, vType, prop.Value, prop.IntValue, prop.DoubleValue, prop.ReferenceId, prop.ReferenceTag, prop.ReferenceClass);
         }
 
         foreach (var child in rootNode.Children)
@@ -483,7 +510,7 @@ internal static class NwcStreamSerializer
             WritePaddedString(w, prop.Class);
             int vType = prop.ValueType != 0 ? prop.ValueType : 4;
             w.Write(vType);
-            WritePropertyValue(w, vType, prop.Value);
+            WritePropertyValue(w, vType, prop.Value, prop.IntValue, prop.DoubleValue, prop.ReferenceId, prop.ReferenceTag, prop.ReferenceClass);
         }
 
         foreach (var child in node.Children)
