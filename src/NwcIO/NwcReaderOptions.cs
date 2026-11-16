@@ -39,4 +39,16 @@ public sealed class NwcReaderOptions
 
     /// <summary>Keep the stream catalog (offsets, sizes, kinds) in the document (default: true).</summary>
     public bool KeepStreamCatalog { get; set; } = true;
+
+    /// <summary>
+    /// Cap on the decompressed size of one container stream (default: 512 MiB). Exceeding it makes
+    /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
+    /// </summary>
+    public long MaxDecompressedStreamBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxDecompressedStreamBytes;
+
+    /// <summary>
+    /// Cap on the decompressed size of all container streams together (default: 2 GiB). Exceeding it makes
+    /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
+    /// </summary>
+    public long MaxTotalDecompressedBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxTotalDecompressedBytes;
 }
