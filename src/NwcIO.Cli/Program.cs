@@ -5,6 +5,7 @@ using NwcIO;
 using NwcIO.Internal.Json;
 using NwcIO.Model;
 using NwcIO.Model.Spatial;
+using NwcIO.Model.Viewer;
 
 namespace NwcIO.Cli;
 
@@ -792,7 +793,7 @@ internal static class Program
             if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
             {
                 EnsureParentDirectory(explicitHtmlViewerPath);
-                doc.SaveHtmlViewer(explicitHtmlViewerPath);
+                WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, doc), @err);
             }
 
             if (!string.IsNullOrEmpty(explicitGridsPath))
@@ -1214,7 +1215,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
         {
             EnsureParentDirectory(explicitHtmlViewerPath);
-            assembly.SaveHtmlViewer(explicitHtmlViewerPath);
+            WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, assembly), @err);
         }
         if (!string.IsNullOrEmpty(explicitNwfXmlPath))
         {
@@ -1513,7 +1514,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
         {
             EnsureParentDirectory(explicitHtmlViewerPath);
-            assembly.SaveHtmlViewer(explicitHtmlViewerPath);
+            WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, assembly), @err);
         }
         if (!string.IsNullOrEmpty(explicitNwfXmlPath))
         {
@@ -1685,6 +1686,18 @@ internal static class Program
         {
             Directory.CreateDirectory(dir);
         }
+    }
+
+    internal static void WarnIfViewerTruncated(NwcHtmlViewerExportResult result, TextWriter err)
+    {
+        if (!result.Truncated)
+        {
+            return;
+        }
+
+        err.WriteLine(
+            $"Warning: HTML viewer export skipped {result.SkippedMeshes} of {result.TotalMeshes} meshes " +
+            $"({result.SkippedVertices:N0} vertices) because MaxMeshVertices ({result.ExportedVertices:N0} written) was reached.");
     }
 
     private static int CountNodes(NwcNode? node)
