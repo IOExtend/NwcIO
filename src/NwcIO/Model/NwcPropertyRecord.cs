@@ -28,8 +28,9 @@ public sealed class NwcPropertyRecord
     public string? InternalName { get; init; }
 
     /// <summary>
-    /// Parent node id for records written from an <see cref="NwcNode"/> tree by <c>NwcWriter</c>; null for records scanned
-    /// from a stream, whose hierarchy is derived from collection names and record order.
+    /// Parent node id for tag-53 node records, both when written from an <see cref="NwcNode"/> tree by <c>NwcWriter</c>
+    /// and when scanned from a stream that carries the <c>-2</c> parent marker. Null when the hierarchy is derived
+    /// from collection names and record order instead.
     /// </summary>
     public int? ParentId { get; init; }
 }

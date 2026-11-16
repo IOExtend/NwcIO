@@ -63,4 +63,48 @@ public class SceneTreeBuilderTests
         Assert.Equal("Length", composite.Properties[0].Name);
         Assert.Equal("5000 mm", composite.Properties[0].Value);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Build_ExplicitParentChain_EnforcesTheNestingLimit(bool overLimit)
+    {
+        int depth = LcObjectReader.MaxNestingDepth + (overLimit ? 1 : 0);
+        var records = new List<NwcPropertyRecord>();
+        for (int id = 1; id <= depth; id++)
+        {
+            records.Add(new NwcPropertyRecord { FirstInt = id, Tag = 53, Name = $"N{id}", Class = "Node", ParentId = id - 1 });
+            records.Add(new NwcPropertyRecord { FirstInt = id, Tag = 52, Name = "n", Class = "LcTestGroup" });
+        }
+
+        if (overLimit)
+        {
+            Assert.Throws<InvalidDataException>(() => SceneTreeBuilder.Build("root", records));
+        }
+        else
+        {
+            Assert.NotNull(SceneTreeBuilder.Build("root", records));
+        }
+    }
+
+    [Fact]
+    public void Open_Save_Open_PreservesExplicitParentHierarchy()
+    {
+        var root = new NwcNode { Id = 1, Name = "Site", Class = "LcTestGroup" };
+        var building = new NwcNode { Id = 2, Name = "Building", Class = "LcTestGroup", Parent = root };
+        var wall = new NwcNode { Id = 3, Name = "Wall-1", Class = "LcRevitData_Element", Parent = building };
+        root.Children.Add(building);
+        building.Children.Add(wall);
+
+        byte[] firstGeneration = NwcIO.NwcDocument.Create(rootNode: root).ToByteArray();
+        var firstOpen = NwcIO.NwcDocument.Open(new MemoryStream(firstGeneration));
+        var secondOpen = NwcIO.NwcDocument.Open(new MemoryStream(firstOpen.ToByteArray()));
+
+        var model = secondOpen.RootNode!;
+        Assert.Equal("Site", model.Name);
+        var buildingNode = Assert.Single(model.Children);
+        Assert.Equal("Building", buildingNode.Name);
+        var wallNode = Assert.Single(buildingNode.Children);
+        Assert.Equal("Wall-1", wallNode.Name);
+    }
 }

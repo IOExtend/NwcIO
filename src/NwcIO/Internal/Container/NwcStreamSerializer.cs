@@ -291,6 +291,11 @@ internal static class NwcStreamSerializer
                     w.Write(r.FirstInt);
                     w.Write(53);
                     WritePaddedString(w, r.Name);
+                    if (r.ParentId is { } parentId)
+                    {
+                        w.Write(-2);
+                        w.Write(parentId);
+                    }
                 }
                 else if (r.Tag == 52)
                 {

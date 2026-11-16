@@ -207,6 +207,7 @@ public static class SceneTreeBuilder
             AttachGuidsRecursive(root, guids, 0);
         }
 
+        EnsureBoundedDepth(root);
         return root;
     }
 
@@ -236,5 +237,29 @@ public static class SceneTreeBuilder
         }
 
         return nextIndex;
+    }
+
+    /// <summary>
+    /// An explicit parent marker can chain nodes as deep as the stream wants. Every recursive consumer of
+    /// the tree (materials, transforms, GUIDs, exporters) needs the same bound as the strict hierarchy reader.
+    /// </summary>
+    private static void EnsureBoundedDepth(NwcNode root)
+    {
+        var stack = new Stack<(NwcNode Node, int Depth)>();
+        stack.Push((root, 0));
+        while (stack.Count > 0)
+        {
+            var (node, depth) = stack.Pop();
+            if (depth > LcObjectReader.MaxNestingDepth)
+            {
+                throw new InvalidDataException(
+                    $"Scene tree depth exceeds {LcObjectReader.MaxNestingDepth} at node '{node.Name}'.");
+            }
+
+            foreach (var child in node.Children)
+            {
+                stack.Push((child, depth + 1));
+            }
+        }
     }
 }
