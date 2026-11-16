@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using NwcIO.Internal.Container;
 using NwcIO.Internal.Parsing;
 using NwcIO.Model;
+using NwcIO.Model.Sectioning;
 using Xunit;
 
 namespace NwcIO.Tests;
@@ -171,6 +172,133 @@ public class WriterTests
         Assert.Equal(records.Select(r => (r.FirstInt, r.Tag, r.Name, r.Class, r.Value)),
             reopened.PropertyRecords.Select(r => (r.FirstInt, r.Tag, r.Name, r.Class, r.Value)));
         Assert.Equal(viewpoints.Select(v => v.Name), reopened.SavedViewpoints.Select(v => v.Name));
+    }
+
+    [Fact]
+    public void Writer_SavedViewpointRoundtrip_PreservesCameraAnnotationsAndSections()
+    {
+        var id = Guid.Parse("00112233-4455-6677-8899-aabbccddeeff");
+        var first = new NwcSavedViewpoint
+        {
+            Id = id,
+            Name = "View A",
+            Camera = new NwcCamera
+            {
+                Position = new Vector3d(1, 2, 3),
+                Rotation = Quaterniond.Identity,
+                FocalDistance = 1,
+                FieldOfView = 45,
+                FarDistance = 500,
+                AspectRatio = 1.5,
+                NearDistance = 0.25,
+                Projection = NwcCameraProjection.Orthographic,
+            },
+            Comments = ["Check clearance at grid A"],
+            SectionPlanes = [NwcSectionPlane.CreateTop(10)],
+            SectionBox = new NwcSectionBox(new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(10, 20, 30))),
+        };
+        var second = new NwcSavedViewpoint
+        {
+            Name = "MEP Level 1",
+            Camera = new NwcCamera { Position = new Vector3d(4, 5, 6), Rotation = Quaterniond.Identity, FocalDistance = 10 },
+        };
+
+        var doc = NwcDocument.Create(savedViewpoints: [first, second]);
+        using var input = new MemoryStream(doc.ToByteArray());
+        var reopened = NwcDocument.Open(input);
+
+        Assert.Equal(2, reopened.SavedViewpoints.Count);
+        var a = reopened.SavedViewpoints[0];
+        Assert.Equal(id, a.Id);
+        Assert.Equal(45, a.Camera.FieldOfView, 6);
+        Assert.Equal(500, a.Camera.FarDistance, 6);
+        Assert.Equal(NwcCameraProjection.Orthographic, a.Camera.Projection);
+        Assert.Equal(["Check clearance at grid A"], a.Comments);
+
+        var plane = Assert.Single(a.SectionPlanes);
+        Assert.Equal(0, plane.PlaneIndex);
+        Assert.True(plane.IsEnabled);
+        Assert.Equal(NwcSectionAlignment.Top, plane.Alignment);
+        Assert.Equal(new Vector3d(0, 0, -1), plane.Normal);
+        Assert.Equal(-10, plane.Distance, 6);
+
+        Assert.NotNull(a.SectionBox);
+        Assert.True(a.SectionBox.IsEnabled);
+        Assert.Equal(new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(10, 20, 30)), a.SectionBox.Bounds);
+
+        Assert.Empty(reopened.SavedViewpoints[1].Comments);
+        Assert.Null(reopened.SavedViewpoints[1].SectionBox);
+        Assert.Empty(reopened.SavedViewpoints[1].SectionPlanes);
+    }
+
+    [Fact]
+    public void Writer_SavedViewpoints_WithSameNameAndCameraButDifferentSections_AreAllKept()
+    {
+        var camera = new NwcCamera { Position = new Vector3d(1, 2, 3), Rotation = Quaterniond.Identity, FocalDistance = 10 };
+        var viewpoints = Enumerable.Range(1, 3).Select(n => n * 3.0).Select(z => new NwcSavedViewpoint
+        {
+            Name = "Plan",
+            Camera = camera,
+            SectionPlanes = [NwcSectionPlane.CreateTop(z)],
+        }).ToArray();
+
+        var doc = NwcDocument.Create(savedViewpoints: viewpoints);
+        using var input = new MemoryStream(doc.ToByteArray());
+        var reopened = NwcDocument.Open(input);
+
+        Assert.Equal(3, reopened.SavedViewpoints.Count);
+        Assert.Equal([-3.0, -6.0, -9.0], reopened.SavedViewpoints.Select(v => v.SectionPlanes.Single().Distance));
+    }
+
+    [Fact]
+    public void Parser_ViewpointTrailerWithTruncatedPayload_FallsBackToDefaults()
+    {
+        var viewpoint = new NwcSavedViewpoint
+        {
+            Name = "View A",
+            Camera = new NwcCamera { Position = new Vector3d(1, 2, 3), Rotation = Quaterniond.Identity, FocalDistance = 10, FieldOfView = 45 },
+            Comments = ["note"],
+        };
+        byte[] stream = NwcStreamSerializer.BuildSavedViewsStream([viewpoint]);
+        int trailer = -1;
+        for (int i = 0; i + 8 <= stream.Length; i += 4)
+        {
+            if (BinaryPrimitives.ReadInt32LittleEndian(stream.AsSpan(i)) == ViewpointExtensionFormat.Magic)
+            {
+                trailer = i;
+                break;
+            }
+        }
+
+        Assert.True(trailer >= 0);
+        // Declare a payload longer than the stream so the trailer must be rejected, not read out of bounds.
+        BinaryPrimitives.WriteInt32LittleEndian(stream.AsSpan(trailer + 4), stream.Length);
+
+        var parsed = Assert.Single(ViewpointParser.Parse(stream));
+        Assert.Equal(60.0, parsed.Camera.FieldOfView);
+        Assert.Equal(NwcCameraProjection.Perspective, parsed.Camera.Projection);
+        Assert.Empty(parsed.SectionPlanes);
+    }
+
+    [Fact]
+    public void Writer_SavedViewpointBeyondReaderLimits_IsRejected()
+    {
+        var camera = new NwcCamera { Rotation = Quaterniond.Identity };
+        var tooManyPlanes = new NwcSavedViewpoint
+        {
+            Name = "View A",
+            Camera = camera,
+            SectionPlanes = Enumerable.Range(0, 65).Select(_ => NwcSectionPlane.CreateTop(1)).ToArray(),
+        };
+        var tooManyComments = new NwcSavedViewpoint
+        {
+            Name = "View B",
+            Camera = camera,
+            Comments = Enumerable.Repeat("c", 1025).ToArray(),
+        };
+
+        Assert.Throws<ArgumentException>(() => NwcDocument.Create(savedViewpoints: [tooManyPlanes]).ToByteArray());
+        Assert.Throws<ArgumentException>(() => NwcDocument.Create(savedViewpoints: [tooManyComments]).ToByteArray());
     }
 
     [Theory]

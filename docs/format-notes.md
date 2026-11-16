@@ -277,6 +277,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
     - `offset + 76`: Focal distance to target / look-at center point (double).
     - `offset + 84`: View height / frustum vertical extent (double).
     - `offset + 92`: Near clipping plane distance (double).
+  - Writer trailer (not present in Navisworks files): immediately after `offset + 100`, `[int32 "NWVP"][int32 payloadLength]` then a payload starting with `[int32 "NWVP"][int32 version]` and holding field of view in degrees, far distance, projection, viewpoint id, comment count and strings, section planes and the section box. The reader takes the field of view only from the trailer (the `offset + 84` slot is not read as degrees) and prefers the trailer over the heuristic comment scan; records with a trailer are not de-duplicated; `NwcWriter` writes it, other producers do not.
 - **Coordinate Frame & Vector Algebra**:
   - Canonical view direction vector in camera local space is along $-Z$ (`(0, 0, -1)`).
   - Canonical up vector in camera local space is along $+Y$ (`(0, 1, 0)`).

@@ -156,6 +156,7 @@ public class ViewpointTests
         Assert.Equal(34.5, vp.Camera.Position.Y);
         Assert.Equal(56.5, vp.Camera.Position.Z);
         Assert.Equal(50.0, vp.Camera.FocalDistance);
+        Assert.Equal(60.0, vp.Camera.FieldOfView); // the +84 slot (10.0 here) is not a field of view in degrees
         Assert.InRange(vp.Camera.AspectRatio, 1.77, 1.78);
         Assert.Equal(new Vector3d(0, 0, -1), vp.Camera.Direction);
     }
