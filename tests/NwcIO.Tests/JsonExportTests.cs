@@ -35,24 +35,42 @@ public sealed class JsonExportTests
 
         doc.SaveJson(counting, new NwcJsonExportOptions { IncludeSceneTree = false });
 
-        Assert.True(counting.Writes > 1, "The transforms section was buffered until the end of the export.");
+        // Without incremental flushing the whole output arrives in one final write.
+        Assert.True(counting.LargestWrite < counting.Length / 2, "The transforms section was buffered until the end of the export.");
         using var json = JsonDocument.Parse(counting.ToArray());
         Assert.Equal(2000, json.RootElement.GetProperty("transforms").GetArrayLength());
     }
 
+    [Fact]
+    public void Json_WriteFile_RemovesPartialFileOnFailure()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            var doc = new NwcDocumentBuilder().Build();
+            // Null options fail after the output file has been created.
+            Assert.ThrowsAny<Exception>(() => NwcIO.Internal.Json.JsonExporter.WriteFile(doc, path, null!));
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private sealed class CountingStream : MemoryStream
     {
-        public int Writes { get; private set; }
+        public int LargestWrite { get; private set; }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            Writes++;
+            LargestWrite = Math.Max(LargestWrite, count);
             base.Write(buffer, offset, count);
         }
 
         public override void Write(ReadOnlySpan<byte> buffer)
         {
-            Writes++;
+            LargestWrite = Math.Max(LargestWrite, buffer.Length);
             base.Write(buffer);
         }
     }
