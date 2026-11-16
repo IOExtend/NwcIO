@@ -51,7 +51,7 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - No stream names the length unit. The Revit loader (`LcNwcLoaderPlugin:lcldrevit`, Navisworks reading a `.rvt`) and the Revit NWC exporter (`nwexportrevit`) write coordinates and length values in feet, areas in ft², volumes in ft³.
 
 ### 2.2 Logical Hierarchy (`LcOpNwdLogicalHierarchy`)
-- **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced.
+- **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced. Files without a DbCache directory still use that lenient scan (see §2.2.2).
 - **Stream framing**: `[int32 k][k x int32] [int32 100] [int32 n] n x pointer [int32 1]`, zero-padded to a multiple of 8. `k` is the number of `LcOaPartitionProps` root streams; the `k` ints are their root counts (§2.2.1). Id 100 is the implicit root and has no class or body.
 - **Pointer rule**: a pointer is `0` (null), `[1][id]` (back-reference to an object whose body is complete) or `[nextId][classId][body]` (new object). `nextId` starts at 100; an object takes its id before its body is read, so nested new objects take the following ids in depth-first order. Any other first value, an unknown class, or a back-reference to an unfinished object is invalid. Ids are per stream: equal ids in different streams mean nothing.
 - **Primitives**: strings are `[int32 len][UTF-8][zero pad to 4]` with `-1` for null; `f64` and `i64` values are aligned to 8 bytes from the stream start, with one zero `int32` of padding when needed.
@@ -79,6 +79,17 @@ LINK      := the n-th null attribute slot of a hierarchy node, in byte order, ta
 ```
 
 The roots are the tabs a node uses once (element, parameter, type, material and room tabs) and its element id; tabs shared by two or more nodes stay in the hierarchy. A class-66 root becomes a one-property tab named by its key (`LcRevitId`). The per-node order the exporter writes (`86* 79? 66?`, the 66 last) is not enforced.
+
+### 2.2.2 Lenient fallback scene tree
+
+Containers without a DbCache directory (no `LcOpNwdLogicalHierarchy`, fragments or geometry segment) fall back to a tag 52/53 scan of the streams that look like scene trees, built by `SceneTreeBuilder`:
+
+- A tag-53 record supplies the display name of the next tag-52 node. The class stored on the tag-52 record decides the role: `*Layer` starts a layer, `*Collection`/`*Group` a collection, `*Element`/`*Composite`/`*Instance`/`*Node`/`*Object` an element, and the observed `LcRevit*` names are always recognized.
+- Collections nest as Category → Family → Type. The level is taken from the stored marker name (`Категория`, `Category`, `Kategorie`, … and the corresponding Family/Type spellings) and, for names outside that table, from record order: the first three collections after a layer take the three levels, and a collection that follows an element starts a new Category.
+- A tag-52 record whose class has no property marker (`Property`) and no value becomes an element node. Records with a value or a property class are attached as properties to the current node.
+- GUIDs are assigned in scan order to element nodes; this mapping is only valid when the stream stores exactly one GUID per element.
+
+The nesting is therefore independent of the exporter UI language for the marker names in the table, but an unrecognized language falls back to record order, and parent links lost by the tag scan cannot be recovered.
 
 ### 2.3 GUID Table (`Guids`)
 - **Location**: the DbCache entry `LcOpGuidStore`, one zlib stream `[i32 a = 1][i32 n][n x 16-byte GUID]` in Windows layout. The GUID of element `X` is the Revit export GUID of the element (its UniqueId's session GUID with the last 32 bits XORed with the element id).
