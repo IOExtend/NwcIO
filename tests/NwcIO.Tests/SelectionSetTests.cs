@@ -213,15 +213,15 @@ public class SelectionSetTests
     }
 
     [Fact]
-    public void SearchSetXml_PreservesFlagsInternalNamesValueTypeNegationAndGroups()
+    public void SearchSetXml_PreservesFlagsInternalNamesAndValueType()
     {
         const string xml = """
 <exchange><selectionsets><selectionset name="Complex" guid="11111111-1111-1111-1111-111111111111">
 <findspec mode="all" disjoint="0"><conditions>
-<condition test="defined" flags="5" group="2" negate="1">
+<condition test="contains" flags="5">
 <category><name internal="CatInternal">Cat</name></category>
 <property><name internal="PropInternal">Prop</name></property>
-</condition>
+<value><data type="wstring">abc</data></value></condition>
 <condition test="equals"><category><name>Item</name></category><property><name>Name</name></property>
 <value><data type="double">1.5</data></value></condition>
 </conditions></findspec></selectionset></selectionsets></exchange>
@@ -231,10 +231,8 @@ public class SelectionSetTests
 
         Assert.Equal(2, search.Conditions.Count);
         var first = search.Conditions[0];
-        Assert.Equal(NwcSearchOperator.Defined, first.Operator);
+        Assert.Equal(NwcSearchOperator.Contains, first.Operator);
         Assert.Equal("5", first.Flags);
-        Assert.Equal(2, first.Group);
-        Assert.True(first.Negate);
         Assert.Equal("CatInternal", first.InternalCategory);
         Assert.Equal("PropInternal", first.InternalProperty);
         var second = search.Conditions[1];
@@ -247,37 +245,10 @@ public class SelectionSetTests
         var reloaded = Assert.IsType<NwcSearchSet>(Assert.Single(NwcXmlSetSerializer.Read(output)));
         var reloadedFirst = reloaded.Conditions[0];
         Assert.Equal("5", reloadedFirst.Flags);
-        Assert.Equal(2, reloadedFirst.Group);
-        Assert.True(reloadedFirst.Negate);
+        Assert.Equal(NwcSearchOperator.Contains, reloadedFirst.Operator);
         Assert.Equal("CatInternal", reloadedFirst.InternalCategory);
         Assert.Equal("PropInternal", reloadedFirst.InternalProperty);
         Assert.Equal("double", reloaded.Conditions[1].ValueType);
-    }
-
-    [Fact]
-    public void SearchSet_DefinedUndefinedNegateAndOrGroups()
-    {
-        var node = new NwcNode { Id = 1, Name = "Wall", Class = "LcRevitData_Element" };
-        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "System", Class = "Item", Value = "Exhaust" });
-
-        Assert.True(new NwcSearchCondition("Item", "Class", NwcSearchOperator.Defined, "").Evaluate(node));
-        Assert.False(new NwcSearchCondition("Item", "Class", NwcSearchOperator.Undefined, "").Evaluate(node));
-        Assert.False(new NwcSearchCondition("Item", "Missing", NwcSearchOperator.Defined, "").Evaluate(node));
-        Assert.True(new NwcSearchCondition("Item", "Class", NwcSearchOperator.Defined, "") { Negate = true }.Evaluate(node) == false);
-
-        var orGroup = new NwcSearchSet("or", [
-            new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "No") { Group = 1 },
-            new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "Wall") { Group = 1 },
-            new NwcSearchCondition("Item", "Class", NwcSearchOperator.Equals, "LcRevitData_Element"),
-        ]);
-        Assert.True(orGroup.Matches(node));
-
-        var noMatch = new NwcSearchSet("or", [
-            new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "No") { Group = 1 },
-            new NwcSearchCondition("Item", "Name", NwcSearchOperator.Equals, "Other") { Group = 1 },
-            new NwcSearchCondition("Item", "Class", NwcSearchOperator.Equals, "LcRevitData_Element"),
-        ]);
-        Assert.False(noMatch.Matches(node));
     }
 
     [Fact]

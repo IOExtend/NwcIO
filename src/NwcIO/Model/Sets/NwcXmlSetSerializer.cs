@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
 
@@ -6,9 +5,9 @@ namespace NwcIO.Model.Sets;
 
 /// <summary>
 /// Serializes and deserializes Navisworks Selection Sets and Search Sets to/from the Navisworks
-/// "Import/Export Selection Sets" XML exchange structure. Supports the condition <c>test</c>, <c>flags</c>,
-/// internal names and value data types, per-condition negation and OR groups; compatibility with every
-/// attribute Navisworks writes has not been verified against a Navisworks-produced export.
+/// "Import/Export Selection Sets" XML exchange structure. Condition <c>test</c>, <c>flags</c>, internal names
+/// and value data types are preserved; compatibility with every attribute Navisworks writes has not been
+/// verified against a Navisworks-produced export.
 /// </summary>
 public static class NwcXmlSetSerializer
 {
@@ -129,22 +128,11 @@ public static class NwcXmlSetSerializer
                 {
                     condElem.Add(new XAttribute("flags", c.Flags));
                 }
-                if (c.Group is { } group)
-                {
-                    condElem.Add(new XAttribute("group", group));
-                }
-                if (c.Negate)
-                {
-                    condElem.Add(new XAttribute("negate", "1"));
-                }
 
                 condElem.Add(new XElement("category", NameElement(c.Category, c.InternalCategory)));
                 condElem.Add(new XElement("property", NameElement(c.Property, c.InternalProperty)));
-                if (c.Operator is not (NwcSearchOperator.Defined or NwcSearchOperator.Undefined))
-                {
-                    condElem.Add(new XElement("value",
-                        new XElement("data", new XAttribute("type", string.IsNullOrEmpty(c.ValueType) ? "wstring" : c.ValueType), c.Value)));
-                }
+                condElem.Add(new XElement("value",
+                    new XElement("data", new XAttribute("type", string.IsNullOrEmpty(c.ValueType) ? "wstring" : c.ValueType), c.Value)));
 
                 conditions.Add(condElem);
             }
@@ -254,8 +242,6 @@ public static class NwcXmlSetSerializer
                         string val = valueElem?.Value ?? string.Empty;
 
                         var op = NwcSearchOperatorFormat.Parse(cElem.Attribute("test")?.Value);
-                        int? group = int.TryParse(cElem.Attribute("group")?.Value, NumberStyles.Integer,
-                            CultureInfo.InvariantCulture, out int groupValue) ? groupValue : null;
 
                         searchSet.Conditions.Add(new NwcSearchCondition(category, property, op, val)
                         {
@@ -263,8 +249,6 @@ public static class NwcXmlSetSerializer
                             InternalCategory = categoryElem?.Attribute("internal")?.Value,
                             InternalProperty = propertyElem?.Attribute("internal")?.Value,
                             ValueType = valueElem?.Attribute("type")?.Value ?? "wstring",
-                            Negate = cElem.Attribute("negate")?.Value is "1" or "true",
-                            Group = group,
                         });
                     }
                 }
