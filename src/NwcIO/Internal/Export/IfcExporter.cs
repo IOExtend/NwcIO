@@ -19,9 +19,18 @@ internal static class IfcExporter
         ArgumentNullException.ThrowIfNull(doc);
         ArgumentNullException.ThrowIfNull(path);
 
-        using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
-        Write(doc, writer, options, Path.GetFileName(path));
+        // Output is streamed, so a failure part-way would leave a truncated IFC that looks valid; remove it.
+        try
+        {
+            using var fs = File.Create(path);
+            using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
+            Write(doc, writer, options, Path.GetFileName(path));
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
     }
 
     /// <summary>Writes a single <see cref="NwcDocument"/> to a <see cref="TextWriter"/>.</summary>
@@ -37,7 +46,10 @@ internal static class IfcExporter
         options ??= NwcIfcExportOptions.Default;
         fileName ??= Path.GetFileName(doc.FileInfo.SourcePath) ?? "model.ifc";
 
-        var w = new StepWriter();
+        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
+        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
+        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
+        var w = new StepWriter(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
 
         // 1. Project infrastructure & Owner History
         int personId = w.Add("IFCPERSON", $"$,{StepWriter.Str(options.Author)},$,$,$,$,$,$");
@@ -106,7 +118,6 @@ internal static class IfcExporter
             $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:building-storey"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},({StepWriter.Ref(storeyId)})");
 
         // 4. Materials & Styles Cache
-        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
         var styleCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (options.ExportMaterials)
         {
@@ -118,8 +129,6 @@ internal static class IfcExporter
 
         // 5. Export Meshes as IFC Products
         bool useTessellation = isIfc4 && options.UseTessellationInIfc4;
-        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
-        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
 
         double scale = (options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres) ? 0.001 : 1.0;
         var elementIds = new List<int>(doc.Meshes.Count);
@@ -238,7 +247,7 @@ internal static class IfcExporter
         }
 
         // 8. Write complete STEP physical file
-        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
+        w.Complete();
     }
 
     /// <summary>Writes a federated <see cref="NwcAssembly"/> to an IFC file.</summary>
@@ -247,9 +256,17 @@ internal static class IfcExporter
         ArgumentNullException.ThrowIfNull(assembly);
         ArgumentNullException.ThrowIfNull(path);
 
-        using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
-        WriteAssembly(assembly, writer, options, Path.GetFileName(path));
+        try
+        {
+            using var fs = File.Create(path);
+            using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
+            WriteAssembly(assembly, writer, options, Path.GetFileName(path));
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
     }
 
     /// <summary>Writes a federated <see cref="NwcAssembly"/> to a <see cref="TextWriter"/>.</summary>
@@ -265,7 +282,10 @@ internal static class IfcExporter
         options ??= NwcIfcExportOptions.Default;
         fileName ??= $"{assembly.Name}.ifc";
 
-        var w = new StepWriter();
+        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
+        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
+        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
+        var w = new StepWriter(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
 
         // 1. Project infrastructure & Owner History
         int personId = w.Add("IFCPERSON", $"$,{StepWriter.Str(options.Author)},$,$,$,$,$,$");
@@ -325,7 +345,6 @@ internal static class IfcExporter
             $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:site-building"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(siteId)},({StepWriter.Ref(buildingId)})");
 
         // 4. Materials Cache
-        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
         var styleCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (options.ExportMaterials)
         {
@@ -337,8 +356,6 @@ internal static class IfcExporter
 
         // 5. Storeys per Model or Global Storey
         bool useTessellation = isIfc4 && options.UseTessellationInIfc4;
-        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
-        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
 
         double scale = (options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres) ? 0.001 : 1.0;
         var storeyIds = new List<int>();
@@ -473,7 +490,7 @@ internal static class IfcExporter
                 $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:building-storeys"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},{StepWriter.List(storeyIds.Select(StepWriter.Ref))}");
         }
 
-        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
+        w.Complete();
     }
 
     private static int WriteMeshFacetedBrep(

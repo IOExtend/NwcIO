@@ -1413,4 +1413,40 @@ public class IfcExportTests
         Assert.Contains("'Concrete Wall 200'", ifc);
         Assert.DoesNotContain("Mesh_42", ifc);
     }
+
+    private static NwcDocument CreateUnwritableDocument() =>
+        NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "bad.rvt" },
+            materials: [null!]);
+
+    [Fact]
+    public void SaveIfc_File_RemovesPartialFileOnFailure()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.ifc");
+        try
+        {
+            Assert.ThrowsAny<Exception>(() => CreateUnwritableDocument().SaveIfc(path));
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void SaveIfc_AssemblyFile_RemovesPartialFileOnFailure()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.ifc");
+        try
+        {
+            var assembly = NwcAssembly.Create("Bad", CreateUnwritableDocument());
+            Assert.ThrowsAny<Exception>(() => assembly.SaveIfc(path));
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
