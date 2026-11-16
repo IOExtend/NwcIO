@@ -409,7 +409,8 @@ public class TimeLinerMsProjectAndPrimaveraTests
         NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms);
         ms.Position = 0;
         string xer = new StreamReader(ms, leaveOpen: true).ReadToEnd();
-        Assert.Contains("2026-06-01 05:00", xer);
+        Assert.Contains("	2026-06-01 05:00	2026-06-01 14:00	Active", xer); // PROJECT plan dates
+        Assert.Contains("	2026-06-01 05:00	2026-06-01 14:00	2026-06-01 06:00	2026-06-01 09:00	", xer); // TASK dates
 
         ms.Position = 0;
         var imported = NwcTimeLinerPrimaveraXerSerializer.Read(ms);
@@ -436,7 +437,11 @@ public class TimeLinerMsProjectAndPrimaveraTests
         ms.Position = 0;
         string xml = new StreamReader(ms, leaveOpen: true).ReadToEnd();
         Assert.Contains("<StartDate>2026-06-01T05:00:00</StartDate>", xml);
+        Assert.Contains("<FinishDate>2026-06-01T14:00:00</FinishDate>", xml);
         Assert.Contains("<Start>2026-06-01T05:00:00</Start>", xml);
+        Assert.Contains("<Finish>2026-06-01T14:00:00</Finish>", xml);
+        Assert.Contains("<ActualStart>2026-06-01T06:00:00</ActualStart>", xml);
+        Assert.Contains("<ActualFinish>2026-06-01T09:00:00</ActualFinish>", xml);
 
         ms.Position = 0;
         var imported = NwcTimeLinerMsProjectXmlSerializer.Read(ms);
@@ -445,5 +450,16 @@ public class TimeLinerMsProjectAndPrimaveraTests
         Assert.Equal(start.AddHours(9), task.PlannedEnd);
         Assert.Equal(start.AddHours(1), task.ActualStart);
         Assert.Equal(start.AddHours(4), task.ActualEnd);
+    }
+
+    [Fact]
+    public void Cli_UsageHelp_DisplaysNewTimeLinerFlags()
+    {
+        using var sw = new StringWriter();
+        int code = Program.Run(HelpArgs, outWriter: sw);
+        Assert.Equal(0, code);
+        string output = sw.ToString();
+        Assert.Contains("--timeliner-msproject", output);
+        Assert.Contains("--timeliner-primavera", output);
     }
 }

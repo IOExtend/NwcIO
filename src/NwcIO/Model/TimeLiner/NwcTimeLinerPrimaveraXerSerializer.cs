@@ -6,7 +6,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner construction simulation schedules
 /// to and from Primavera P6 XER format (.xer).
-/// XER has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip.
+/// XER has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerPrimaveraXerSerializer
 {

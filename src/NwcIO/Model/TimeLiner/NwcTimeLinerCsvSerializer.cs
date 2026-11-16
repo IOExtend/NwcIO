@@ -6,7 +6,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner schedules to/from CSV format.
 /// Fully compatible with Navisworks TimeLiner "Import/Export Tasks to CSV", Microsoft Project, and Primavera P6.
-/// CSV has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip.
+/// CSV has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerCsvSerializer
 {
