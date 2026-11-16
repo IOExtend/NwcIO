@@ -51,7 +51,8 @@ Once inflated, streams serve dedicated roles identified by their signature prefi
 - No stream names the length unit. The Revit loader (`LcNwcLoaderPlugin:lcldrevit`, Navisworks reading a `.rvt`) and the Revit NWC exporter (`nwexportrevit`) write coordinates and length values in feet, areas in ft², volumes in ft³.
 
 ### 2.2 Logical Hierarchy (`LcOpNwdLogicalHierarchy`)
-- **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced.
+- **Location**: the DbCache entry whose final segment is `LcOpNwdLogicalHierarchy` (one zlib stream). Older notes called it the scene tree and scanned it for tags 52/53; that scan misses every node that is only back-referenced. Files without a DbCache directory still use that lenient scan (see §2.2.2).
+- **Writer tree records**: `NwcWriter` writes flat tag-53 name and tag-52 identity pairs. A tag-53 record may carry a parent marker `[int32 -2][int32 parentNodeId]` after the name (`0` is the model root), which makes the lenient builder attach the following node exactly; real Navisworks streams do not contain it.
 - **Stream framing**: `[int32 k][k x int32] [int32 100] [int32 n] n x pointer [int32 1]`, zero-padded to a multiple of 8. `k` is the number of `LcOaPartitionProps` root streams; the `k` ints are their root counts (§2.2.1). Id 100 is the implicit root and has no class or body.
 - **Pointer rule**: a pointer is `0` (null), `[1][id]` (back-reference to an object whose body is complete) or `[nextId][classId][body]` (new object). `nextId` starts at 100; an object takes its id before its body is read, so nested new objects take the following ids in depth-first order. Any other first value, an unknown class, or a back-reference to an unfinished object is invalid. Ids are per stream: equal ids in different streams mean nothing.
 - **Primitives**: strings are `[int32 len][UTF-8][zero pad to 4]` with `-1` for null; `f64` and `i64` values are aligned to 8 bytes from the stream start, with one zero `int32` of padding when needed.
@@ -79,6 +80,17 @@ LINK      := the n-th null attribute slot of a hierarchy node, in byte order, ta
 ```
 
 The roots are the tabs a node uses once (element, parameter, type, material and room tabs) and its element id; tabs shared by two or more nodes stay in the hierarchy. A class-66 root becomes a one-property tab named by its key (`LcRevitId`). The per-node order the exporter writes (`86* 79? 66?`, the 66 last) is not enforced.
+
+### 2.2.2 Lenient fallback scene tree
+
+Containers without a DbCache directory (no `LcOpNwdLogicalHierarchy`, fragments or geometry segment) fall back to a tag 52/53 scan of the streams that look like scene trees, built by `SceneTreeBuilder`:
+
+- A tag-53 record supplies the display name of the next tag-52 node. The class stored on the tag-52 record decides the role: `*Layer` starts a layer, `*Collection`/`*Group` a collection, `*Element`/`*Composite`/`*Instance`/`*Node`/`*Object` an element, and the observed `LcRevit*` names are always recognized. `LcRevitElement` records whose name starts with `Material "` are material definitions and stay properties.
+- Collections nest as Category -> Family -> Type. The level is taken from the stored marker name (the localized Category/Family/Type spellings); a marker seen earlier in the same layer keeps its level. For names outside the table, the first three distinct markers of a layer take the three levels, and a new marker after an element starts a new Category.
+- Tag-52 records with a property class or a value are attached as properties to the current node.
+- GUIDs are assigned in scan order to element nodes; this mapping is only valid when the stream stores exactly one GUID per element.
+
+The nesting is therefore independent of the exporter UI language for the marker names in the table, and repeated markers outside it keep their level; otherwise the first distinct markers and record order decide, and parent links lost by the tag scan cannot be recovered.
 
 ### 2.3 GUID Table (`Guids`)
 - **Location**: the DbCache entry `LcOpGuidStore`, one zlib stream `[i32 a = 1][i32 n][n x 16-byte GUID]` in Windows layout. The GUID of element `X` is the Revit export GUID of the element (its UniqueId's session GUID with the last 32 bits XORed with the element id).
@@ -147,6 +159,7 @@ UVBODY := [p1][fc][fc x f32] TOKENS(p1, fc/2)?        (raw; tokens iff fc/2 != p
 - **Polylines** (class 95): render vertices `0..p1-1` are split by `L` into open polylines; the segment count is the sum of `L-1`. There is no implicit closing segment.
 - **UVBODY**: the raw form has a non-negative first int `p1` and `fc` floats (two per UV pair, `fc/2` pairs). The quantised form has `-p1`, four floats, then `w`, `m` and the packed words; `bu = w & 0xFF` and `bv = (w >> 8) & 0xFF` are the bit widths of the two coordinates, so the packed block is `ceil(m*(bu+bv)/32)` words. The token stream maps each of the `p1` render vertices to one of the `fc/2` or `m` stored pairs.
 - **Not decoded**: UV values and colour channels. Only their lengths and maps are read, to find the next field.
+- **Writer records**: `NwcWriter` emits its own simplified record, `[id][94][0][60][p1][p2][p2 x f32 xyz]`, followed by the trailer `["NWCI"][indexCount][indexCount x i32][Id i32][nameLength][UTF-8 name][pad4]`. The fallback mesh parser (§2.5) restores the exact triangle indices, `Id` and `Name` from the trailer; records without it keep the rebuilt strip and the synthesized `Mesh_{index}` identity. The trailer is writer-specific: it is not part of the documented Navisworks grammar.
 
 ### 2.7 DB Cache Directory (`DbCache` / `LcOpDBCache`)
 The directory is the only stream of section 1. It lists every other segment and tiles section 0 exactly.
@@ -219,8 +232,8 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
 - **Character Encoding**:
   - Full Unicode support with ISO 10303-21 `\X2\HHHH...\X0\` escaping for Cyrillic and international characters (e.g., Russian BIM category and parameter names).
 - **Geometric Representations**:
-  - **IFC2x3 (Boundary Representation)**: Serialized as `IfcFacetedBrep` composed of `IfcClosedShell` containing `IfcFace` &rarr; `IfcFaceOuterBound` &rarr; `IfcPolyLoop` referencing `IfcCartesianPoint` coordinates, with one point shared per mesh vertex index when `SharedVertices` is enabled (the default); coincident coordinates at different vertex indices are not merged.
-  - **IFC4 (Modern Tessellation)**: Serialized as `IfcTriangulatedFaceSet` referencing `IfcCartesianPointList3D` with representation type `'Tessellation'`. Reduces entity count and file size by over 60%, delivering sub-120 ms export times for full buildings.
+  - **IFC2x3 (Boundary Representation)**: Serialized as `IfcFacetedBrep` composed of `IfcClosedShell` containing `IfcFace` &rarr; `IfcFaceOuterBound` &rarr; `IfcPolyLoop` referencing `IfcCartesianPoint` coordinates, with one point shared per mesh vertex index when `SharedVertices` is enabled (the default); coincident coordinates at different vertex indices are not merged. A mesh whose triangles do not form a closed surface (checked after welding vertices by position) is written as `IfcOpenShell` in an `IfcShellBasedSurfaceModel` with representation type `'SurfaceModel'`; a mesh without a valid triangle gets no body representation.
+  - **IFC4 (Modern Tessellation)**: Serialized as `IfcTriangulatedFaceSet` referencing `IfcCartesianPointList3D` with representation type `'Tessellation'`. Reduces entity count and file size by over 60%, delivering sub-120 ms export times for full buildings. `Closed` is `.T.` for a closed surface and `$` (unknown) otherwise.
 - **Type Products & Occurrence Relations (`IfcRelDefinesByType`)**:
   - Generates type definition objects (`IfcTypeProduct` subtypes): `IFCWALLTYPE`, `IFCSLABTYPE`, `IFCCOLUMNTYPE`, `IFCBEAMTYPE`, `IFCREINFORCINGBARTYPE`, `IFCFOOTINGTYPE`, `IFCRAILINGTYPE`, `IFCROOFTYPE`, `IFCSTAIRFLIGHTTYPE`, `IFCPIPESEGMENTTYPE`, `IFCDUCTSEGMENTTYPE`, `IFCWINDOWTYPE`/`IFCWINDOWSTYLE`, `IFCDOORTYPE`/`IFCDOORSTYLE`, and `IFCBUILDINGELEMENTPROXYTYPE`.
   - Links occurrence instances to their corresponding type object using `IfcRelDefinesByType`.
@@ -233,11 +246,12 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
     - Priority: the node's `Category`, `Family`, `Type`/`Тип`, `Element Type`, `IFC Type` or `IfcEntity` property, then the node class and name, then the mesh name. Material names never decide the class.
     - Keywords match at word-token starts only (`Drywall` is not a wall, `Outdoor` is not a door), so Russian stems such as `стен`, `перекрыт`, `колонн`, `арматур` and English words such as `wall`, `slab`, `column`, `rebar`, `pipe`, `duct` are recognized. Nothing matching falls back to `IFCBUILDINGELEMENTPROXY` (or `IFCFLOWSEGMENT` for pipes/ducts in IFC2X3).
     - Type objects are named from the node's `Family`/`Type` property, then the element name; the material name is not used.
+    - Attribute lists follow the selected schema (IFC2x3 or IFC4). IFC2x3 requires `NominalDiameter` and `CrossSectionArea` on `IFCREINFORCINGBAR`, which an NWC file does not carry, so the placeholders `1.` and `0.` are written there; IFC4 writes `$`.
 - **Materials & Properties**:
   - Shading styles serialized via `IfcSurfaceStyle`, `IfcSurfaceStyleShading`, and `IfcColourRgb`, assigned to geometry via `IfcStyledItem`.
   - Element metadata and dimensional bounding parameters exported as `IfcPropertySet` containing `IfcPropertySingleValue` linked to elements via `IfcRelDefinesByProperties`.
 - **Global Identifiers**:
-  - Deterministic 22-character buildingSMART base64 GUIDs generated via UUID/SHA-256 namespace hashing (`IfcGuid`), ensuring stable GUIDs across repeated exports.
+  - Deterministic 22-character buildingSMART base64 GUIDs generated via UUID/SHA-256 namespace hashing (`IfcGuid`). Element ids hash the model source path, the authoring element id (`NwcNode.IfcGlobalId`, else `NwcNode.ElementGuid`) when the mesh has one, and the mesh id, so equal mesh ids in different models stay distinct; spatial, relationship, property-set and type ids hash fixed role keys. The same input produces the same GlobalIds on repeated exports, and clash/BCF component ids use the same derivation as IFC.
 
 ### 2.12 BIM Collaboration Format (BCF 2.1) & Interactive Clash Reports
 - **BCF 2.1 Container Specification**:
@@ -257,6 +271,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - Saved viewpoint streams are identified by the presence of marker Tag `517` (`0x0205`), accompanied by consecutive IEEE 754 double sequences representing 3D coordinates and rotation quaternions.
 - **Binary Layout of Viewpoint Records**:
   - String record prefix: Length-prefixed 32-bit integer followed by UTF-8 (or CP866 / CP1251 in localized releases) display name string (e.g., `"Общий вид здания"`, `"Navisworks коллизии"`).
+  - Legacy names: the reader accepts strict UTF-8 first, then decodes the bytes as both CP866 and CP1251 and keeps the more plausible Russian text (letter-frequency score, with penalties for box-drawing and symbol noise), so a CP1251 name is no longer shown as CP866 mojibake.
   - Header tag: `517` (`0x00000205`), followed by `int32 1`, `int32 0`.
   - Eye position: 3 consecutive 64-bit IEEE 754 doubles at `offset + 12, +20, +28` ($X, Y, Z$ in model world coordinates).
   - Orientation quaternion: 4 consecutive 64-bit IEEE 754 doubles at `offset + 36, +44, +52, +60` ($Q_X, Q_Y, Q_Z, Q_W$), where $Q_X^2 + Q_Y^2 + Q_Z^2 + Q_W^2 \approx 1.0$.
@@ -265,6 +280,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
     - `offset + 76`: Focal distance to target / look-at center point (double).
     - `offset + 84`: View height / frustum vertical extent (double).
     - `offset + 92`: Near clipping plane distance (double).
+  - Writer trailer (not present in Navisworks files): immediately after `offset + 100`, `[int32 "NWVP"][int32 payloadLength]` then a payload starting with `[int32 "NWVP"][int32 version]` and holding field of view in degrees, far distance, projection, viewpoint id, comment count and strings, section planes and the section box. The reader takes the field of view only from the trailer (the `offset + 84` slot is not read as degrees) and prefers the trailer over the heuristic comment scan; records with a trailer are not de-duplicated; `NwcWriter` writes it, other producers do not.
 - **Coordinate Frame & Vector Algebra**:
   - Canonical view direction vector in camera local space is along $-Z$ (`(0, 0, -1)`).
   - Canonical up vector in camera local space is along $+Y$ (`(0, 1, 0)`).
