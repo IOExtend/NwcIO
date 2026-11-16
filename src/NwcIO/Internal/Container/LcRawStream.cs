@@ -1,7 +1,7 @@
 namespace NwcIO.Internal.Container;
 
 /// <summary>How a raw stream was identified.</summary>
-public enum NwcStreamKind
+internal enum NwcStreamKind
 {
     Unknown,
     /// <summary>Partition 0 header: source file path, timestamp, loader plugin, export options.</summary>
@@ -34,7 +34,7 @@ public enum NwcStreamKind
 /// One zlib-decompressed stream ("chunk") of the container plus its raw placement in the file.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1711:Identifiers should not have incorrect suffix", Justification = "Matches Navisworks LcUStream naming convention")]
-public sealed record LcRawStream
+internal sealed record LcRawStream
 {
     public required int Index { get; init; }
 
@@ -56,7 +56,7 @@ public sealed record LcRawStream
 }
 
 /// <summary>The parsed container: section headers and the ordered stream list.</summary>
-public sealed record NwcContainer
+internal sealed record NwcContainer
 {
     public required IReadOnlyList<LcUStreamHeader> Sections { get; init; }
 

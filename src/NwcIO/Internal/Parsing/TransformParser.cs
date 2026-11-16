@@ -8,7 +8,7 @@ namespace NwcIO.Internal.Parsing;
 /// Parses 3D transformation streams (<see cref="NwcStreamKind.Transforms"/>):
 /// decodes element poses (translation, rotation quaternion) and local bounding boxes.
 /// </summary>
-public static class TransformParser
+internal static class TransformParser
 {
     private const int TagTransform = 13;
     private const int TagPose = 15;

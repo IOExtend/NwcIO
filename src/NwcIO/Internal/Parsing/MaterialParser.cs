@@ -8,7 +8,7 @@ namespace NwcIO.Internal.Parsing;
 /// one gets a neutral colour and <see cref="NwcMaterial.IsInferred"/>. Meshes without a material
 /// get one neutral inferred fallback.
 /// </summary>
-public static class MaterialParser
+internal static class MaterialParser
 {
     private static readonly RgbaColor NeutralColor = new(0.70f, 0.72f, 0.75f, 1.0f);
 

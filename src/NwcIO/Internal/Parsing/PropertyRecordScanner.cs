@@ -24,7 +24,7 @@ namespace NwcIO.Internal.Parsing;
 ///     - 13: Point2D (16 bytes)
 /// The scanner searches forward resiliently for tags 52/53 across the decompressed chunk.
 /// </remarks>
-public sealed class PropertyRecordScanner
+internal sealed class PropertyRecordScanner
 {
     private readonly byte[] _data;
     private int _pos;

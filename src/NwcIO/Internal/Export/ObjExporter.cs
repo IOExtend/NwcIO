@@ -7,7 +7,7 @@ namespace NwcIO.Internal.Export;
 /// Streams 3D meshes to Wavefront OBJ format (.obj), compatible with Blender, 3ds Max,
 /// MeshLab, Windows 3D Viewer, and standard CAD/BIM visualizers.
 /// </summary>
-public static class ObjExporter
+internal static class ObjExporter
 {
     /// <summary>
     /// Writes meshes to a file in Wavefront OBJ format.

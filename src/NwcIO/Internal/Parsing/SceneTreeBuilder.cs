@@ -15,7 +15,7 @@ namespace NwcIO.Internal.Parsing;
 /// matched by suffix (<c>*Layer</c>, <c>*Collection</c>/<c>*Group</c>, <c>*Element</c>/<c>*Composite</c>/<c>*Node</c>
 /// and the observed <c>LcRevit*</c> names), so loader-specific class names create nodes too.
 /// </remarks>
-public static class SceneTreeBuilder
+internal static class SceneTreeBuilder
 {
     private const int CategoryLevel = 0;
     private const int FamilyLevel = 1;

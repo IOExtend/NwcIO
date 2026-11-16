@@ -6,7 +6,7 @@ namespace NwcIO.Internal.Container;
 /// e.g. <c>#LcUStream-V1.1 binary double release C lichunk-008</c> or
 /// <c>#LcUStream-V1.1 binary double release utf8 navisworks:448 lizlib</c>.
 /// </summary>
-public sealed class LcUStreamHeader
+internal sealed class LcUStreamHeader
 {
     /// <summary>Absolute file offset where the header starts.</summary>
     public required long FileOffset { get; init; }

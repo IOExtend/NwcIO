@@ -8,7 +8,7 @@ namespace NwcIO.Internal.Container;
 /// ASCII section headers interleaved with back-to-back zlib streams
 /// (with occasional non-zlib framing bytes between streams).
 /// </summary>
-public static class NwcContainerReader
+internal static class NwcContainerReader
 {
     private const string SectionMarker = "#LcUStream";
 

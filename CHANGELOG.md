@@ -13,6 +13,9 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 - `NwcPropertyRecord` carries the typed value of a property next to the text `Value`: `IntValue` (types 0, 2, 3 and 5), `DoubleValue` (types 1, 6, 7, 10, 11) and, for reference properties (type 8), `ReferenceId`, `ReferenceTag` and `ReferenceClass`. The scanner fills them and the `.nwc` writer writes them in preference to the text, for flat records and for node properties, so a reference no longer loses its target on a read and write.
 
+### Breaking
+- `NwcIO.Internal.*` types are now `internal`; only the documented public surface ships in the package. `NwcJsonExportOptions` remains public. Package validation runs on `dotnet pack` against the 0.12.1 baseline, with `CompatibilitySuppressions.xml` recording the intentional type removals.
+
 ### Changed
 - **Breaking:** for files read without the DbCache directory, `MaterialParser` no longer adds the Concrete and Rebar presets, no longer picks a mesh's material by its name or size (bounding box above 2000) or falls back to the first material, and no longer guesses a material colour from its name. A material named in property records keeps its colour from a `revit_Color` record, otherwise a neutral grey. Every mesh without a material shares one `Default Material` (a fresh instance per document, listed in `NwcDocument.Materials`, so JSON `meshes[].material` always resolves). New `NwcMaterial.IsInferred` is `true` for a fallback material or colour; it is now settable. The strict (DbCache) path is unchanged.
 - `NwcReaderOptions.MaxMeshVertices` (default 200,000) sets the vertex cap of one geometry record on the lenient reader path. Class 95 records and two-vertex records now read as line meshes (`LineIndices`) instead of triangle strips or being dropped.

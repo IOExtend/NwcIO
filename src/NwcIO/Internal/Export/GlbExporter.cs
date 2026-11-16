@@ -8,7 +8,7 @@ namespace NwcIO.Internal.Export;
 /// Exports 3D meshes, scene hierarchy, materials and PBR surface parameters
 /// to standardized glTF 2.0 Binary container format (.glb).
 /// </summary>
-public static class GlbExporter
+internal static class GlbExporter
 {
     private const uint GlbHeaderMagic = 0x46546C67; // "glTF"
     private const uint GlbVersion = 2;
