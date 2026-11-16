@@ -12,9 +12,15 @@ namespace NwcIO.Model;
 public sealed class NwcAssembly
 {
     private NwcSpatialIndex? _spatialIndex;
+    private readonly Dictionary<NwcMesh, int> _meshModelIndexes;
 
     public string Name { get; }
     public IReadOnlyList<NwcDocument> Models { get; }
+
+    /// <summary>
+    /// Synthetic assembly root. Its id is negative so it cannot collide with the
+    /// document roots (id 0); node ids are otherwise unique only within a document.
+    /// </summary>
     public NwcNode RootNode { get; }
     public IReadOnlyList<NwcMesh> AllMeshes { get; }
     public IReadOnlyList<NwcMaterial> AllMaterials { get; }
@@ -62,7 +68,8 @@ public sealed class NwcAssembly
         IReadOnlyList<NwcMesh> allMeshes,
         IReadOnlyList<NwcMaterial> allMaterials,
         BoundingBox3d boundingBox,
-        IReadOnlyList<NwcSavedViewpoint> savedViewpoints)
+        IReadOnlyList<NwcSavedViewpoint> savedViewpoints,
+        Dictionary<NwcMesh, int> meshModelIndexes)
     {
         Name = name;
         Models = models;
@@ -71,6 +78,27 @@ public sealed class NwcAssembly
         AllMaterials = allMaterials;
         BoundingBox = boundingBox;
         SavedViewpoints = savedViewpoints;
+        _meshModelIndexes = meshModelIndexes;
+    }
+
+    /// <summary>
+    /// Returns the zero-based index of the source model that owns <paramref name="mesh"/>,
+    /// or -1 when the mesh does not belong to this assembly.
+    /// </summary>
+    public int GetModelIndex(NwcMesh mesh)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        return _meshModelIndexes.TryGetValue(mesh, out int index) ? index : -1;
+    }
+
+    /// <summary>
+    /// Returns the source model that owns <paramref name="mesh"/>, or null when the
+    /// mesh does not belong to this assembly.
+    /// </summary>
+    public NwcDocument? GetModelOf(NwcMesh mesh)
+    {
+        int index = GetModelIndex(mesh);
+        return index >= 0 && index < Models.Count ? Models[index] : null;
     }
 
     /// <summary>
@@ -89,6 +117,7 @@ public sealed class NwcAssembly
 
         var modelList = models.ToList();
         var allMeshes = new List<NwcMesh>();
+        var meshModelIndexes = new Dictionary<NwcMesh, int>();
         // Dedupe by reference, NOT by name: disciplines routinely define their own
         // material with a shared name (Concrete, Steel) and different colours, and a
         // by-name map would silently drop the later ones from AllMaterials.
@@ -100,7 +129,11 @@ public sealed class NwcAssembly
         for (int m = 0; m < modelList.Count; m++)
         {
             var doc = modelList[m];
-            allMeshes.AddRange(doc.Meshes);
+            foreach (var mesh in doc.Meshes)
+            {
+                allMeshes.Add(mesh);
+                meshModelIndexes[mesh] = m;
+            }
 
             foreach (var mat in doc.Materials)
             {
@@ -121,7 +154,7 @@ public sealed class NwcAssembly
                 string docName = Path.GetFileNameWithoutExtension(doc.FileInfo.SourcePath ?? $"Model_{m + 1}");
                 var fallbackNode = new NwcNode
                 {
-                    Id = m + 1,
+                    Id = -(m + 2),
                     Name = docName,
                     Class = "LcOpModelFile",
                 };
@@ -144,13 +177,13 @@ public sealed class NwcAssembly
 
         var rootNode = new NwcNode
         {
-            Id = 0,
+            Id = -1,
             Name = name,
             Class = "LcOpModelAssembly",
         };
         rootNode.Children.AddRange(rootChildren);
 
-        return new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints);
+        return new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints, meshModelIndexes);
     }
 
     /// <summary>
@@ -461,7 +494,24 @@ public sealed class NwcAssembly
     /// <summary>Exports the entire federated assembly to a Wavefront OBJ file.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
     {
-        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name);
+        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name, GetObjectNamePrefix);
+    }
+
+    private string? GetObjectNamePrefix(NwcMesh mesh)
+    {
+        int modelIndex = GetModelIndex(mesh);
+        if (modelIndex < 0)
+        {
+            return null;
+        }
+
+        var model = Models[modelIndex];
+        string modelName = Path.GetFileNameWithoutExtension(model.FileInfo.SourcePath ?? string.Empty);
+        if (string.IsNullOrEmpty(modelName))
+        {
+            modelName = $"Model_{modelIndex + 1}";
+        }
+        return $"M{modelIndex + 1}_{modelName}";
     }
 
     /// <summary>Exports the entire federated assembly with geometry, materials, and spatial hierarchy to an IFC2x3 STEP file (.ifc).</summary>

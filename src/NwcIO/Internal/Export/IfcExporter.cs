@@ -414,7 +414,7 @@ internal static class IfcExporter
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
                 string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-                string elemGuid = IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
+                string elemGuid = IfcGuid.FromElementId(mesh.Id, $"NwcAssemblyMesh:{modelIdx}");
                 string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);

@@ -203,6 +203,51 @@ public class AssemblyTests
         }
     }
 
+    [Fact]
+    public void Create_OverlappingMeshIds_MapsMeshesToSourceModels()
+    {
+        var first = CreateComponentModel("A.nwc", 0, 0);
+        var second = CreateComponentModel("B.nwc", 0, 20);
+
+        var assembly = NwcAssembly.Create("Fed", first, second);
+
+        var meshA = Assert.Single(first.Meshes);
+        var meshB = Assert.Single(second.Meshes);
+        Assert.Equal(0, assembly.GetModelIndex(meshA));
+        Assert.Equal(1, assembly.GetModelIndex(meshB));
+        Assert.Same(first, assembly.GetModelOf(meshA));
+        Assert.Same(second, assembly.GetModelOf(meshB));
+        Assert.Equal(-1, assembly.GetModelIndex(new NwcMesh { Id = 99, Vertices = [], Indices = [] }));
+        Assert.Null(assembly.GetModelOf(new NwcMesh { Id = 99, Vertices = [], Indices = [] }));
+
+        // The synthetic assembly root and fallback model nodes use negative ids,
+        // so they cannot collide with document roots (id 0).
+        Assert.Equal(-1, assembly.RootNode.Id);
+        Assert.All(assembly.RootNode.Children, node =>
+            Assert.True(node.Id < 0, $"Synthetic node id {node.Id} must not collide with a document root."));
+    }
+
+    [Fact]
+    public void SaveObj_PrefixesObjectNamesWithSourceModelWhenMeshIdsRepeat()
+    {
+        var assembly = NwcAssembly.Create("Fed",
+            CreateComponentModel("A.nwc", 0, 0),
+            CreateComponentModel("B.nwc", 0, 20));
+        string path = Path.Combine(Path.GetTempPath(), "nwcio-asm-" + Guid.NewGuid().ToString("N") + ".obj");
+        try
+        {
+            assembly.SaveObj(path);
+
+            string obj = File.ReadAllText(path);
+            Assert.Contains("o M1_A/Mesh_0", obj);
+            Assert.Contains("o M2_B/Mesh_0", obj);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     private static NwcDocument CreateComponentModel(string sourcePath, int meshId, double offsetX)
     {
         return new NwcDocumentBuilder().SetFileInfo(sourcePath)
