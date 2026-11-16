@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NwcIO\NwcIO.csproj" />
+    <ProjectReference Include="..\NwcIO.Scene\NwcIO.Scene.csproj" />
   </ItemGroup>
 
   <ItemGroup>

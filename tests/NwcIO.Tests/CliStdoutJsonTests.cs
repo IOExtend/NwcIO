@@ -253,4 +253,55 @@ public class CliStdoutJsonTests
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
+
+    [Fact]
+    public void ReportNwf_PrintsMaterialsAndBvhStatsOnlyWhenRequested()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nwcio-nwf-report-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var comp = NwcDocument.Create(
+                fileInfo: new NwcFileInfo { SourcePath = "Comp.rvt" },
+                meshes:
+                [
+                    new NwcMesh
+                    {
+                        Id = 1,
+                        Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                        Indices = [0, 1, 2]
+                    }
+                ]);
+            string compPath = Path.Combine(dir, "Comp.nwc");
+            comp.Save(compPath);
+
+            string nwfPath = Path.Combine(dir, "fed.nwf");
+            string tableJson = "{\"Type\":\"XRefTable\",\"Version\":1,\"SavedFilename\":\"fed.nwf\",\"Table\":[{\"OriginalPath\":\"Comp.nwc\",\"RemappedPath\":\"\"}]}";
+            byte[] xrefStream = Encoding.UTF8.GetBytes(tableJson);
+            using (var fs = File.Create(nwfPath))
+            {
+                NwcIO.Internal.Container.NwcContainerWriter.Write(fs, [xrefStream]);
+            }
+
+            string Report(params string[] extra)
+            {
+                using var stdoutStream = new MemoryStream();
+                using var outWriter = new StringWriter();
+                using var errWriter = new StringWriter();
+                string[] args = [nwfPath, "-", "--report", .. extra];
+                Assert.Equal(0, NwcIO.Cli.Program.Run(args, stdoutStream, outWriter, errWriter));
+                return errWriter.ToString();
+            }
+
+            string withBvh = Report("--bvh-stats");
+            Assert.Contains("Total Materials:  ", withBvh);
+            Assert.Contains("BVH Nodes:", withBvh);
+            Assert.DoesNotContain("BVH Nodes:", Report());
+        }
+        finally
+        {
+            if (File.Exists("-")) File.Delete("-");
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
 }

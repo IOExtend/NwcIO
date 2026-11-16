@@ -239,8 +239,12 @@ public sealed class NwcSceneReaderTests
         Assert.Equal(doc.Elements[5].PropertySetIds[1..3], doc.Elements[7].PropertySetIds[1..3]);    // level and type tabs shared by the walls
         Assert.Equal(doc.Elements[8].PropertySetIds[0], doc.Elements[10].PropertySetIds[0]);         // the pair's element tab
 
-        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Type",
-            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }] };
+        var tab = new NwcPropertyTab
+        {
+            Name = "T",
+            InternalName = "LcRevitData_Type",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }]
+        };
         var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         leaf.PropertyTabs.AddRange([tab, tab]); root.Children.Add(leaf);
@@ -264,8 +268,12 @@ public sealed class NwcSceneReaderTests
     [InlineData("-1", "1")]
     public void Read_BooleanValue_IsZeroOrOne(string stored, string text)
     {
-        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Element",
-            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 3, Value = stored }] };
+        var tab = new NwcPropertyTab
+        {
+            Name = "T",
+            InternalName = "LcRevitData_Element",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 3, Value = stored }]
+        };
         var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         leaf.PropertyTabs.Add(tab); root.Children.Add(leaf);
@@ -281,8 +289,12 @@ public sealed class NwcSceneReaderTests
     [InlineData(13, "x")]
     public void Read_ValueThatCannotBeShown_IsLeftOut(int type, string? value)
     {
-        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Element",
-            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = type, Value = value }] };
+        var tab = new NwcPropertyTab
+        {
+            Name = "T",
+            InternalName = "LcRevitData_Element",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = type, Value = value }]
+        };
         var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         leaf.PropertyTabs.Add(tab); root.Children.Add(leaf);
@@ -311,8 +323,13 @@ public sealed class NwcSceneReaderTests
     {
         // 90° about Z, translation (1, 2, 3) ft: NwcTransform.ToMatrix4x4 rows are the images of X, Y, Z (row vectors)
         double h = Math.Sqrt(0.5);
-        var mesh = new NwcMesh { Id = 0, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2],
-            Transform = new NwcTransform { Id = 0, Rotation = new(0, 0, h, h), Translation = new(1, 2, 3) } };
+        var mesh = new NwcMesh
+        {
+            Id = 0,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 0, Rotation = new(0, 0, h, h), Translation = new(1, 2, 3) }
+        };
         var result = SceneOf(mesh);
         var t = result.Document.Instances[0].Transform!.Value;
         AssertNear(new Vector3d(0, 1, 0), t.XAxis);
@@ -378,10 +395,14 @@ public sealed class NwcSceneReaderTests
         // 2,000 segments, each of its own colour: one line geometry per colour up to the cap, each with only its two vertices,
         // then one geometry drawn with the material colour for the segments of the further colours
         const int segments = 2000;
-        var mesh = new NwcMesh { Id = 0, Indices = [],
+        var mesh = new NwcMesh
+        {
+            Id = 0,
+            Indices = [],
             Vertices = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.Vector3d(v / 2, v % 2, 0))],
             LineIndices = [.. Enumerable.Range(0, 2 * segments)],
-            LineColors = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.RgbaColor(v / 2 % 256 / 255f, v / 2 / 256 / 255f, 0))] };
+            LineColors = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.RgbaColor(v / 2 % 256 / 255f, v / 2 / 256 / 255f, 0))]
+        };
         var result = SceneOf(mesh);
         var doc = result.Document;
         Assert.Equal(MaxLineColourGroups + 1, doc.Geometries.Count);
@@ -425,8 +446,11 @@ public sealed class NwcSceneReaderTests
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         for (int i = 0; i < tabs; i++)
         {
-            leaf.PropertyTabs.Add(new NwcPropertyTab { Name = "T",
-                Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }] });
+            leaf.PropertyTabs.Add(new NwcPropertyTab
+            {
+                Name = "T",
+                Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }]
+            });
         }
 
         leaf.PropertyTabs.Add(leaf.PropertyTabs[0]);
@@ -466,8 +490,14 @@ public sealed class NwcSceneReaderTests
     public void Read_ZeroNormals_AreAveragedFromTheTriangles()
     {
         // two triangles of a unit square in z = 0, CCW seen from +Z; vertex 3 stores no normal
-        var mesh = new NwcMesh { Id = 0, GeometryIndex = -1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = [0, 1, 2, 2, 1, 3],
-            Normals = [new(0, 0, 1), new(0, 0, 1), new(0, 0, 1), NwcIO.Model.Vector3d.Zero] };
+        var mesh = new NwcMesh
+        {
+            Id = 0,
+            GeometryIndex = -1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)],
+            Indices = [0, 1, 2, 2, 1, 3],
+            Normals = [new(0, 0, 1), new(0, 0, 1), new(0, 0, 1), NwcIO.Model.Vector3d.Zero]
+        };
         Assert.Equal(new Vector3d(0, 0, 1), SceneOf(mesh).Document.Geometries[0].Normals![3]);
     }
 
@@ -647,7 +677,8 @@ public sealed class NwcSceneReaderTests
 
     private static NwcPropertyTab Tab(params (string Name, int Type, string? Value)[] values) => new()
     {
-        Name = "T", InternalName = "LcRevitData_Element",
+        Name = "T",
+        InternalName = "LcRevitData_Element",
         Properties = [.. values.Select(v => new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = v.Name, Class = "T", ValueType = v.Type, Value = v.Value })],
     };
 
