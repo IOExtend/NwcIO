@@ -120,14 +120,25 @@ public sealed class NwcDocument
     /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
+        => Open(path, options, null, default);
+
+    /// <summary>
+    /// Opens and parses a Navisworks file from disk with cancellation and progress reporting.
+    /// </summary>
+    public static NwcDocument Open(
+        string path,
+        NwcReaderOptions? options,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
         {
             throw new FileNotFoundException($"Navisworks file not found: {path}", path);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         using var stream = File.OpenRead(path);
-        var document = Open(stream, options, Path.GetFileNameWithoutExtension(path));
+        var document = Open(stream, options, Path.GetFileNameWithoutExtension(path), progress, cancellationToken);
         document.LoadedPath = Path.GetFullPath(path);
         return document;
     }
@@ -137,11 +148,25 @@ public sealed class NwcDocument
     /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
+        => Open(stream, options, fallbackName, null, default);
+
+    /// <summary>
+    /// Opens and parses a Navisworks file from a stream with cancellation and progress reporting.
+    /// </summary>
+    public static NwcDocument Open(
+        Stream stream,
+        NwcReaderOptions? options,
+        string? fallbackName,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= NwcReaderOptions.Default;
+        cancellationToken.ThrowIfCancellationRequested();
 
         var container = NwcContainerReader.Read(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("read-container", 1, 1));
         StreamClassifier.ClassifyAll(container.Streams);
         var segments = ModelGraphReader.Locate(container);
 
@@ -160,6 +185,7 @@ public sealed class NwcDocument
         string rootName = Path.GetFileNameWithoutExtension(fileInfo.SourcePath ?? fallbackName ?? "Model");
 
         var records = new List<NwcPropertyRecord>();
+        cancellationToken.ThrowIfCancellationRequested();
         if (options.ReadPropertyRecords)
         {
             foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.SceneTree))
@@ -186,6 +212,7 @@ public sealed class NwcDocument
         int skippedMeshRecords = 0;
         var materials = new List<NwcMaterial>();
         NwcNode? rootNode = null;
+        cancellationToken.ThrowIfCancellationRequested();
         if (segments is not null)
         {
             var graph = ModelGraphReader.Read(segments, options, rootName);
@@ -226,6 +253,9 @@ public sealed class NwcDocument
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("read-geometry", 1, 1));
+
         // The name and colour heuristics apply only to files not read through their DbCache directory.
         if (segments is null && options.ReadMaterials)
         {
@@ -265,6 +295,7 @@ public sealed class NwcDocument
         }
 
         Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null;
+        cancellationToken.ThrowIfCancellationRequested();
         if (options.ReadTimeLiner)
         {
             var tlStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.TimeLiner);
@@ -279,6 +310,8 @@ public sealed class NwcDocument
             container = container with { Streams = [] };
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("open", 1, 1));
         var document = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
         var diagnostics = new List<NwcDiagnostic>();
         if (skippedMeshRecords > 0)
@@ -680,6 +713,31 @@ public sealed class NwcDocument
     /// </summary>
     public Model.Diff.NwcDiffReport Compare(NwcDocument revision, Model.Diff.NwcDiffOptions? options = null) =>
         Model.Diff.NwcDiffEngine.Compare(this, revision, options);
+
+    /// <summary>Opens a file asynchronously. The current implementation wraps the synchronous reader.</summary>
+    public static Task<NwcDocument> OpenAsync(
+        string path,
+        NwcReaderOptions? options = null,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() => Open(path, options, progress, cancellationToken), cancellationToken);
+
+    /// <summary>Opens a stream asynchronously. The current implementation wraps the synchronous reader.</summary>
+    public static Task<NwcDocument> OpenAsync(
+        Stream stream,
+        NwcReaderOptions? options = null,
+        string? fallbackName = null,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() => Open(stream, options, fallbackName, progress, cancellationToken), cancellationToken);
+
+    /// <summary>Saves the document asynchronously. The current implementation wraps the synchronous writer.</summary>
+    public Task SaveAsync(string path, string? header = null, CancellationToken cancellationToken = default)
+        => Task.Run(() => Save(path, header), cancellationToken);
+
+    /// <summary>Saves the document to a stream asynchronously.</summary>
+    public Task SaveAsync(Stream stream, string? header = null, CancellationToken cancellationToken = default)
+        => Task.Run(() => Save(stream, header), cancellationToken);
 
     /// <summary>
     /// Populates clash grid location tags across all clash detective tests in this document using the provided or attached grid system.
