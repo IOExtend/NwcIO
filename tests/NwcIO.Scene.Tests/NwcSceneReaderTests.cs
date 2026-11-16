@@ -726,6 +726,44 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_LinkedSubtreesWithTheSameName_GetOneModelPerRoot()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        for (int i = 1; i <= 2; i++)
+        {
+            var link = new NwcNode
+            {
+                Id = i,
+                Name = "Linked model",
+                Class = "LcOpModelFile",
+                IsLinkPlacement = true,
+            };
+            var child = new NwcNode
+            {
+                Id = 10 + i,
+                Name = $"Part {i}",
+                Class = "LcRevitData_Element",
+                IsElement = true,
+                Element = link,
+            };
+            link.Children.Add(child);
+            root.Children.Add(link);
+        }
+
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Equal(3, result.Document.Models.Count);
+        Assert.Equal(["model.nwc", "Linked model", "Linked model#2"],
+            result.Document.Models.Select(model => model.Key));
+        Assert.Equal(2, result.Document.Elements.Single(element => element.Name == "Part 1").ModelId);
+        Assert.Equal(3, result.Document.Elements.Single(element => element.Name == "Part 2").ModelId);
+    }
+
+    [Fact]
     public void Read_FileWithSavedViews_SkipsThemWithAWarning()
     {
         var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));

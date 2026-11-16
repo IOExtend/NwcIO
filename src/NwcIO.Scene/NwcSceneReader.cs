@@ -19,6 +19,8 @@ public static partial class NwcSceneReader
     private static readonly string Producer = "NwcIO.Scene "
         + typeof(NwcSceneReader).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
 
+    private const int MaxLinkModels = 100_000;
+
     /// <summary>Reads the model file at <paramref name="path"/> with <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> and converts it.</summary>
     /// <param name="path">The model file.</param>
     /// <param name="options">Conversion options; null uses the defaults.</param>
@@ -112,11 +114,13 @@ public static partial class NwcSceneReader
         int elementsWithGeometry = 0;
         NwcLengthUnit? commonUnit = null;
         bool mixedUnits = false;
+        var usedKeys = new HashSet<string>(StringComparer.Ordinal);
+        var nextSuffix = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (int i = 0; i < documents.Count; i++)
         {
             var document = documents[i];
-            string key = ModelKey(document, i, options, scene);
+            string key = ModelKey(document, i, options, usedKeys, nextSuffix);
             if (document.RootNode is null)
             {
                 throw new ArgumentException(
@@ -124,7 +128,7 @@ public static partial class NwcSceneReader
                     nameof(assembly));
             }
 
-            var result = ConvertInto(scene, document, key, document.FileInfo.SourcePath, options, modelId: scene.Models.Count + 1);
+            var result = ConvertInto(scene, document, key, document.FileInfo.SourcePath, options, modelId: scene.Models.Count + 1, usedKeys, nextSuffix);
             diagnostics.AddRange(result.Diagnostics.Select(d => new SceneDiagnostic(
                 d.Severity,
                 d.Code,
@@ -156,7 +160,12 @@ public static partial class NwcSceneReader
         };
     }
 
-    private static string ModelKey(NwcDocument document, int index, NwcSceneOptions? options, SceneDocument scene)
+    private static string ModelKey(
+        NwcDocument document,
+        int index,
+        NwcSceneOptions? options,
+        HashSet<string> used,
+        Dictionary<string, int> nextSuffix)
     {
         string candidate = options?.ModelKey is { Length: > 0 } key && index == 0
             ? key
@@ -166,25 +175,36 @@ public static partial class NwcSceneReader
             candidate = $"Model_{index + 1}";
         }
 
-        return UniqueModelKey(scene, candidate);
+        return UniqueModelKey(candidate, used, nextSuffix);
     }
 
-    private static string UniqueModelKey(SceneDocument scene, string candidate)
+    private static string UniqueModelKey(
+        string candidate,
+        HashSet<string> used,
+        Dictionary<string, int> nextSuffix)
     {
-        var used = new HashSet<string>(scene.Models.Select(m => m.Key), StringComparer.Ordinal);
-        string unique = candidate;
-        int suffix = 2;
-        while (!used.Add(unique))
+        if (used.Add(candidate))
+        {
+            return candidate;
+        }
+
+        int suffix = nextSuffix.TryGetValue(candidate, out int next) ? next : 2;
+        string unique;
+        do
         {
             unique = $"{candidate}#{suffix++}";
         }
+        while (!used.Add(unique));
+
+        nextSuffix[candidate] = suffix;
         return unique;
     }
 
     private static NwcSceneResult Convert(NwcDocument document, string key, string? path, NwcSceneOptions? options)
     {
         var scene = new SceneDocument { Title = key };
-        return ConvertInto(scene, document, key, path, options, modelId: 1);
+        return ConvertInto(scene, document, key, path, options, modelId: 1,
+            new HashSet<string>(StringComparer.Ordinal), new Dictionary<string, int>(StringComparer.Ordinal));
     }
 
     private static NwcSceneResult ConvertInto(
@@ -193,10 +213,13 @@ public static partial class NwcSceneReader
         string key,
         string? path,
         NwcSceneOptions? options,
-        int modelId)
+        int modelId,
+        HashSet<string> usedKeys,
+        Dictionary<string, int> nextSuffix)
     {
         var unit = options?.LengthUnit ?? document.LengthUnit;
         string? loader = document.FileInfo.LoaderPlugin;
+        usedKeys.Add(key);
         scene.Models.Add(new SceneModel
         {
             Id = modelId,
@@ -263,11 +286,12 @@ public static partial class NwcSceneReader
         }
 
         // Each item carries the names at depth 2 and 4 on its path and the depth of the node's element, for Category and TypeName.
-        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4, int ModelId)>();
-        pending.Push((root, null, 0, null, 0, "", "", modelId));
+        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4, int ModelId, int? LinkModelId)>();
+        pending.Push((root, null, 0, null, 0, "", "", modelId, null));
+        int linkModels = 0;
         while (pending.TryPop(out var item))
         {
-            var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4, nodeModelId) = item;
+            var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4, nodeModelId, linkModelId) = item;
             atDepth2 = depth == 2 ? node.Name : atDepth2;
             atDepth4 = depth == 4 ? node.Name : atDepth4;
 
@@ -278,11 +302,22 @@ public static partial class NwcSceneReader
                 elementDepth = depth;
             }
 
-            if (node.IsLinkPlacement && parent is not null)
+            bool isLinkRoot = false;
+            if (node.IsLinkPlacement && parent is not null && linkModelId is null)
             {
+                if (++linkModels > MaxLinkModels)
+                {
+                    throw new InvalidDataException(
+                        $"The scene would need more than {MaxLinkModels} linked models.");
+                }
+
                 nodeModelId = scene.Models.Count + 1;
-                string linkKey = UniqueModelKey(scene,
-                    string.IsNullOrWhiteSpace(node.Name) ? $"Link_{nodeModelId}" : node.Name);
+                string linkKey = UniqueModelKey(
+                    string.IsNullOrWhiteSpace(node.Name) ? $"Link_{nodeModelId}" : node.Name,
+                    usedKeys,
+                    nextSuffix);
+                linkModelId = nodeModelId;
+                isLinkRoot = true;
                 scene.Models.Add(new SceneModel
                 {
                     Id = nodeModelId,
@@ -297,9 +332,13 @@ public static partial class NwcSceneReader
                 });
                 levelId = null;
             }
+            else if (linkModelId is int enclosingLink)
+            {
+                nodeModelId = enclosingLink;
+            }
 
             SceneNodeKind kind;
-            if (node.IsLinkPlacement)
+            if (isLinkRoot)
             {
                 kind = SceneNodeKind.Model;
             }
@@ -389,7 +428,7 @@ public static partial class NwcSceneReader
 
             for (int i = node.Children.Count - 1; i >= 0; i--)
             {
-                pending.Push((node.Children[i], node, depth + 1, levelId, elementDepth, atDepth2, atDepth4, nodeModelId));
+                pending.Push((node.Children[i], node, depth + 1, levelId, elementDepth, atDepth2, atDepth4, nodeModelId, linkModelId));
             }
         }
 
