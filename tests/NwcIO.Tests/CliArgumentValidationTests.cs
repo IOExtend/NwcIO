@@ -221,6 +221,41 @@ public class CliArgumentValidationTests
     }
 
     [Fact]
+    public void Scene_WithFolderInput_Exits1()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var (exit, _, err) = Run([dir, "--scene", Path.Combine(dir, "out.scene.json")]);
+            Assert.Equal(1, exit);
+            Assert.Contains("only supported for a single", err);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Scene_WithReaderFlags_Exits1()
+    {
+        string model = TempModel();
+        string scene = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var (exit, _, err) = Run([model, "--scene", scene, "--no-tree"]);
+            Assert.Equal(1, exit);
+            Assert.Contains("cannot be combined with --no-meshes", err);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(scene)) File.Delete(scene);
+        }
+    }
+
+    [Fact]
     public void IfcSchema_InvalidVersion_Exits1()
     {
         string model = TempModel();

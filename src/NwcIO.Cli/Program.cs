@@ -27,6 +27,8 @@ internal static class Program
 
         Options:
           --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
+          --scene <file.json> Export an IOScene scene document (.json)
+          --scene-length-unit <unit> Scene length unit: ft, m, cm or mm
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
@@ -124,6 +126,8 @@ internal static class Program
         string? explicitClashXmlPath = null;
         string? explicitClashBcfPath = null;
         string? explicitNwfXmlPath = null;
+        string? explicitScenePath = null;
+        NwcLengthUnit? sceneLengthUnit = null;
         double clashTolerance = 0.001;
         string? explicitBcfPath = null;
         string? explicitViewpointsBcfPath = null;
@@ -212,6 +216,18 @@ internal static class Program
                     break;
                 case "--nwc":
                     if (!TryConsumeValue(args, ref i, "--nwc", out explicitNwcPath, @err)) return 1;
+                    break;
+                case "--scene":
+                    if (!TryConsumeValue(args, ref i, "--scene", out explicitScenePath, @err)) return 1;
+                    break;
+                case "--scene-length-unit":
+                    if (!TryConsumeValue(args, ref i, "--scene-length-unit", out string sceneUnitStr, @err)) return 1;
+                    if (!Enum.TryParse<NwcLengthUnit>(sceneUnitStr, ignoreCase: true, out var parsedSceneUnit))
+                    {
+                        @err.WriteLine($"Error: Invalid scene length unit '{sceneUnitStr}'. Use ft, m, cm or mm.");
+                        return 1;
+                    }
+                    sceneLengthUnit = parsedSceneUnit;
                     break;
                 case "--sets-xml":
                     if (!TryConsumeValue(args, ref i, "--sets-xml", out explicitSetsXmlPath, @err)) return 1;
@@ -412,6 +428,21 @@ internal static class Program
 
         bool isDirectory = Directory.Exists(inputPath);
         bool isFile = File.Exists(inputPath);
+        bool isNwfInput = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrEmpty(explicitScenePath))
+        {
+            if (isDirectory || isNwfInput)
+            {
+                @err.WriteLine("Error: --scene is only supported for a single .nwc or .nwd document.");
+                return 1;
+            }
+            if (!readMeshes || !readMaterials || !includeTransforms || !includeTree)
+            {
+                @err.WriteLine("Error: --scene cannot be combined with --no-meshes, --no-materials, --no-transforms or --no-tree.");
+                return 1;
+            }
+        }
 
         if (isDirectory || inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
         {
@@ -506,6 +537,21 @@ internal static class Program
         {
             @err.WriteLine($"Error reading '{inputPath}': {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return 3;
+        }
+
+        if (!string.IsNullOrEmpty(explicitScenePath))
+        {
+            EnsureParentDirectory(explicitScenePath);
+            var sceneResult = NwcIO.Scene.NwcSceneReader.Read(doc, new NwcIO.Scene.NwcSceneOptions
+            {
+                ModelKey = Path.GetFileName(inputPath),
+                LengthUnit = sceneLengthUnit,
+            });
+            File.WriteAllText(explicitScenePath, IOScene.SceneJson.Write(sceneResult.Document));
+            foreach (var diagnostic in sceneResult.Diagnostics)
+            {
+                @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
+            }
         }
 
         bool outputIsIfc = outputPath.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase);
