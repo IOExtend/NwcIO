@@ -24,5 +24,8 @@ public sealed class NwcMaterial
     /// <summary>Optional category or classification name.</summary>
     public string? Category { get; set; }
 
+    /// <summary>True when this is a neutral fallback, not read from the file.</summary>
+    public bool IsInferred { get; init; }
+
     public override string ToString() => $"{Name} ({Color.ToHex()})";
 }

@@ -8,33 +8,6 @@ namespace NwcIO.Internal.Parsing;
 /// </summary>
 public static class MaterialParser
 {
-    private static readonly NwcMaterial DefaultConcrete = new()
-    {
-        Id = -1,
-        Name = "Default Concrete",
-        Color = RgbaColor.Concrete,
-        Metallic = 0.05f,
-        Roughness = 0.85f,
-    };
-
-    private static readonly NwcMaterial DefaultRebar = new()
-    {
-        Id = -2,
-        Name = "Default Rebar",
-        Color = RgbaColor.Rebar,
-        Metallic = 0.60f,
-        Roughness = 0.40f,
-    };
-
-    private static readonly NwcMaterial DefaultInsulation = new()
-    {
-        Id = -3,
-        Name = "Default Insulation",
-        Color = RgbaColor.Insulation,
-        Metallic = 0.0f,
-        Roughness = 0.95f,
-    };
-
     private static readonly NwcMaterial DefaultGeneric = new()
     {
         Id = 0,
@@ -42,6 +15,7 @@ public static class MaterialParser
         Color = new RgbaColor(0.70f, 0.72f, 0.75f, 1.0f),
         Metallic = 0.10f,
         Roughness = 0.70f,
+        IsInferred = true,
     };
 
     /// <summary>
@@ -131,17 +105,6 @@ public static class MaterialParser
             }
         }
 
-        // Add standard fallback presets if not already present
-        if (!materials.ContainsKey("Concrete") && !materials.ContainsKey("Бетон"))
-        {
-            materials["Concrete"] = DefaultConcrete;
-        }
-
-        if (!materials.ContainsKey("Rebar") && !materials.ContainsKey("Арматура"))
-        {
-            materials["Rebar"] = DefaultRebar;
-        }
-
         var resultList = materials.Values.ToList();
 
         // Assign materials to meshes
@@ -161,31 +124,13 @@ public static class MaterialParser
 
     private static void AssignMaterialsToMeshes(IReadOnlyList<NwcMesh> meshes, List<NwcMaterial> materials)
     {
-        var rebarMat = materials.FirstOrDefault(m => m.Name.Contains("Арматур", StringComparison.OrdinalIgnoreCase) ||
-                                                    m.Name.Contains("Rebar", StringComparison.OrdinalIgnoreCase)) ?? DefaultRebar;
-        var concreteMat = materials.FirstOrDefault(m => m.Name.Contains("Бетон", StringComparison.OrdinalIgnoreCase) ||
-                                                       m.Name.Contains("Concrete", StringComparison.OrdinalIgnoreCase)) ?? DefaultConcrete;
-        var defaultMat = materials.Count > 0 ? materials[0] : DefaultGeneric;
-
+        // The parser has no per-geometry appearance data yet, so every mesh
+        // without a material gets one neutral fallback that is marked inferred.
         for (int i = 0; i < meshes.Count; i++)
         {
-            var mesh = meshes[i];
-            if (mesh.Material is null)
+            if (meshes[i].Material is null)
             {
-                // Infer from mesh name or vertex count (rebar profiles are linear solid strips with high length/width ratio)
-                if (mesh.Name.Contains("Rebar", StringComparison.OrdinalIgnoreCase) ||
-                    mesh.Name.Contains("Арматур", StringComparison.OrdinalIgnoreCase))
-                {
-                    mesh.Material = rebarMat;
-                }
-                else if (mesh.BoundingBox is { } bbox && (bbox.Size.X > 2000 || bbox.Size.Y > 2000 || bbox.Size.Z > 2000))
-                {
-                    mesh.Material = concreteMat;
-                }
-                else
-                {
-                    mesh.Material = defaultMat;
-                }
+                meshes[i].Material = DefaultGeneric;
             }
         }
     }

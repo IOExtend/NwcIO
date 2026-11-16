@@ -83,6 +83,26 @@ public class MaterialParserTests
 
         // Check mesh assignment
         Assert.NotNull(mesh.Material);
-        Assert.Contains("Арматур", mesh.Material.Name);
+        Assert.True(mesh.Material.IsInferred);
+        Assert.Equal("Default Material", mesh.Material.Name);
+        Assert.DoesNotContain(materials, m => m.Name is "Default Concrete" or "Default Rebar");
+    }
+
+    [Fact]
+    public void MaterialParser_NoMaterialRecords_ReturnsNoPresetsAndMarksMeshDefault()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 0,
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        var materials = MaterialParser.Parse([], [mesh]);
+
+        Assert.Empty(materials);
+        Assert.NotNull(mesh.Material);
+        Assert.True(mesh.Material.IsInferred);
+        Assert.Equal("Default Material", mesh.Material.Name);
     }
 }
