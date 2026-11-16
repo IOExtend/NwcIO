@@ -262,39 +262,39 @@ public class RealFixtureTests
 
     [RealFixtureFact]
     public void Save_RealNwcFixture_RoundtripsSuccessfully()
-        {
-            var original = NwcDocument.Open(FixturePath!);
-            string tempNwc = Path.Combine(Path.GetTempPath(), $"roundtrip_{Guid.NewGuid():N}.nwc");
+    {
+        var original = NwcDocument.Open(FixturePath!);
+        string tempNwc = Path.Combine(Path.GetTempPath(), $"roundtrip_{Guid.NewGuid():N}.nwc");
 
+        try
+        {
             try
             {
-                try
-                {
-                    original.Save(tempNwc);
-                }
-                catch (ArgumentException)
-                {
-                    // The writer rejects what it cannot store (scaled poses, lines) before writing a byte.
-                    Assert.False(File.Exists(tempNwc));
-                    return;
-                }
-
-                Assert.True(File.Exists(tempNwc));
-                Assert.True(new FileInfo(tempNwc).Length > 1000);
-
-                var reloaded = NwcDocument.Open(tempNwc);
-                Assert.Equal(original.FileInfo.SourcePath, reloaded.FileInfo.SourcePath);
-                Assert.Equal(original.Meshes.Count, reloaded.Meshes.Count);
-                Assert.Equal(original.Transforms.Count, reloaded.Transforms.Count);
-                Assert.Equal(original.Guids.Count, reloaded.Guids.Count);
-                Assert.Equal(original.SavedViewpoints.Count, reloaded.SavedViewpoints.Count);
+                original.Save(tempNwc);
             }
-            finally
+            catch (ArgumentException)
             {
-                if (File.Exists(tempNwc))
-                {
-                    File.Delete(tempNwc);
-                }
+                // The writer rejects what it cannot store (scaled poses, lines) before writing a byte.
+                Assert.False(File.Exists(tempNwc));
+                return;
+            }
+
+            Assert.True(File.Exists(tempNwc));
+            Assert.True(new FileInfo(tempNwc).Length > 1000);
+
+            var reloaded = NwcDocument.Open(tempNwc);
+            Assert.Equal(original.FileInfo.SourcePath, reloaded.FileInfo.SourcePath);
+            Assert.Equal(original.Meshes.Count, reloaded.Meshes.Count);
+            Assert.Equal(original.Transforms.Count, reloaded.Transforms.Count);
+            Assert.Equal(original.Guids.Count, reloaded.Guids.Count);
+            Assert.Equal(original.SavedViewpoints.Count, reloaded.SavedViewpoints.Count);
+        }
+        finally
+        {
+            if (File.Exists(tempNwc))
+            {
+                File.Delete(tempNwc);
             }
         }
     }
+}

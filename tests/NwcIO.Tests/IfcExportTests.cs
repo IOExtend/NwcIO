@@ -13,7 +13,7 @@ public class IfcExportTests
     {
         var mesh = TestMeshes.MirroredQuad();
         string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
-            { SchemaVersion = NwcIfcSchemaVersion.Ifc4, UseTessellationInIfc4 = true, WorldCoordinates = world });
+        { SchemaVersion = NwcIfcSchemaVersion.Ifc4, UseTessellationInIfc4 = true, WorldCoordinates = world });
         Assert.Contains(coordIndex, ifc);
         Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
     }
@@ -25,7 +25,7 @@ public class IfcExportTests
     {
         var mesh = TestMeshes.MirroredQuad();
         string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
-            { SchemaVersion = NwcIfcSchemaVersion.Ifc2x3, WorldCoordinates = world });
+        { SchemaVersion = NwcIfcSchemaVersion.Ifc2x3, WorldCoordinates = world });
 
         // With shared vertices the quad's points are consecutive entities, so a loop's point ids minus the first one are its corners.
         var corners = System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCPOLYLOOP\(\(#(\d+),#(\d+),#(\d+)\)\)")
