@@ -146,10 +146,13 @@ internal static class IfcExporter
             }
 
             var vertices = options.WorldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
-            if (vertices.Count < 3 || mesh.Indices.Count < 3)
+            var indices = options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices;
+            if (vertices.Count < 3 || !HasValidTriangle(indices, vertices.Count))
             {
                 continue;
             }
+
+            bool closed = IsWatertight(indices, vertices);
 
             // Material style
             int? styleId = null;
@@ -163,13 +166,13 @@ internal static class IfcExporter
             string repType;
             if (useTessellation)
             {
-                geomId = WriteMeshTriangulatedFaceSet(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale);
+                geomId = WriteMeshTriangulatedFaceSet(w, vertices, indices, scale, closed);
                 repType = "Tessellation";
             }
             else
             {
-                geomId = WriteMeshFacetedBrep(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale, options.SharedVertices);
-                repType = "Brep";
+                geomId = WriteMeshFacetedBrep(w, vertices, indices, scale, options.SharedVertices, closed);
+                repType = closed ? "Brep" : "SurfaceModel";
             }
 
             if (styleId.HasValue)
@@ -379,10 +382,13 @@ internal static class IfcExporter
                 }
 
                 var vertices = options.WorldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
-                if (vertices.Count < 3 || mesh.Indices.Count < 3)
+                var indices = options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices;
+                if (vertices.Count < 3 || !HasValidTriangle(indices, vertices.Count))
                 {
                     continue;
                 }
+
+                bool closed = IsWatertight(indices, vertices);
 
                 int? styleId = null;
                 if (options.ExportMaterials && mesh.Material is not null)
@@ -394,13 +400,13 @@ internal static class IfcExporter
                 string repType;
                 if (useTessellation)
                 {
-                    geomId = WriteMeshTriangulatedFaceSet(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale);
+                    geomId = WriteMeshTriangulatedFaceSet(w, vertices, indices, scale, closed);
                     repType = "Tessellation";
                 }
                 else
                 {
-                    geomId = WriteMeshFacetedBrep(w, vertices, options.WorldCoordinates ? mesh.GetWorldIndices() : mesh.Indices, scale, options.SharedVertices);
-                    repType = "Brep";
+                    geomId = WriteMeshFacetedBrep(w, vertices, indices, scale, options.SharedVertices, closed);
+                    repType = closed ? "Brep" : "SurfaceModel";
                 }
 
                 if (styleId.HasValue)
@@ -480,7 +486,8 @@ internal static class IfcExporter
         IReadOnlyList<Vector3d> vertices,
         IReadOnlyList<int> indices,
         double scale,
-        bool sharedVertices)
+        bool sharedVertices,
+        bool closed)
     {
         var faceIds = new List<int>(indices.Count / 3);
 
@@ -539,8 +546,15 @@ internal static class IfcExporter
             }
         }
 
-        int shellId = w.Add("IFCCLOSEDSHELL", StepWriter.List(faceIds.Select(StepWriter.Ref)));
-        return w.Add("IFCFACETEDBREP", StepWriter.Ref(shellId));
+        if (closed)
+        {
+            int shellId = w.Add("IFCCLOSEDSHELL", StepWriter.List(faceIds.Select(StepWriter.Ref)));
+            return w.Add("IFCFACETEDBREP", StepWriter.Ref(shellId));
+        }
+
+        // An unclosed mesh cannot be a solid: export it as an open shell surface model.
+        int openShellId = w.Add("IFCOPENSHELL", StepWriter.List(faceIds.Select(StepWriter.Ref)));
+        return w.Add("IFCSHELLBASEDSURFACEMODEL", StepWriter.List(StepWriter.Ref(openShellId)));
     }
 
     private static int GetOrCreateSurfaceStyle(StepWriter w, NwcMaterial mat, Dictionary<string, int> cache, bool isIfc4)
@@ -729,7 +743,8 @@ internal static class IfcExporter
         StepWriter w,
         IReadOnlyList<Vector3d> vertices,
         IReadOnlyList<int> indices,
-        double scale)
+        double scale,
+        bool closed)
     {
         // 1. Build IFCCARTESIANPOINTLIST3D
         var sbPoints = new StringBuilder(vertices.Count * 28 + 32);
@@ -776,7 +791,69 @@ internal static class IfcExporter
         }
         sbIndices.Append(')');
 
-        return w.Add("IFCTRIANGULATEDFACESET", $"{StepWriter.Ref(pointListId)},$,.T.,{sbIndices},$");
+        // Closed is optional in IFC4: true only when watertightness was proven, otherwise leave it unknown
+        // rather than asserting that a mesh we could not prove closed is definitely open.
+        return w.Add("IFCTRIANGULATEDFACESET", $"{StepWriter.Ref(pointListId)},$,{(closed ? ".T." : "$")},{sbIndices},$");
+    }
+
+    private static bool HasValidTriangle(IReadOnlyList<int> indices, int vertexCount)
+    {
+        for (int i = 0; i + 2 < indices.Count; i += 3)
+        {
+            if ((uint)indices[i] < (uint)vertexCount &&
+                (uint)indices[i + 1] < (uint)vertexCount &&
+                (uint)indices[i + 2] < (uint)vertexCount)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Every undirected edge is shared by exactly two valid triangles, i.e. the surface is closed. Vertices
+    /// are welded by position first: real NWC meshes store render vertices, so one position is repeated for
+    /// every face normal and index-based edges would report every flat-shaded solid as open.
+    /// </summary>
+    private static bool IsWatertight(IReadOnlyList<int> indices, IReadOnlyList<Vector3d> vertices)
+    {
+        var canonical = new Dictionary<Vector3d, int>(vertices.Count);
+        var ids = new int[vertices.Count];
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            if (!canonical.TryGetValue(vertices[i], out int id))
+            {
+                id = canonical.Count;
+                canonical[vertices[i]] = id;
+            }
+
+            ids[i] = id;
+        }
+
+        var edges = new Dictionary<(int Low, int High), int>();
+        for (int i = 0; i + 2 < indices.Count; i += 3)
+        {
+            int a = indices[i];
+            int b = indices[i + 1];
+            int c = indices[i + 2];
+            if ((uint)a >= (uint)vertices.Count || (uint)b >= (uint)vertices.Count || (uint)c >= (uint)vertices.Count)
+            {
+                continue;
+            }
+
+            CountEdge(edges, ids[a], ids[b]);
+            CountEdge(edges, ids[b], ids[c]);
+            CountEdge(edges, ids[c], ids[a]);
+        }
+
+        return edges.Count > 0 && edges.Values.All(count => count == 2);
+    }
+
+    private static void CountEdge(Dictionary<(int Low, int High), int> edges, int a, int b)
+    {
+        var key = a < b ? (a, b) : (b, a);
+        edges[key] = edges.GetValueOrDefault(key) + 1;
     }
 
     private static int AddIfcTypeProduct(

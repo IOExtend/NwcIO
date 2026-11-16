@@ -7,6 +7,202 @@ namespace NwcIO.Tests;
 public class IfcExportTests
 {
     [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_OpenSingleTriangle_IsNotDeclaredClosed(NwcIfcSchemaVersion schema)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Sheet",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCOPENSHELL(", ifc);
+            Assert.Contains("IFCSHELLBASEDSURFACEMODEL(", ifc);
+            Assert.Contains("'SurfaceModel'", ifc);
+            Assert.DoesNotContain("IFCCLOSEDSHELL(", ifc);
+            Assert.DoesNotContain("IFCFACETEDBREP(", ifc);
+        }
+        else
+        {
+            Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
+            Assert.Contains(",$,$,", ifc);
+            Assert.DoesNotContain(",$,.T.,", ifc);
+            Assert.DoesNotContain(",$,.F.,", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, true, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, false, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, true, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, false, false)]
+    public void SaveIfc_CubeWithSplitRenderVertices_StaysAClosedSolid(
+        NwcIfcSchemaVersion schema, bool sharedVertices, bool tessellate)
+    {
+        var mesh = CreateSplitVertexCube();
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            SharedVertices = sharedVertices,
+            UseTessellationInIfc4 = tessellate,
+        });
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3 || !tessellate)
+        {
+            Assert.Contains("IFCCLOSEDSHELL(", ifc);
+            Assert.Contains("IFCFACETEDBREP(", ifc);
+            Assert.DoesNotContain("IFCOPENSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains(",$,.T.,", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_AssemblyWithSplitRenderVertices_StaysAClosedSolid(NwcIfcSchemaVersion schema)
+    {
+        var doc = NwcDocument.Create(meshes: [CreateSplitVertexCube()]);
+        using var sw = new StringWriter();
+
+        NwcAssembly.Create("Split assembly", doc).SaveIfc(sw, new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        string ifc = sw.ToString();
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCCLOSEDSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains(",$,.T.,", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_AssemblyWithOpenMesh_IsNotDeclaredClosed(NwcIfcSchemaVersion schema)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Sheet",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        using var sw = new StringWriter();
+
+        NwcAssembly.Create("Open assembly", NwcDocument.Create(meshes: [mesh])).SaveIfc(sw, new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        string ifc = sw.ToString();
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCOPENSHELL(", ifc);
+            Assert.Contains("'SurfaceModel'", ifc);
+            Assert.DoesNotContain("IFCCLOSEDSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
+            Assert.DoesNotContain(",$,.T.,", ifc);
+        }
+    }
+
+    [Fact]
+    public void SaveIfc_CubeWithDegenerateTriangle_IsNotDeclaredClosed()
+    {
+        // A zero-area triangle after welding adds an edge that is not shared by two faces: unproven, so not closed.
+        var source = CreateSplitVertexCube();
+        var cube = new NwcMesh
+        {
+            Id = source.Id,
+            Name = source.Name,
+            Vertices = source.Vertices,
+            Indices = [.. source.Indices, 0, 0, 1],
+        };
+
+        string ifc = NwcDocument.Create(meshes: [cube]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = NwcIfcSchemaVersion.Ifc4,
+            UseTessellationInIfc4 = true,
+        });
+
+        Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
+        Assert.DoesNotContain(",$,.T.,", ifc);
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_ClosedCube_StaysAClosedSolid(NwcIfcSchemaVersion schema)
+    {
+        var doc = CreateSyntheticDocument("Cube", null);
+        string ifc = doc.ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCCLOSEDSHELL(", ifc);
+            Assert.Contains("IFCFACETEDBREP(", ifc);
+            Assert.DoesNotContain("IFCOPENSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains(",$,.T.,", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_MeshWithoutValidTriangles_GetsNoBodyRepresentation(NwcIfcSchemaVersion schema)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Broken",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 9],
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        Assert.DoesNotContain("IFCFACETEDBREP(", ifc);
+        Assert.DoesNotContain("IFCCLOSEDSHELL(", ifc);
+        Assert.DoesNotContain("IFCOPENSHELL(", ifc);
+        Assert.DoesNotContain("IFCTRIANGULATEDFACESET(", ifc);
+        Assert.DoesNotContain("IFCBUILDINGELEMENTPROXY", ifc);
+    }
+
+    [Theory]
     [InlineData(true, "((1,3,2),(3,4,2))")]
     [InlineData(false, "((1,2,3),(3,2,4))")]
     public void SaveIfc_MirroredTransform_ReversesOnlyWorldFaces(bool world, string coordIndex)
@@ -111,6 +307,32 @@ public class IfcExportTests
             .Select(m => m.Groups[1].Value)
             .ToArray();
         Assert.Equal(2, guids.Distinct().Count());
+    }
+
+    /// <summary>Cube as the NWC reader emits it: every face has its own four render vertices with a face normal.</summary>
+    private static NwcMesh CreateSplitVertexCube()
+    {
+        var positions = new[]
+        {
+            new Vector3d(0, 0, 0), new Vector3d(1000, 0, 0), new Vector3d(1000, 1000, 0), new Vector3d(0, 1000, 0),
+            new Vector3d(0, 0, 1000), new Vector3d(1000, 0, 1000), new Vector3d(1000, 1000, 1000), new Vector3d(0, 1000, 1000),
+        };
+        int[][] faces =
+        [
+            [0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+            [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7],
+        ];
+
+        var vertices = new List<Vector3d>(24);
+        var indices = new List<int>(36);
+        foreach (var face in faces)
+        {
+            int first = vertices.Count;
+            vertices.AddRange(face.Select(index => positions[index]));
+            indices.AddRange([first, first + 1, first + 2, first, first + 2, first + 3]);
+        }
+
+        return new NwcMesh { Id = 1, Name = "Split cube", Vertices = vertices, Indices = indices };
     }
 
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
@@ -696,6 +918,11 @@ public class IfcExportTests
         Assert.Contains("IFCDOOR", seen);
         Assert.Contains("IFCWINDOW", seen);
         Assert.Contains(schema == NwcIfcSchemaVersion.Ifc4 && useTessellation ? "IFCTRIANGULATEDFACESET" : "IFCFACETEDBREP", seen);
+        if (!(schema == NwcIfcSchemaVersion.Ifc4 && useTessellation))
+        {
+            Assert.Contains("IFCOPENSHELL", seen);
+            Assert.Contains("IFCSHELLBASEDSURFACEMODEL", seen);
+        }
     }
 
     private static readonly Dictionary<string, int> Ifc2x3AttributeCounts = new(StringComparer.Ordinal)
@@ -710,7 +937,7 @@ public class IfcExportTests
         ["IFCCOLOURRGB"] = 4, ["IFCSURFACESTYLESHADING"] = 1, ["IFCSURFACESTYLE"] = 3,
         ["IFCPRESENTATIONSTYLEASSIGNMENT"] = 1, ["IFCSTYLEDITEM"] = 3,
         ["IFCCLOSEDSHELL"] = 1, ["IFCFACE"] = 1, ["IFCFACEOUTERBOUND"] = 2, ["IFCPOLYLOOP"] = 1,
-        ["IFCFACETEDBREP"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
+        ["IFCFACETEDBREP"] = 1, ["IFCOPENSHELL"] = 1, ["IFCSHELLBASEDSURFACEMODEL"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
         ["IFCPROPERTYSINGLEVALUE"] = 4, ["IFCPROPERTYSET"] = 5, ["IFCRELDEFINESBYPROPERTIES"] = 6,
         ["IFCRELDEFINESBYTYPE"] = 6, ["IFCRELCONTAINEDINSPATIALSTRUCTURE"] = 6,
         ["IFCDOCUMENTREFERENCE"] = 3, ["IFCRELASSOCIATESDOCUMENT"] = 6,
@@ -736,7 +963,7 @@ public class IfcExportTests
         ["IFCCOLOURRGB"] = 4, ["IFCSURFACESTYLESHADING"] = 2, ["IFCSURFACESTYLE"] = 3,
         ["IFCPRESENTATIONSTYLEASSIGNMENT"] = 1, ["IFCSTYLEDITEM"] = 3,
         ["IFCCLOSEDSHELL"] = 1, ["IFCFACE"] = 1, ["IFCFACEOUTERBOUND"] = 2, ["IFCPOLYLOOP"] = 1,
-        ["IFCFACETEDBREP"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
+        ["IFCFACETEDBREP"] = 1, ["IFCOPENSHELL"] = 1, ["IFCSHELLBASEDSURFACEMODEL"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
         ["IFCCARTESIANPOINTLIST3D"] = 1, ["IFCTRIANGULATEDFACESET"] = 5,
         ["IFCPROPERTYSINGLEVALUE"] = 4, ["IFCPROPERTYSET"] = 5, ["IFCRELDEFINESBYPROPERTIES"] = 6,
         ["IFCRELDEFINESBYTYPE"] = 6, ["IFCRELCONTAINEDINSPATIALSTRUCTURE"] = 6,
@@ -835,7 +1062,7 @@ public class IfcExportTests
                 Id = i + 1,
                 Name = names[i],
                 Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)],
-                Indices = [0, 1, 2, 0, 1, 3],
+                Indices = i == names.Length - 1 ? [0, 1, 2, 0, 1, 3] : [0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3],  // the last mesh is open
                 Material = material,
             };
             if (i == 0)
