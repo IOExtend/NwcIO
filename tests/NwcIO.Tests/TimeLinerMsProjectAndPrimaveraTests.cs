@@ -418,4 +418,61 @@ public class TimeLinerMsProjectAndPrimaveraTests
         Assert.Contains(read.Warnings, w => w.Contains("target start", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(read.Warnings, w => w.Contains("target end", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void PrimaveraXer_WritesNoBomAndEndsWithTerminator()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "A", start, start.AddDays(1)));
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms);
+        var bytes = ms.ToArray();
+
+        Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+        string text = System.Text.Encoding.UTF8.GetString(bytes);
+        Assert.StartsWith("ERMHDR", text, StringComparison.Ordinal);
+        Assert.EndsWith("%E", text.TrimEnd(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PrimaveraXer_NestedTasksAndTypes_Roundtrip()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var parent = new NwcTimeLinerTask("A", "Parent", start, start.AddDays(10));
+        parent.Children.Add(new NwcTimeLinerTask("A1", "Child 1", start.AddDays(1), start.AddDays(3), NwcTimeLinerTaskType.Demolish));
+        parent.Children.Add(new NwcTimeLinerTask("A2", "Child 2", start.AddDays(4), start.AddDays(6), NwcTimeLinerTaskType.Temporary));
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(parent);
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms);
+        ms.Position = 0;
+        var read = NwcTimeLinerPrimaveraXerSerializer.Read(ms);
+
+        var root = Assert.Single(read.Tasks);
+        Assert.Equal("Parent", root.Name);
+        Assert.Equal(2, root.Children.Count);
+        Assert.Equal("Child 1", root.Children[0].Name);
+        Assert.Equal(NwcTimeLinerTaskType.Demolish, root.Children[0].TaskType);
+        Assert.Equal("Child 2", root.Children[1].Name);
+        Assert.Equal(NwcTimeLinerTaskType.Temporary, root.Children[1].TaskType);
+    }
+
+    [Fact]
+    public void PrimaveraXer_ReadWithEncoding_DecodesNonUtf8File()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("Café");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "Café", start, start.AddDays(1)));
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms, System.Text.Encoding.Latin1);
+        ms.Position = 0;
+        var read = NwcTimeLinerPrimaveraXerSerializer.Read(ms, System.Text.Encoding.Latin1);
+
+        Assert.Equal("Café", read.Name);
+        Assert.Equal("Café", Assert.Single(read.Tasks).Name);
+    }
 }

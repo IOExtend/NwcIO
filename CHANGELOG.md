@@ -154,7 +154,8 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
   - Roundtrips attached Selection Set names and `TaskType` through task `Notes`.
   - Direct integration into `NwcDocument` and `NwcAssembly` via `ExportTimeLinerMsProject` and `ImportTimeLinerMsProject`.
 - **Primavera P6 XER 4D Schedule Serialization (`NwcTimeLinerPrimaveraXerSerializer`)**:
-  - Full reading and writing of Primavera P6 tab-delimited XER exchange format (`ERMHDR`, `%T PROJECT`, `%T PROJWBS`, `%T TASK`).
+  - Reads and writes Primavera P6 tab-delimited XER (`ERMHDR`, `%T PROJECT`, `%T PROJWBS`, `%T TASK`, `%E`) without a byte-order mark.
+  - Preserves the WBS hierarchy through `PROJWBS.parent_wbs_id` and each task's `wbs_id`; the TimeLiner task type survives in the `nwcio_task_type` column, an NwcIO extension over the standard P6 layout.
   - Serializes task codes, activity names, target and actual start/finish timestamps, durations in hours, physical completion percentages, and planned/actual costs.
   - Direct integration into `NwcDocument` and `NwcAssembly` via `ExportTimeLinerPrimavera` and `ImportTimeLinerPrimavera`.
 - **Interactive 3D WebGL Viewer Enhancements (`NwcHtmlViewerExporter`)**:

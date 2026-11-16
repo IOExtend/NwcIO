@@ -31,13 +31,22 @@ public static class NwcTimeLinerPrimaveraXerSerializer
 
     /// <summary>
     /// Serializes a 4D TimeLiner schedule to a Primavera P6 XER stream.
+    /// Writes UTF-8 without a byte-order mark, one PROJWBS row per task so the
+    /// hierarchy round-trips, and terminates the file with a <c>%E</c> record.
     /// </summary>
-    public static void Write(NwcTimeLinerSchedule schedule, Stream stream)
+    public static void Write(NwcTimeLinerSchedule schedule, Stream stream) =>
+        Write(schedule, stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+    /// <summary>
+    /// Serializes a 4D TimeLiner schedule to a Primavera P6 XER stream with the given encoding.
+    /// </summary>
+    public static void Write(NwcTimeLinerSchedule schedule, Stream stream, Encoding encoding)
     {
         ArgumentNullException.ThrowIfNull(schedule);
         ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(encoding);
 
-        using var writer = new StreamWriter(stream, Encoding.UTF8, bufferSize: 4096, leaveOpen: true);
+        using var writer = new StreamWriter(stream, encoding, bufferSize: 4096, leaveOpen: true);
 
         // 1. Primavera XER Header
         string exportDate = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -49,58 +58,102 @@ public static class NwcTimeLinerPrimaveraXerSerializer
 
         writer.WriteLine("%T\tPROJECT");
         writer.WriteLine("%F\tproj_id\tproj_short_name\tplan_start_date\tplan_end_date\tstatus_code");
-        writer.WriteLine($"%R\t1\t{CleanField(schedule.Name)}\t{overallStart.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{overallEnd.ToString(DateFormat, CultureInfo.InvariantCulture)}\tActive");
+        writer.WriteLine($"%R\t1\t{CleanField(schedule.Name)}\t{overallStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{overallEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\tActive");
 
-        // 3. PROJWBS Table
+        // 3. PROJWBS Table: one row per task, with parent_wbs_id, so the reader
+        // can rebuild NwcTimeLinerTask.Children instead of flattening the tree.
+        var taskWbsIds = new Dictionary<NwcTimeLinerTask, int>();
+        var parentWbsIds = new Dictionary<NwcTimeLinerTask, int>();
+        var orderedTasks = new List<NwcTimeLinerTask>();
+        int nextWbsId = 101;
+
+        void AssignWbs(NwcTimeLinerTask task, int parentWbsId)
+        {
+            taskWbsIds[task] = nextWbsId++;
+            parentWbsIds[task] = parentWbsId;
+            orderedTasks.Add(task);
+            foreach (var child in task.Children)
+            {
+                AssignWbs(child, taskWbsIds[task]);
+            }
+        }
+
+        foreach (var task in schedule.Tasks)
+        {
+            AssignWbs(task, 100);
+        }
+
         writer.WriteLine("%T\tPROJWBS");
         writer.WriteLine("%F\twbs_id\tproj_id\tparent_wbs_id\twbs_short_name\twbs_name");
         writer.WriteLine($"%R\t100\t1\t\tROOT\t{CleanField(schedule.Name)}");
+        foreach (var task in orderedTasks)
+        {
+            string shortName = string.IsNullOrWhiteSpace(task.Id) ? $"WBS{taskWbsIds[task]}" : task.Id;
+            writer.WriteLine($"%R\t{taskWbsIds[task]}\t1\t{parentWbsIds[task]}\t{CleanField(shortName)}\t{CleanField(task.Name)}");
+        }
 
-        // 4. TASK Table
+        // 4. TASK Table. nwcio_task_type is an NwcIO extension: the standard
+        // task_type column stays TT_Task so P6 sees ordinary activities.
         writer.WriteLine("%T\tTASK");
-        writer.WriteLine("%F\ttask_id\tproj_id\twbs_id\ttask_code\ttask_name\ttask_type\tstatus_code\ttarget_start_date\ttarget_end_date\tact_start_date\tact_end_date\ttarget_drtn_hr_cnt\tphys_complete_pct\ttarget_cost\tact_cost");
+        writer.WriteLine("%F\ttask_id\tproj_id\twbs_id\ttask_code\ttask_name\ttask_type\tstatus_code\ttarget_start_date\ttarget_end_date\tact_start_date\tact_end_date\ttarget_drtn_hr_cnt\tphys_complete_pct\ttarget_cost\tact_cost\tnwcio_task_type");
 
         int taskId = 1000;
-        foreach (var task in schedule.FlattenTasks())
+        foreach (var task in orderedTasks)
         {
             taskId++;
             string status = task.Progress >= 1.0 ? "TK_Complete" : (task.Progress > 0.0 ? "TK_Active" : "TK_NotStart");
-            string actStart = task.ActualStart?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
-            string actEnd = task.ActualEnd?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
+            string actStart = task.ActualStart?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
+            string actEnd = task.ActualEnd?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
             string durationHours = Math.Max(0.0, task.PlannedDuration.TotalHours).ToString("F1", CultureInfo.InvariantCulture);
             string pct = (Math.Clamp(task.Progress, 0.0, 1.0) * 100.0).ToString("F1", CultureInfo.InvariantCulture);
             string cost = task.PlannedCost?.ToString("F2", CultureInfo.InvariantCulture) ?? "";
             string actCost = task.ActualCost?.ToString("F2", CultureInfo.InvariantCulture) ?? "";
             string code = string.IsNullOrEmpty(task.Id) ? $"T{taskId}" : task.Id;
 
-            writer.WriteLine($"%R\t{taskId}\t1\t100\t{CleanField(code)}\t{CleanField(task.Name)}\tTT_Task\t{status}\t{task.PlannedStart.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{task.PlannedEnd.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{actStart}\t{actEnd}\t{durationHours}\t{pct}\t{cost}\t{actCost}");
+            writer.WriteLine($"%R\t{taskId}\t1\t{taskWbsIds[task]}\t{CleanField(code)}\t{CleanField(task.Name)}\tTT_Task\t{status}\t{task.PlannedStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{task.PlannedEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{actStart}\t{actEnd}\t{durationHours}\t{pct}\t{cost}\t{actCost}\t{task.TaskType}");
         }
 
+        writer.WriteLine("%E");
         writer.Flush();
     }
 
     /// <summary>
     /// Loads a 4D TimeLiner schedule from a Primavera P6 XER file (.xer).
     /// </summary>
-    public static NwcTimeLinerSchedule Open(string filePath)
+    public static NwcTimeLinerSchedule Open(string filePath) => Open(filePath, Encoding.UTF8);
+
+    /// <summary>
+    /// Loads a 4D TimeLiner schedule from a Primavera P6 XER file with the given encoding.
+    /// </summary>
+    public static NwcTimeLinerSchedule Open(string filePath, Encoding encoding)
     {
         ArgumentNullException.ThrowIfNull(filePath);
+        ArgumentNullException.ThrowIfNull(encoding);
         if (!File.Exists(filePath)) throw new FileNotFoundException($"Primavera P6 file '{filePath}' not found.", filePath);
 
         using var fs = File.OpenRead(filePath);
-        return Read(fs);
+        return Read(fs, encoding);
     }
 
     /// <summary>
     /// Reads a 4D TimeLiner schedule from a Primavera P6 XER stream.
     /// </summary>
-    public static NwcTimeLinerSchedule Read(Stream stream)
+    public static NwcTimeLinerSchedule Read(Stream stream) => Read(stream, Encoding.UTF8);
+
+    /// <summary>
+    /// Reads a 4D TimeLiner schedule from a Primavera P6 XER stream with the given encoding.
+    /// A UTF-8/UTF-16 byte-order mark, when present, still takes precedence.
+    /// </summary>
+    public static NwcTimeLinerSchedule Read(Stream stream, Encoding encoding)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(encoding);
 
-        using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+        using var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         string scheduleName = "Primavera P6 Schedule";
         var tasks = new List<NwcTimeLinerTask>();
+        var parsedTasks = new List<(NwcTimeLinerTask Task, string WbsId)>();
+        var wbsNodes = new Dictionary<string, (string? ParentId, string Name)>(StringComparer.Ordinal);
         var warnings = new List<string>();
 
         string? currentTable = null;
@@ -142,9 +195,22 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                         scheduleName = pName;
                     }
                 }
+                else if (currentTable == "PROJWBS")
+                {
+                    string wbsId = rowMap.GetValueOrDefault("wbs_id")?.Trim() ?? string.Empty;
+                    if (!string.IsNullOrEmpty(wbsId))
+                    {
+                        string? parentWbsId = rowMap.GetValueOrDefault("parent_wbs_id")?.Trim();
+                        string name = rowMap.GetValueOrDefault("wbs_name")?.Trim() is { Length: > 0 } wbsName
+                            ? wbsName
+                            : rowMap.GetValueOrDefault("wbs_short_name")?.Trim() ?? wbsId;
+                        wbsNodes[wbsId] = (string.IsNullOrEmpty(parentWbsId) ? null : parentWbsId, name);
+                    }
+                }
                 else if (currentTable == "TASK")
                 {
                     taskRow++;
+                    string wbsId = rowMap.GetValueOrDefault("wbs_id")?.Trim() ?? string.Empty;
                     string id = rowMap.GetValueOrDefault("task_code") ?? rowMap.GetValueOrDefault("task_id") ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(id))
                     {
@@ -172,6 +238,12 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                     }
 
                     var task = new NwcTimeLinerTask(id, name, start, end);
+
+                    string taskTypeValue = rowMap.GetValueOrDefault("nwcio_task_type") ?? string.Empty;
+                    if (Enum.TryParse<NwcTimeLinerTaskType>(taskTypeValue, ignoreCase: true, out var parsedTaskType))
+                    {
+                        task.TaskType = parsedTaskType;
+                    }
 
                     if (rowMap.TryGetValue("phys_complete_pct", out var pctStr) && double.TryParse(pctStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double pct))
                     {
@@ -212,8 +284,34 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                         }
                     }
 
-                    tasks.Add(task);
+                    parsedTasks.Add((task, wbsId));
                 }
+            }
+        }
+
+        // Rebuild NwcTimeLinerTask.Children from PROJWBS parent_wbs_id and each
+        // task's wbs_id. Tasks without a known parent stay at the top level.
+        var byWbsId = new Dictionary<string, NwcTimeLinerTask>(StringComparer.Ordinal);
+        foreach (var (task, wbsId) in parsedTasks)
+        {
+            if (!string.IsNullOrEmpty(wbsId))
+            {
+                byWbsId[wbsId] = task;
+            }
+        }
+
+        foreach (var (task, wbsId) in parsedTasks)
+        {
+            string? parentWbsId = wbsNodes.TryGetValue(wbsId, out var node) ? node.ParentId : null;
+            if (!string.IsNullOrEmpty(parentWbsId) &&
+                byWbsId.TryGetValue(parentWbsId, out var parent) &&
+                !ReferenceEquals(parent, task))
+            {
+                parent.Children.Add(task);
+            }
+            else
+            {
+                tasks.Add(task);
             }
         }
 
