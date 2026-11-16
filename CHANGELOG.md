@@ -406,7 +406,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
   - **glTF 2.0 Binary (GLB)**:
     - Interleaved binary buffers with PBR material definitions, per-element metadata, and embedded viewpoints / cameras.
   - **Wavefront OBJ**:
-    - Direct export of textured geometry (`.obj` + `.mtl`).
+    - Direct Wavefront OBJ export with a sibling `.mtl` material library (`Kd`/`d`); texture coordinates and texture images are not supported.
   - **Structured JSON**:
     - Export of complete scene hierarchy, bounding boxes, property sets, clash test results, and camera definitions.
 - **BCF 2.1 & Clash Reports**:
