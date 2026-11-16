@@ -29,3 +29,6 @@ test_files/
 
 # Local secrets
 .env
+
+# Test coverage output
+coverage/

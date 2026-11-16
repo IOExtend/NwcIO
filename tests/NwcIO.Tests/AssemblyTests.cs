@@ -154,6 +154,37 @@ public class AssemblyTests
         Assert.Equal(2.0, clash.IntersectionBox.Max.X);
     }
 
+    [Theory]
+    [InlineData(0.0005, 0.001, 1)]
+    [InlineData(0.0005, 0.0, 0)]
+    public void FindClashes_ToleranceReportsNearMissAtTheGap(double gap, double tolerance, int expected)
+    {
+        var meshA = new NwcMesh
+        {
+            Id = 10,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 1)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 1)),
+        };
+        var meshB = new NwcMesh
+        {
+            Id = 20,
+            Vertices = [new(0, 0, 1 + gap), new(1, 0, 1 + gap), new(0, 1, 2)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 1 + gap), new(1, 1, 2)),
+        };
+
+        var assembly = NwcAssembly.Create("Coordination", CreateMockDocument("A.rvt", [meshA]), CreateMockDocument("B.rvt", [meshB]));
+
+        var clashes = assembly.FindClashes(tolerance);
+
+        Assert.Equal(expected, clashes.Count);
+        if (expected == 1)
+        {
+            Assert.Equal(1 + gap / 2, clashes[0].IntersectionBox.Center.Z, 9); // middle of the gap, not of the element centres
+        }
+    }
+
     private static NwcDocument CreateMockDocument(string sourceName, IReadOnlyList<NwcMesh> meshes)
     {
         // Synthetic minimal container with PartitionHeader
@@ -204,44 +235,122 @@ public class AssemblyTests
     }
 
     [Fact]
-    public void SaveNwc_PreservesAssemblyContentAndUsesNeutralOrigin()
+    public void Create_OverlappingMeshIds_MapsMeshesToSourceModels()
     {
-        static NwcDocument Model(string sourcePath, int meshId, double x) =>
-            new NwcDocumentBuilder()
-                .SetFileInfo(sourcePath, "LcIfcLoader")
-                .AddMesh(new NwcMesh
-                {
-                    Id = meshId,
-                    Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
-                    Indices = [0, 1, 2],
-                    BoundingBox = new BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
-                })
-                .AddGuid(Guid.NewGuid())
-                .AddSelectionSet(new Model.Sets.NwcSelectionSet($"Set {sourcePath}", [1]))
-                .AddSavedViewpoint(NwcSavedViewpoint.CreateDefault(
-                    new BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
-                    $"View {sourcePath}"))
-                .Build();
+        var first = CreateComponentModel("A.nwc", 0, 0);
+        var second = CreateComponentModel("B.nwc", 0, 20);
 
-        var assembly = NwcAssembly.Create("Fed", Model("A.ifc", 0, 0), Model("B.ifc", 0, 20));
+        var assembly = NwcAssembly.Create("Fed", first, second);
+
+        var meshA = Assert.Single(first.Meshes);
+        var meshB = Assert.Single(second.Meshes);
+        Assert.Equal(0, assembly.GetModelIndex(meshA));
+        Assert.Equal(1, assembly.GetModelIndex(meshB));
+        Assert.Same(first, assembly.GetModelOf(meshA));
+        Assert.Same(second, assembly.GetModelOf(meshB));
+        Assert.Equal(-1, assembly.GetModelIndex(new NwcMesh { Id = 99, Vertices = [], Indices = [] }));
+        Assert.Null(assembly.GetModelOf(new NwcMesh { Id = 99, Vertices = [], Indices = [] }));
+
+        // The synthetic assembly root and fallback model nodes use negative ids,
+        // so they cannot collide with document roots (id 0).
+        Assert.Equal(-1, assembly.RootNode.Id);
+        Assert.All(assembly.RootNode.Children, node =>
+            Assert.True(node.Id < 0, $"Synthetic node id {node.Id} must not collide with a document root."));
+    }
+
+    [Fact]
+    public void SaveObj_PrefixesObjectNamesWithSourceModelWhenMeshIdsRepeat()
+    {
+        var assembly = NwcAssembly.Create("Fed",
+            CreateComponentModel("A.nwc", 0, 0),
+            CreateComponentModel("B.nwc", 0, 20));
+        string path = Path.Combine(Path.GetTempPath(), "nwcio-asm-" + Guid.NewGuid().ToString("N") + ".obj");
+        try
+        {
+            assembly.SaveObj(path);
+
+            string obj = File.ReadAllText(path);
+            Assert.Contains("o M1_A/Mesh_0", obj);
+            Assert.Contains("o M2_B/Mesh_0", obj);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private static NwcDocument CreateTreeModel(string sourcePath, double x, string layerName, bool withSet = false)
+    {
+        var root = new NwcNode { Id = 0, Name = Path.GetFileNameWithoutExtension(sourcePath), Class = "Model" };
+        root.Children.Add(new NwcNode { Id = 1, Name = layerName, Class = "LcRevitLayer" });
+        var builder = new NwcDocumentBuilder()
+            .SetFileInfo(sourcePath, "LcIfcLoader")
+            .AddMesh(new NwcMesh
+            {
+                Id = 0,
+                Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+                Transform = new NwcTransform { Id = 100, Translation = new(x, 0, 0) },
+            })
+            .AddGuid(Guid.NewGuid())
+            .SetRootNode(root);
+        if (withSet)
+        {
+            builder.AddSelectionSet(new Model.Sets.NwcSelectionSet("Own", [1]));
+        }
+        return builder.Build();
+    }
+
+    [Fact]
+    public void SaveNwc_KeepsModelTreesTransformsAndAssemblySetsUnderNeutralOrigin()
+    {
+        var assembly = NwcAssembly.Create("Fed", CreateTreeModel("A.ifc", 0, "Level A"), CreateTreeModel("B.ifc", 20, "Level B"));
+        assembly.SelectionSets.Add(new Model.Sets.NwcSelectionSet("Everything") { NodePaths = { "Fed/A" } });
+        assembly.TimeLiner = new Model.TimeLiner.NwcTimeLinerSchedule();
+        assembly.TimeLiner.Tasks.Add(new Model.TimeLiner.NwcTimeLinerTask("t1", "Pour", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1)));
         string path = Path.Combine(Path.GetTempPath(), "nwcio-asm-" + Guid.NewGuid().ToString("N") + ".nwc");
         try
         {
             assembly.SaveNwc(path);
 
             var reopened = NwcDocument.Open(path);
+            Assert.Equal("LcOpNwcIOAssembly", reopened.FileInfo.LoaderPlugin);
+            Assert.Equal("Fed.nwc", reopened.FileInfo.SourcePath);
             Assert.Equal(2, reopened.Meshes.Count);
-            Assert.Equal("Fed", reopened.RootNode?.Name);
-            Assert.DoesNotContain(".rvt", reopened.FileInfo.SourcePath, StringComparison.OrdinalIgnoreCase);
-            Assert.NotEqual("LcOpRevitExport", reopened.FileInfo.LoaderPlugin);
+            Assert.Equal("0,20", string.Join(",", reopened.Meshes.Select(m => m.Transform!.Translation.X)));
             Assert.Equal(2, reopened.Guids.Count);
-            Assert.Equal(2, reopened.SelectionSets.Count);
-            Assert.Equal(2, reopened.SavedViewpoints.Count);
+            Assert.Equal("Fed", reopened.RootNode!.Name);
+            Assert.Equal("A,B", string.Join(",", reopened.RootNode.Children.Select(c => c.Name)));
+            Assert.Equal("Level A,Level B", string.Join(",", reopened.RootNode.Children.Select(c => Assert.Single(c.Children).Name)));
+            var set = Assert.IsType<Model.Sets.NwcSelectionSet>(Assert.Single(reopened.SelectionSets));
+            Assert.Equal("Everything", set.Name);
+            Assert.Equal("A", Assert.Single(set.ResolveNodes(reopened)).Name);
+            Assert.Equal("Pour", Assert.Single(reopened.TimeLiner!.Tasks).Name);
         }
         finally
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void ToDocument_NumbersTreeUniquelyLeavesAssemblyUntouchedAndSkipsModelSets()
+    {
+        var first = CreateTreeModel("A.ifc", 0, "Level A", withSet: true);
+        var second = CreateTreeModel("B.ifc", 20, "Level B");
+        var assembly = NwcAssembly.Create("Fed", first, second);
+
+        var document = assembly.ToDocument();
+
+        var ids = new List<int>();
+        void Collect(NwcNode node) { ids.Add(node.Id); node.Children.ForEach(Collect); }
+        Collect(document.RootNode!);
+        Assert.Equal(Enumerable.Range(0, 5), ids);
+        Assert.Equal(-1, assembly.RootNode.Id);
+        Assert.Equal(0, second.RootNode!.Id);
+        Assert.Empty(document.SelectionSets);
+        Assert.Null(document.TimeLiner);
     }
 
     private static NwcDocument CreateComponentModel(string sourcePath, int meshId, double offsetX)

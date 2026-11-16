@@ -84,6 +84,12 @@ public sealed class NwcTimeLinerSchedule
     public string Name { get; set; } = "TimeLiner Schedule";
     public List<NwcTimeLinerTask> Tasks { get; } = [];
 
+    /// <summary>
+    /// Diagnostics emitted while reading a schedule, such as missing or invalid
+    /// dates and synthesised task ids. Schedules created in code start empty.
+    /// </summary>
+    public List<string> Warnings { get; } = [];
+
     public NwcTimeLinerSchedule() { }
 
     public NwcTimeLinerSchedule(string name)
@@ -128,10 +134,20 @@ public sealed class NwcTimeLinerSchedule
     }
 
     /// <summary>Gets the earliest planned start date across all schedule tasks.</summary>
-    public DateTimeOffset? OverallStart => Tasks.Count > 0 ? FlattenTasks().Min(t => t.PlannedStart) : null;
+    public DateTimeOffset? OverallStart => Tasks.Count > 0
+        ? FlattenTasks().Select(task => task.PlannedStart)
+            .Where(start => start != DateTimeOffset.UnixEpoch)
+            .DefaultIfEmpty(DateTimeOffset.UnixEpoch)
+            .Min()
+        : null;
 
     /// <summary>Gets the latest planned end date across all schedule tasks.</summary>
-    public DateTimeOffset? OverallEnd => Tasks.Count > 0 ? FlattenTasks().Max(t => t.PlannedEnd) : null;
+    public DateTimeOffset? OverallEnd => Tasks.Count > 0
+        ? FlattenTasks().Select(task => task.PlannedEnd)
+            .Where(end => end != DateTimeOffset.UnixEpoch)
+            .DefaultIfEmpty(DateTimeOffset.UnixEpoch)
+            .Max()
+        : null;
 
     /// <summary>Total planned budget across all schedule tasks.</summary>
     public decimal TotalPlannedCost => FlattenTasks().Sum(t => t.PlannedCost ?? 0m);
