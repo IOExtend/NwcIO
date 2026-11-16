@@ -41,6 +41,12 @@ public sealed class NwcReaderOptions
     public bool KeepStreamCatalog { get; set; } = true;
 
     /// <summary>
+    /// Override the document length unit when the source unit is known. Null (default) infers feet for the Revit
+    /// loader/exporter and leaves the unit Unknown for everything else. Exposed as <see cref="NwcDocument.LengthUnit"/>.
+    /// </summary>
+    public NwcLengthUnit? LengthUnit { get; set; }
+
+    /// <summary>
     /// Cap on the decompressed size of one container stream (default: 512 MiB). Exceeding it makes
     /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
     /// </summary>

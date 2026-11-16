@@ -42,12 +42,12 @@ internal static class Program
           --clash-matrix-md <file.md> Export clash matrix coordination report as Markdown table
           --clash-matrix-bcf <file.bcfzip> Export clash matrix conflicts to buildingSMART BCF 2.1 zip
           --clash-group <mode> Group clashes: proximity, element, grid, layer
-          --clash-radius <m>   Cluster radius in meters for proximity grouping (default: 1.0)
-          --clash-tolerance <m> Set clash detection tolerance in meters (default: 0.001)
+          --clash-radius <units> Cluster radius in document units for proximity grouping (default: 1.0)
+          --clash-tolerance <units> Clash detection tolerance in document units (default: 0.001)
           --diff <baseline.nwc> Compare model against baseline revision
           --diff-json <file.json> Export revision comparison report to JSON
           --diff-bcf <file.bcfzip> Export revision comparison to buildingSMART BCF 2.1 zip
-          --diff-tolerance <m> Geometric displacement tolerance for diff (default: 0.005m)
+          --diff-tolerance <units> Geometric displacement tolerance for diff in document units (default: 0.005)
           --grids <file.xml>   Load spatial grid system from XML (.xml)
           --export-grids <file.xml> Export extracted or loaded grid system to XML (.xml)
           --nwf-xml <file.xml> Export Navisworks federated coordination manifest (.nwf.xml)
