@@ -98,7 +98,7 @@ public static partial class NwcSceneReader
 
         var documents = assembly.Models.Count > 1
             ? assembly.Models
-                .Where(d => !string.Equals(Path.GetExtension(d.FileInfo.SourcePath ?? string.Empty), ".nwf", StringComparison.OrdinalIgnoreCase))
+                .Where(d => !string.Equals(Path.GetExtension(DocumentPath(d) ?? string.Empty), ".nwf", StringComparison.OrdinalIgnoreCase))
                 .ToList()
             : assembly.Models.ToList();
         if (documents.Count == 0)
@@ -125,11 +125,12 @@ public static partial class NwcSceneReader
                     nameof(assembly));
             }
 
-            var result = ConvertInto(scene, document, key, document.FileInfo.SourcePath, options, modelId: i + 1);
+            var result = ConvertInto(scene, document, key, document.LoadedPath, options, modelId: i + 1);
             diagnostics.AddRange(result.Diagnostics.Select(d => new SceneDiagnostic(
                 d.Severity,
                 d.Code,
-                $"{key}: {d.Message}")));
+                $"{key}: {d.Message}",
+                d.SourceId)));
             elementCount += result.ElementCount;
             elementsWithGeometry += result.ElementsWithGeometry;
 
@@ -157,11 +158,14 @@ public static partial class NwcSceneReader
         };
     }
 
+    private static string? DocumentPath(NwcDocument document) =>
+        document.LoadedPath ?? document.FileInfo.SourcePath;
+
     private static string ModelKey(NwcDocument document, int index, NwcSceneOptions? options, HashSet<string> used)
     {
         string candidate = options?.ModelKey is { Length: > 0 } key && index == 0
             ? key
-            : Path.GetFileName(document.FileInfo.SourcePath ?? string.Empty);
+            : Path.GetFileName(DocumentPath(document) ?? string.Empty);
         if (string.IsNullOrWhiteSpace(candidate))
         {
             candidate = $"Model_{index + 1}";

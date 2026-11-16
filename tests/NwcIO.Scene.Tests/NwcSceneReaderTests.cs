@@ -665,6 +665,35 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_AssemblyLoadedFromDirectory_UsesFileNamesForKeysAndPaths()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nwcscene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var fileInfo = new NwcFileInfo { SourcePath = "Tower.rvt", LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" };
+            NwcDocument.Create(fileInfo, rootNode: root).Save(Path.Combine(directory, "Arch.nwc"));
+            NwcDocument.Create(fileInfo, rootNode: root).Save(Path.Combine(directory, "Struct.nwc"));
+
+            var assembly = NwcAssembly.LoadFromDirectory(directory);
+            var result = Valid(NwcSceneReader.Read(assembly));
+
+            Assert.Equal(["Arch.nwc", "Struct.nwc"],
+                result.Document.Models.Select(model => model.Key).OrderBy(key => key, StringComparer.Ordinal));
+            Assert.All(result.Document.Models, model =>
+            {
+                Assert.NotNull(model.Path);
+                Assert.Equal(model.Key, Path.GetFileName(model.Path));
+            });
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public void Read_FileWithSavedViews_SkipsThemWithAWarning()
     {
         var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));
