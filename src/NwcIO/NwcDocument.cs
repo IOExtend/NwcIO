@@ -741,6 +741,7 @@ public sealed class NwcDocument
         options ??= NwcJsonExportOptions.Default;
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 0, 1));
+        cancellationToken.ThrowIfCancellationRequested();
         Internal.Json.JsonExporter.WriteFile(this, path, options);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 1, 1));
@@ -756,6 +757,7 @@ public sealed class NwcDocument
         options ??= NwcJsonExportOptions.Default;
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 0, 1));
+        cancellationToken.ThrowIfCancellationRequested();
         Internal.Json.JsonExporter.Write(this, stream, options);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 1, 1));

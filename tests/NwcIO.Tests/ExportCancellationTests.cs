@@ -50,6 +50,46 @@ public sealed class ExportCancellationTests
     }
 
     [Fact]
+    public void AssemblySaveJson_CanceledToken_DoesNotTruncateExistingFile()
+    {
+        var assembly = NwcAssembly.Create("Fed", Document());
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, "keep me");
+        try
+        {
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            Assert.Throws<OperationCanceledException>(() =>
+                assembly.SaveJson(path, null, null, cancellation.Token));
+
+            Assert.Equal("keep me", File.ReadAllText(path));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void AssemblySaveJson_ProgressCanCancelMidExport()
+    {
+        var assembly = NwcAssembly.Create("Fed", Document());
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.json");
+        using var cancellation = new CancellationTokenSource();
+        var progress = new CancellingProgress(cancellation);
+        try
+        {
+            Assert.Throws<OperationCanceledException>(() =>
+                assembly.SaveJson(path, null, progress, cancellation.Token));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task SaveJsonAsync_CanceledToken_IsCanceled()
     {
         var document = Document();
@@ -76,5 +116,10 @@ public sealed class ExportCancellationTests
         public List<NwcProgress> Reports { get; } = [];
 
         public void Report(NwcProgress value) => Reports.Add(value);
+    }
+
+    private sealed class CancellingProgress(CancellationTokenSource cancellation) : IProgress<NwcProgress>
+    {
+        public void Report(NwcProgress value) => cancellation.Cancel();
     }
 }

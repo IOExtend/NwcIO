@@ -561,6 +561,7 @@ public sealed class NwcAssembly
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-bcf", 0, 1));
         clashes ??= FindClashes();
+        cancellationToken.ThrowIfCancellationRequested();
         BcfExporter.WriteFile(clashes, path, Name);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-bcf", 1, 1));
@@ -578,6 +579,7 @@ public sealed class NwcAssembly
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-bcf", 0, 1));
         clashes ??= FindClashes();
+        cancellationToken.ThrowIfCancellationRequested();
         BcfExporter.Write(clashes, stream, Name);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-bcf", 1, 1));
@@ -659,6 +661,7 @@ public sealed class NwcAssembly
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-html", 0, 1));
         clashes ??= FindClashes();
+        cancellationToken.ThrowIfCancellationRequested();
         HtmlClashReportExporter.WriteFile(clashes, path, Name, Models.Count, AllMeshes.Count);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-html", 1, 1));
@@ -737,6 +740,7 @@ public sealed class NwcAssembly
     {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 0, 1));
+        cancellationToken.ThrowIfCancellationRequested();
         SaveJsonCore(stream, options);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 1, 1));
@@ -805,6 +809,7 @@ public sealed class NwcAssembly
     public void SaveJson(string path, NwcJsonExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
+        cancellationToken.ThrowIfCancellationRequested();
         using var fs = File.Create(path);
         SaveJson(fs, options, progress, cancellationToken);
     }
