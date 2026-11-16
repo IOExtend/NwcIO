@@ -8,11 +8,24 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 
 ### Changed
+- `NwcReaderOptions.MaxMeshVertices` (default 200,000) sets the vertex cap of one geometry record on the lenient reader path. Class 95 records and two-vertex records now read as line meshes (`LineIndices`) instead of triangle strips or being dropped.
 - The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
 
 ### Fixed
+- IFC export skips meshes without a valid triangle instead of writing an empty `IfcClosedShell`, and writes a mesh whose triangles are not a closed surface (vertices welded by position) as `IfcOpenShell` in an `IfcShellBasedSurfaceModel` (IFC2x3) or an `IfcTriangulatedFaceSet` with `Closed` unknown (IFC4), instead of declaring it a solid.
+- The mesh reader numbers geometry records by their position in the table of contents: a record it skips (malformed, or with a coordinate beyond the 1e8 limit) no longer shifts the fallback `Id` and `Name` (`Mesh_<n>`) or the positional transform of the records after it, so those meshes keep their file placement and the `Id`-derived IFC and BCF GUIDs follow the record number. Files read without a table of contents keep numbering by accepted mesh.
+- The `.nwc` writer keeps the names, hierarchy and property value types of a tree passed as `RootNode`: the model root is written as the root record and each node record carries a writer-specific parent marker that the lenient scene-tree builder reads, including after `Open` and `Save`. The explicit-parent chain obeys the same 256-level limit as the strict reader, and the limit is checked before the recursive transform and GUID passes. (#199)
+- The `.nwc` writer stores the camera field of view, far distance and projection, comments, id, section planes and section box of saved viewpoints in a trailer after each viewpoint record, and the reader restores them (several viewpoints that differ only by their sectioning are all kept). Files without the trailer, including every Navisworks file, keep the 60° default field of view; the double at record offset +84 is not read as degrees. The writer rejects viewpoints with more than 1,024 comments, comments over 65,536 bytes or more than 64 section planes, which the reader would not accept.
+- The container reader caps the decompressed size of each zlib stream (512 MiB) and of all streams together (2 GiB; `NwcReaderOptions.MaxDecompressedStreamBytes` and `MaxTotalDecompressedBytes`), so a crafted file fails with `InvalidDataException` instead of exhausting memory. Streams rejected for a bad trailer count toward the total and a rejected stream after a gap is no longer inflated twice. (#194)
+- IFC export writes the attribute list the selected schema defines for every entity it emits (`IfcBuilding`, the classified products, door, window and reinforcing-bar types, `IfcSurfaceStyleShading`), and in IFC2x3 `IfcStyledItem` refers to an `IfcPresentationStyleAssignment`. IFC2x3 requires `NominalDiameter` and `CrossSectionArea` on `IfcReinforcingBar`; the file has no such data, so `1.` and `0.` are written as placeholders there (IFC4 writes `$`).
+- The `.nwc` writer stores the triangle indices, mesh id and name of every mesh in a trailer after the positions, and the reader restores them, so meshes whose triangles are not one strip round-trip exactly instead of being rejected. `NwcWriter` now rejects only indices outside the vertex buffer. Mesh names read from a file are stripped of control characters, and `ObjExporter` sanitizes names (including U+2028/U+2029) and falls back to `Mesh_{Id}` for blank names. (#191)
+- The scene tree built without a `DbCache` stream no longer depends on Russian Category/Family/Type markers: the marker table covers more languages (including Italian and Portuguese), unknown markers are placed by first appearance below the levels already taken in the layer, and material definitions stay properties instead of becoming nodes that shift element GUIDs.
+- IFC export takes the element name and IFC GlobalId from the scene-tree node a mesh is linked to (the owning element of a leaf when it has one) instead of the mesh name and a mesh-id hash. The product GlobalId is derived from that id plus the mesh id and the model index, so several fragments of one element and copies across assembly models keep distinct ids. (#193)
+- The `.nwc` writer keeps `NwcTransform.Id` as it is (the first transform no longer gets id 100) and writes duplicate ids as separate records instead of throwing, which lets merged documents be exported. Each mesh keeps its own transform through a writer-side link stream (`NWTL`, an index into the written transform list, -1 for none), and transforms referenced only by a mesh are written too. The transform stream carries a new `NWTR` marker. Files without these streams bind transforms to meshes by position as before. Reading a transform stream that carries the `NWTR` marker throws `InvalidDataException` when it holds fewer or more records than it declares, because the link indices would otherwise point at the wrong transforms. (#200)
 - `NwcSceneResult.Diagnostics` and `docs/scene.md` say what the conversion reports: what it left out of the document and could detect, not what a document read with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off already lacked. `docs/scene.md` names `.nwf` under Limits and says that length, area, volume and angle values are left out while the unit is unknown, not while it is not feet.
 - The release workflow runs on tag pushes only and fails before anything is built or pushed unless the tag equals `v<Version>`. It can no longer be started by hand from a branch, and its release step runs `gh release create --verify-tag`, so it never creates a tag and the release tag is always the commit the packages were built from.
+
+- The container reader inflates zlib streams in blocks instead of one byte per read and still measures each stream's exact compressed length (a second pass serves single bytes only from the last block), so streams whose trailer crosses a read boundary or that repeat identically are kept. `Read(Stream)` reads a seekable stream from its current position without a second copy and rejects inputs above 2 GiB with `IOException`. `LcRawStream.CompressedLength`, `NwcContainer.TrailingGap` and `LcUStreamHeader.FileOffset` are `long`.
 
 ### Documentation
 - The README "Scope and frozen features" section states that JSON export is core and grows with the reader, and that the spatial index with raycast, section planes and boxes, and the redline types are frozen: bug fixes only. The README and the docs landing page lead with reading, writing `.nwc`, JSON export and `NwcIO.Scene`; the README, the landing page, the getting started page and the public API page mark the frozen features, and the last three link the scene adapter page.
@@ -355,7 +368,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
   - Standard TimeLiner CSV exchange (`NwcTimeLinerCsvSerializer`) supporting standard task schedule spreadsheet import and export.
 - **Binary Partition Stream Serialization & Ingestion**:
   - Stream classifiers and binary raw stream handlers for Selection Sets (`tag 100 + 105` / XML payload) and TimeLiner (`tag 100 + 106` / CSV payload).
-  - Roundtrip persistence of sets and schedules inside Navisworks `#LcUStream` containers via `NwcStreamSerializer`.
+  - Roundtrip persistence of sets and schedules inside `#LcUStream` containers via `NwcStreamSerializer`.
 - **CLI Enhancements (`nwcio`)**:
   - Added `--sets-xml <output.xml>` option and automatic `.xml` extension routing for exporting Navisworks Selection Sets.
   - Added `--timeliner-csv <output.csv>` option and automatic `.csv` extension routing for exporting 4D TimeLiner schedules.
@@ -366,9 +379,9 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Major Additions & Capabilities
 - **Programmatic NWC Generation & Serializer (`NwcWriter`)**:
-  - Full reverse-engineered serialization of Autodesk Navisworks `#LcUStream` containers and stream partitions from pure managed C#.
+  - Full reverse-engineered serialization of `#LcUStream` containers (the container family Navisworks uses) and stream partitions from pure managed C#.
   - Binary partition serialization: `PartitionHeader` (source metadata, loader plugin, timestamp, options), `SceneTree` (hierarchy nodes, tags 52/53, property types), `Transforms` (poses, quaternion rotations, bounding boxes), `Guids` (16-byte raw identifier tables), `Geometry` chunk records (IEEE 754 float vertices, record tags), and `Toc` (Table of Contents record lengths and chunk sizes).
-  - Built-in compression using managed `ZLibStream` producing valid, specification-compliant back-to-back zlib stream containers.
+  - Built-in compression using managed `ZLibStream` producing an `#LcUStream` container with back-to-back zlib streams that NwcIO can read back. Compatibility with Autodesk Navisworks has not been verified.
   - Saved viewpoint and 3D camera serialization (tag 517).
 - **Document Save & Fluent Builder API**:
   - `NwcDocument.Save(string path)` and `NwcDocument.Save(Stream stream)` methods for direct file output.
@@ -378,7 +391,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - **CLI Enhancement (`nwcio`)**:
   - Added `--nwc <output.nwc>` option and automatic `.nwc` extension routing for converting, saving, and merging models and assemblies into `.nwc` files.
 - **Full Verification**:
-  - Comprehensive unit and integration test coverage verifying bit-level roundtripping (`Create -> Save -> Open -> Verify`) across synthetic models and real-world multi-discipline fixtures.
+  - Unit and integration tests verify that NwcIO reopens what it writes (`Create -> Save -> Open -> Verify`) across synthetic models and, for counts and source metadata, real-world multi-discipline fixtures. The output is not opened or validated in Autodesk Navisworks, and the round trip is not byte-exact at the document level.
 
 ## [0.1.1] - 2026-11-10
 
