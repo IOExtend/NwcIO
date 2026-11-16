@@ -150,6 +150,7 @@ public class PropertyRecordScannerTests
             new() { FirstInt = 7, Tag = 52, Name = "IdProp", Class = "Tab", ValueType = 9, Value = "SYM_01" },
             new() { FirstInt = 8, Tag = 52, Name = "Point3Prop", Class = "Tab", ValueType = 12, Value = "(1, 2, 3)" },
             new() { FirstInt = 9, Tag = 52, Name = "Point2Prop", Class = "Tab", ValueType = 13, Value = "(4, 5)" },
+            new() { FirstInt = 10, Tag = 52, Name = "RefProp", Class = "Tab", ValueType = 8, Value = "Target", ReferenceId = 42, ReferenceTag = 7, ReferenceClass = "LcRevitData_Element" },
         };
 
         var streamBytes = Internal.Container.NwcStreamSerializer.BuildSceneTreeStream(inputRecords, null);
@@ -162,6 +163,13 @@ public class PropertyRecordScannerTests
             Assert.Equal(inputRecords[i].ValueType, scanned[i].ValueType);
             Assert.Equal(inputRecords[i].Value, scanned[i].Value);
         }
+
+        Assert.Equal(123.456, scanned.First(r => r.Name == "DoubleProp").DoubleValue);
+        Assert.Equal(42, scanned.First(r => r.Name == "IntProp").IntValue);
+        var reference = Assert.Single(scanned, r => r.Name == "RefProp");
+        Assert.Equal(42, reference.ReferenceId);
+        Assert.Equal(7, reference.ReferenceTag);
+        Assert.Equal("LcRevitData_Element", reference.ReferenceClass);
     }
 
     private static void WriteDouble(MemoryStream ms, double value)
