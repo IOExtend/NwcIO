@@ -69,6 +69,33 @@ public class MeshParserTests
         Assert.Empty(MeshParser.Parse(container));
     }
 
+    [Fact]
+    public void Parse_OutOfRangeVertexCount_ReportsSkippedRecord()
+    {
+        var chunk = Int32Bytes(0, 94, 0, 60, 1, 0, 0, 0);
+        var toc = Int32Bytes(1, 1, chunk.Length, 24);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var meshes = MeshParser.Parse(container, null, out int skipped);
+
+        Assert.Empty(meshes);
+        Assert.Equal(1, skipped);
+    }
+
+    [Fact]
+    public void Open_OutOfRangeVertexCount_ReportsMeshesSkippedDiagnostic()
+    {
+        var chunk = Int32Bytes(0, 94, 0, 60, 1, 0, 0, 0);
+        var toc = Int32Bytes(1, 1, chunk.Length, 24);
+        using var file = new MemoryStream(NwcContainerWriter.Write([chunk, toc]));
+
+        var document = NwcDocument.Open(file);
+
+        var diagnostic = Assert.Single(document.Diagnostics, d => d.Code == "meshes-skipped");
+        Assert.Contains("geometry records were skipped", diagnostic.Message);
+    }
+
     private static byte[] Int32Bytes(params int[] values)
     {
         var data = new byte[values.Length * 4];

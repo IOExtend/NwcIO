@@ -181,6 +181,7 @@ public sealed class NwcDocument
         var transforms = new List<NwcTransform>();
         var meshes = new List<NwcMesh>();
         var materials = new List<NwcMaterial>();
+        int skippedMeshRecords = 0;
         NwcNode? rootNode = null;
         if (segments is not null)
         {
@@ -206,7 +207,7 @@ public sealed class NwcDocument
 
             if (options.ReadMeshes)
             {
-                meshes.AddRange(MeshParser.Parse(container, transforms));
+                meshes.AddRange(MeshParser.Parse(container, transforms, out skippedMeshRecords));
             }
 
             if (options.BuildSceneTree)
@@ -268,7 +269,26 @@ public sealed class NwcDocument
             container = container with { Streams = [] };
         }
 
-        return new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        var diagnostics = new List<NwcDiagnostic>();
+        if (skippedMeshRecords > 0)
+        {
+            diagnostics.Add(new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "meshes-skipped",
+                $"{skippedMeshRecords} geometry records were skipped: their vertex count is outside " +
+                $"{MeshParser.MinMeshVertices}..{MeshParser.MaxPlausibleVertices} or the record is malformed."));
+        }
+        if (container.TrailingGap > 0)
+        {
+            diagnostics.Add(new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "ContainerTrailingGap",
+                $"Unrecognized {container.TrailingGap} byte tail after the last stream."));
+        }
+
+        var doc = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        doc.Diagnostics = diagnostics;
+        return doc;
     }
 
     /// <summary>
@@ -307,16 +327,6 @@ public sealed class NwcDocument
         };
 
         var doc = new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
-        if (container.TrailingGap > 0)
-        {
-            doc.Diagnostics =
-            [
-                new NwcDiagnostic(
-                    NwcDiagnosticSeverity.Warning,
-                    "ContainerTrailingGap",
-                    $"Unrecognized {container.TrailingGap} byte tail after the last stream."),
-            ];
-        }
         if (appearanceProfiler is not null)
         {
             doc.ApplyAppearanceProfiler(appearanceProfiler);

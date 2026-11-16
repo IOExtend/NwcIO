@@ -944,6 +944,7 @@ internal static class Program
             int totalTriangles = doc.Meshes.Sum(m => m.TriangleCount);
 
             @err.WriteLine("=== NwcIO Execution Report ===");
+            PrintDiagnostics(doc.Diagnostics, @err);
             @err.WriteLine($"Input:            {inputPath}");
             @err.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
             @err.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
@@ -1268,6 +1269,7 @@ internal static class Program
         if (printReport)
         {
             @err.WriteLine("=== NwcIO Assembly Report ===");
+            PrintDiagnostics(assembly.Diagnostics, @err);
             @err.WriteLine($"Assembly:         {assembly.Name}");
             @err.WriteLine($"Models:           {assembly.Models.Count}");
             @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
@@ -1567,6 +1569,7 @@ internal static class Program
         if (printReport)
         {
             @err.WriteLine("=== NwcIO NWF Assembly Report ===");
+            PrintDiagnostics(assembly.Diagnostics, @err);
             @err.WriteLine($"NWF File:         {nwfPath}");
             // Models[0] is the .nwf document itself; report the component files separately.
             @err.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
@@ -1675,6 +1678,20 @@ internal static class Program
         if (printReport && grps > 0)
         {
             @err.WriteLine($"Grouped clashes into {grps} groups using mode '{mode}'.");
+        }
+    }
+
+    private static void PrintDiagnostics(IReadOnlyList<NwcDiagnostic> diagnostics, TextWriter err)
+    {
+        if (diagnostics.Count == 0)
+        {
+            return;
+        }
+
+        err.WriteLine($"Diagnostics:      {diagnostics.Count}");
+        foreach (var diagnostic in diagnostics)
+        {
+            err.WriteLine($"  [{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}");
         }
     }
 

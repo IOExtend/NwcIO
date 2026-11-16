@@ -221,6 +221,31 @@ public class CliArgumentValidationTests
     }
 
     [Fact]
+    public void Report_PrintsDocumentDiagnostics()
+    {
+        string model = TempModel();
+        string output = Path.Combine(Path.GetTempPath(), "cli-diag-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            using (var stream = new FileStream(model, FileMode.Append, FileAccess.Write))
+            {
+                stream.Write(new byte[8]);
+            }
+
+            var (exit, _, err) = Run([model, output, "--report"]);
+
+            Assert.Equal(0, exit);
+            Assert.Contains("Diagnostics:", err);
+            Assert.Contains("ContainerTrailingGap", err);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    [Fact]
     public void IfcSchema_InvalidVersion_Exits1()
     {
         string model = TempModel();

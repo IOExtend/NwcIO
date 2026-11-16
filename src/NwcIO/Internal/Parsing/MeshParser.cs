@@ -17,22 +17,34 @@ public static class MeshParser
     /// Parses all 3D meshes found in the container streams.
     /// </summary>
     public static IReadOnlyList<NwcMesh> Parse(NwcContainer container, IReadOnlyList<NwcTransform>? transforms = null)
+        => Parse(container, transforms, out _);
+
+    /// <summary>
+    /// Parses all 3D meshes found in the container streams and reports how many geometry records were skipped.
+    /// </summary>
+    public static IReadOnlyList<NwcMesh> Parse(
+        NwcContainer container,
+        IReadOnlyList<NwcTransform>? transforms,
+        out int skippedRecords)
     {
         ArgumentNullException.ThrowIfNull(container);
 
         var meshes = new List<NwcMesh>();
+        skippedRecords = 0;
 
         // 1. Primary path: parse via Table of Contents (TOC) stream and chunked geometry block.
         var tocStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (tocStream is not null)
         {
-            ParseViaToc(container, tocStream, meshes, transforms);
+            ParseViaToc(container, tocStream, meshes, transforms, ref skippedRecords);
         }
 
         // 2. Secondary fallback: if TOC yielded no meshes, scan individual streams for vertex buffers.
         if (meshes.Count == 0)
         {
-            ParseViaHeuristicScan(container, meshes, transforms);
+            // The fallback replaces the TOC attempt, so do not count the same record twice.
+            skippedRecords = 0;
+            ParseViaHeuristicScan(container, meshes, transforms, ref skippedRecords);
         }
 
         return meshes;
@@ -42,7 +54,8 @@ public static class MeshParser
         NwcContainer container,
         LcRawStream tocStream,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        ref int skippedRecords)
     {
         var tocData = tocStream.Data;
         if (tocData.Length < 16)
@@ -150,6 +163,14 @@ public static class MeshParser
 
                             meshes.Add(mesh);
                         }
+                        else
+                        {
+                            skippedRecords++;
+                        }
+                    }
+                    else
+                    {
+                        skippedRecords++;
                     }
                 }
             }
@@ -161,7 +182,8 @@ public static class MeshParser
     private static void ParseViaHeuristicScan(
         NwcContainer container,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        ref int skippedRecords)
     {
         foreach (var stream in container.Streams)
         {
@@ -182,6 +204,7 @@ public static class MeshParser
                 int vCount = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(i + 8));
                 if (vCount < MinMeshVertices || vCount > MaxPlausibleVertices)
                 {
+                    skippedRecords++;
                     continue;
                 }
 
@@ -201,6 +224,10 @@ public static class MeshParser
 
                     meshes.Add(mesh);
                     i += 12 + vBytes;
+                }
+                else
+                {
+                    skippedRecords++;
                 }
             }
         }
