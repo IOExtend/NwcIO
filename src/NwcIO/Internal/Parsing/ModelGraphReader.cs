@@ -115,7 +115,7 @@ internal static class ModelGraphReader
 
     /// <summary>The tree first, so a tree that cannot be read fails before any geometry work; then geometry, fragments and links.</summary>
     /// <exception cref="InvalidDataException">A segment breaks its grammar or a fragment breaks a link rule.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
+    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static ModelGraph Read(ModelSegments segments, NwcReaderOptions options, string rootName)
     {
         // The tree needs the table for element GUIDs whatever ReadGuids says.

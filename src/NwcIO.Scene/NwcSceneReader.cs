@@ -19,12 +19,14 @@ public static partial class NwcSceneReader
     private static readonly string Producer = "NwcIO.Scene "
         + typeof(NwcSceneReader).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
 
+    private const int MaxModels = 100_000;   // models in one scene, linked placements included
+
     /// <summary>Reads the model file at <paramref name="path"/> with <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> and converts it.</summary>
     /// <param name="path">The model file.</param>
     /// <param name="options">Conversion options; null uses the defaults.</param>
     /// <returns>The scene with a report of the conversion.</returns>
     /// <exception cref="ArgumentException"><paramref name="path"/> or <see cref="NwcSceneOptions.ModelKey"/> is empty.</exception>
-    /// <exception cref="NotSupportedException">The file's scene tree holds <c>.nwd</c> partition nodes or a Revit link.</exception>
+    /// <exception cref="NotSupportedException">The file's scene tree holds <c>.nwd</c> partition nodes.</exception>
     public static NwcSceneResult Read(string path, NwcSceneOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -41,7 +43,7 @@ public static partial class NwcSceneReader
         }
         catch (NotSupportedException ex)
         {
-            throw new NotSupportedException("NwcIO.Scene needs the scene tree: .nwd partition trees and Revit links are not supported yet. " + ex.Message, ex);
+            throw new NotSupportedException("NwcIO.Scene needs the scene tree: .nwd partition trees are not supported yet. " + ex.Message, ex);
         }
 
         return Convert(document, key, path, options);
@@ -62,6 +64,7 @@ public static partial class NwcSceneReader
     /// <exception cref="ArgumentException">
     /// <see cref="NwcSceneOptions.ModelKey"/> is null or empty, or the document has no scene tree (<see cref="NwcDocument.RootNode"/> is null).
     /// </exception>
+    /// <exception cref="InvalidDataException">The linked placements would make the scene hold more than 100,000 models.</exception>
     public static NwcSceneResult Read(NwcDocument document, NwcSceneOptions options)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -88,6 +91,7 @@ public static partial class NwcSceneReader
     /// <param name="options">Conversion options; <see cref="NwcSceneOptions.ModelKey"/> names the first converted model.</param>
     /// <returns>The scene with a report of the conversion.</returns>
     /// <exception cref="ArgumentException">The assembly has no models, or a model has no scene tree.</exception>
+    /// <exception cref="InvalidDataException">The documents and their linked placements together would make the scene hold more than 100,000 models.</exception>
     public static NwcSceneResult Read(NwcAssembly assembly, NwcSceneOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -108,16 +112,17 @@ public static partial class NwcSceneReader
 
         var scene = new SceneDocument { Title = assembly.Name };
         var diagnostics = new List<SceneDiagnostic>();
-        var usedKeys = new HashSet<string>(StringComparer.Ordinal);
         int elementCount = 0;
         int elementsWithGeometry = 0;
         NwcLengthUnit? commonUnit = null;
         bool mixedUnits = false;
+        var usedKeys = new HashSet<string>(StringComparer.Ordinal);
+        var nextSuffix = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (int i = 0; i < documents.Count; i++)
         {
             var document = documents[i];
-            string key = ModelKey(document, i, options, usedKeys);
+            string key = ModelKey(document, i, options, usedKeys, nextSuffix);
             if (document.RootNode is null)
             {
                 throw new ArgumentException(
@@ -125,7 +130,7 @@ public static partial class NwcSceneReader
                     nameof(assembly));
             }
 
-            var result = ConvertInto(scene, document, key, document.LoadedPath, options, modelId: i + 1);
+            var result = ConvertInto(scene, document, key, document.LoadedPath, options, modelId: scene.Models.Count + 1, usedKeys, nextSuffix);
             diagnostics.AddRange(result.Diagnostics.Select(d => new SceneDiagnostic(
                 d.Severity,
                 d.Code,
@@ -178,7 +183,12 @@ public static partial class NwcSceneReader
     private static string? DocumentPath(NwcDocument document) =>
         document.LoadedPath ?? document.FileInfo.SourcePath;
 
-    private static string ModelKey(NwcDocument document, int index, NwcSceneOptions? options, HashSet<string> used)
+    private static string ModelKey(
+        NwcDocument document,
+        int index,
+        NwcSceneOptions? options,
+        HashSet<string> used,
+        Dictionary<string, int> nextSuffix)
     {
         string candidate = options?.ModelKey is { Length: > 0 } key && index == 0
             ? key
@@ -188,19 +198,36 @@ public static partial class NwcSceneReader
             candidate = $"Model_{index + 1}";
         }
 
-        string unique = candidate;
-        int suffix = 2;
-        while (!used.Add(unique))
+        return UniqueModelKey(candidate, used, nextSuffix);
+    }
+
+    private static string UniqueModelKey(
+        string candidate,
+        HashSet<string> used,
+        Dictionary<string, int> nextSuffix)
+    {
+        if (used.Add(candidate))
+        {
+            return candidate;
+        }
+
+        int suffix = nextSuffix.TryGetValue(candidate, out int next) ? next : 2;
+        string unique;
+        do
         {
             unique = $"{candidate}#{suffix++}";
         }
+        while (!used.Add(unique));
+
+        nextSuffix[candidate] = suffix;
         return unique;
     }
 
     private static NwcSceneResult Convert(NwcDocument document, string key, string? path, NwcSceneOptions? options)
     {
         var scene = new SceneDocument { Title = key };
-        return ConvertInto(scene, document, key, path, options, modelId: 1);
+        return ConvertInto(scene, document, key, path, options, modelId: 1,
+            new HashSet<string>(StringComparer.Ordinal), new Dictionary<string, int>(StringComparer.Ordinal));
     }
 
     private static NwcSceneResult ConvertInto(
@@ -209,10 +236,13 @@ public static partial class NwcSceneReader
         string key,
         string? path,
         NwcSceneOptions? options,
-        int modelId)
+        int modelId,
+        HashSet<string> usedKeys,
+        Dictionary<string, int> nextSuffix)
     {
         var unit = options?.LengthUnit ?? document.LengthUnit;
         string? loader = document.FileInfo.LoaderPlugin;
+        usedKeys.Add(key);
         scene.Models.Add(new SceneModel
         {
             Id = modelId,
@@ -279,11 +309,11 @@ public static partial class NwcSceneReader
         }
 
         // Each item carries the names at depth 2 and 4 on its path and the depth of the node's element, for Category and TypeName.
-        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4)>();
-        pending.Push((root, null, 0, null, 0, "", ""));
+        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4, int ModelId, int? LinkModelId)>();
+        pending.Push((root, null, 0, null, 0, "", "", modelId, null));
         while (pending.TryPop(out var item))
         {
-            var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4) = item;
+            var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4, nodeModelId, linkModelId) = item;
             atDepth2 = depth == 2 ? node.Name : atDepth2;
             atDepth4 = depth == 4 ? node.Name : atDepth4;
 
@@ -294,8 +324,46 @@ public static partial class NwcSceneReader
                 elementDepth = depth;
             }
 
+            bool isLinkRoot = false;
+            if ((node.IsLinkRoot || node.IsLinkPlacement) && parent is not null && linkModelId is null)
+            {
+                if (scene.Models.Count >= MaxModels)
+                {
+                    throw new InvalidDataException($"The scene would need more than {MaxModels} models.");
+                }
+
+                nodeModelId = scene.Models.Count + 1;
+                string linkKey = UniqueModelKey(
+                    string.IsNullOrWhiteSpace(node.Name) ? $"Link_{nodeModelId}" : node.Name,
+                    usedKeys,
+                    nextSuffix);
+                linkModelId = nodeModelId;
+                isLinkRoot = true;
+                scene.Models.Add(new SceneModel
+                {
+                    Id = nodeModelId,
+                    Key = linkKey,
+                    Name = linkKey,
+                    Path = null,
+                    SourceFormat = "nwc",
+                    Producer = Producer,
+                    SourceLengthUnit = unit.GetSymbol(),
+                    Application = loader?[(loader.LastIndexOf(':') + 1)..],
+                    CreatedAt = document.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+                });
+                levelId = null;
+            }
+            else if (linkModelId is int enclosingLink)
+            {
+                nodeModelId = enclosingLink;
+            }
+
             SceneNodeKind kind;
-            if (parent is null)
+            if (isLinkRoot)
+            {
+                kind = SceneNodeKind.Model;
+            }
+            else if (parent is null)
             {
                 kind = SceneNodeKind.Model;
             }
@@ -307,7 +375,7 @@ public static partial class NwcSceneReader
                 scene.Levels.Add(new SceneLevel
                 {
                     Id = levelId.Value,
-                    ModelId = modelId,
+                    ModelId = nodeModelId,
                     Name = node.Name,
                     Elevation = levelElementId is not null && levelElevations.TryGetValue(levelElementId, out double elevation)
                         ? elevation
@@ -333,16 +401,19 @@ public static partial class NwcSceneReader
             {
                 if (metresPerUnit is double m && lineMeshes.TryGetValue(node, out var meshes) && IsGrid(node) && GridLine(node, meshes, m) is { } gridLine)
                 {
-                    var gridSystem = scene.Grids.FirstOrDefault(g => g.ModelId == modelId);
+                    var gridSystem = scene.Grids.FirstOrDefault(g => g.ModelId == nodeModelId);
                     if (gridSystem is null)
                     {
-                        gridSystem = new SceneGridSystem { ModelId = modelId, Name = "Grids" };
+                        gridSystem = new SceneGridSystem { ModelId = nodeModelId, Name = "Grids" };
                         scene.Grids.Add(gridSystem);
                     }
 
                     gridSystem.Lines.Add(gridLine);
                 }
+            }
 
+            if (node.IsElement || node.IsLinkPlacement)
+            {
                 elementCount++;
                 elementsWithGeometry += placed.Contains(node) ? 1 : 0;
             }
@@ -357,18 +428,19 @@ public static partial class NwcSceneReader
             var (category, typeName) = !revit || kind != SceneNodeKind.Element ? ("", "")
                 : (elementDepth == 2 ? (node.Element ?? node).Name : elementDepth > 2 ? atDepth2 : "", elementDepth == 5 ? atDepth4 : "");
 
-            // The second node of a sibling pair is a part of the first.
-            long? parentId = parent is null ? null
+            // The second node of a sibling pair is a part of the first. A linked placement is a model root.
+            long? parentId = node.IsLinkPlacement ? null
+                : parent is null ? null
                 : node.Element is { } owner && owner != node && owner != parent.Element ? ids.TryGetValue(owner, out long o) ? o : ids[parent] : ids[parent];
             scene.Elements.Add(new SceneElement
             {
                 Id = ids[node],
-                ModelId = modelId,
+                ModelId = nodeModelId,
                 ParentId = parentId,
                 Kind = kind,
                 Name = node.Name,
-                SourceId = node.IsElement ? node.ElementGuid?.ToString("D") : null,
-                IfcGuid = node.IsElement ? node.IfcGlobalId : null,
+                SourceId = node.IsElement || node.IsLinkPlacement ? (node.Element ?? node).ElementGuid?.ToString("D") : null,
+                IfcGuid = node.IsElement || node.IsLinkPlacement ? (node.Element ?? node).IfcGlobalId : null,
                 Category = category,
                 TypeName = typeName,
                 LevelId = levelId,
@@ -377,7 +449,7 @@ public static partial class NwcSceneReader
 
             for (int i = node.Children.Count - 1; i >= 0; i--)
             {
-                pending.Push((node.Children[i], node, depth + 1, levelId, elementDepth, atDepth2, atDepth4));
+                pending.Push((node.Children[i], node, depth + 1, levelId, elementDepth, atDepth2, atDepth4, nodeModelId, linkModelId));
             }
         }
 

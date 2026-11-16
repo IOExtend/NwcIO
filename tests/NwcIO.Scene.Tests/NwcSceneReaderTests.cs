@@ -53,7 +53,7 @@ public sealed class NwcSceneReaderTests
         w.Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(1);
         using var file = TempFile(SyntheticNwcFile.Build(w.ToArray(), null, [], []), "Site.nwd");
         var ex = Assert.Throws<NotSupportedException>(() => NwcSceneReader.Read(file.Path));
-        Assert.StartsWith("NwcIO.Scene needs the scene tree: .nwd partition trees and Revit links are not supported yet. ", ex.Message);
+        Assert.StartsWith("NwcIO.Scene needs the scene tree: .nwd partition trees are not supported yet. ", ex.Message);
         Assert.IsType<NotSupportedException>(ex.InnerException);
     }
 
@@ -712,6 +712,192 @@ public sealed class NwcSceneReaderTests
                 meshes: [mesh],
                 rootNode: root);
         }
+    }
+
+    [Fact]
+    public void Read_LinkedPlacement_BecomesItsOwnSceneModel()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var element = new NwcNode
+        {
+            Id = 1,
+            Name = "Element",
+            Class = "LcRevitData_Element",
+            IsElement = true,
+            ElementGuid = Guid.Parse("11111111-2222-4333-8444-555555555555"),
+        };
+        element.Element = element;
+        var link = new NwcNode
+        {
+            Id = 2,
+            Name = "Link A",
+            Class = "LcOpModelFile",
+            Element = element,
+            IsLinkPlacement = true,
+        };
+        root.Children.Add(element);
+        root.Children.Add(link);
+
+        var elementMesh = Mesh(1, 0, element);
+        var linkMesh = Mesh(2, 10, link);
+        var document = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "model.nwc" },
+            meshes: [elementMesh, linkMesh],
+            rootNode: root);
+
+        var result = NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        });
+
+        Assert.Equal(2, result.Document.Models.Count);
+        Assert.Equal(2, result.Document.Models[1].Id);
+        Assert.Equal("Link A", result.Document.Models[1].Key);
+        Assert.Equal(2, result.Document.Instances.Count);
+        Assert.Equal(2, result.Document.Elements.Select(e => e.ModelId).Distinct().Count());
+        Assert.All(result.Document.Elements.Where(e => e.ModelId == 2),
+            e => Assert.Equal("11111111-2222-4333-8444-555555555555", e.SourceId));
+        Assert.Empty(result.Document.Validate());
+
+        static NwcMesh Mesh(int id, double x, NwcNode node)
+        {
+            var mesh = new NwcMesh
+            {
+                Id = id,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Node = node;
+            node.Mesh = mesh;
+            return mesh;
+        }
+    }
+
+    [Fact]
+    public void Read_SharedLinkedSubtree_BecomesOneModel()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true };
+        first.Element = first;
+        var shared = new NwcNode { Id = 2, Name = "Shared model", Class = "LcOpModelFile", IsLinkRoot = true };
+        for (int i = 0; i < 3; i++)
+        {
+            shared.Children.Add(new NwcNode
+            {
+                Id = 10 + i,
+                Name = $"Part {i + 1}",
+                Class = "LcRevitData_Element",
+                Element = first,
+                IsLinkPlacement = true,
+            });
+        }
+
+        root.Children.Add(first);
+        root.Children.Add(shared);
+
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Equal(2, result.Document.Models.Count);
+        var linkModel = result.Document.Models[1];
+        Assert.Equal("Shared model", linkModel.Key);
+        Assert.All(result.Document.Elements.Where(element => element.Name.StartsWith("Part ", StringComparison.Ordinal)),
+            element => Assert.Equal(linkModel.Id, element.ModelId));
+    }
+
+    [Fact]
+    public void Read_GeometryUnderALinkedPlacement_CountsThePlacementNotItsElement()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true, Parent = root };
+        first.Element = first;
+        var link = new NwcNode { Id = 2, Name = "Link", Class = "LcOpModelFile", Element = first, IsLinkPlacement = true, IsLinkRoot = true, Parent = root };
+        var part = new NwcNode { Id = 3, Name = "Part", Class = "LcRevitData_Element", Element = first, Parent = link };
+        link.Children.Add(part);
+        root.Children.Add(first);
+        root.Children.Add(link);
+
+        var result = Valid(NwcSceneReader.Read(
+            NwcDocument.Create(meshes: [Mesh(1, 0, first), Mesh(2, 10, part)], rootNode: root),
+            new NwcSceneOptions { ModelKey = "model.nwc", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Equal(2, result.ElementCount);
+        Assert.Equal(2, result.ElementsWithGeometry);
+
+        static NwcMesh Mesh(int id, double x, NwcNode node)
+        {
+            var mesh = new NwcMesh
+            {
+                Id = id,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Node = node;
+            node.Mesh = mesh;
+            return mesh;
+        }
+    }
+
+    [Fact]
+    public void Read_MoreLinkedPlacementsThanTheModelLimit_Throws()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true, Parent = root };
+        first.Element = first;
+        root.Children.Add(first);
+        for (int i = 0; i < 100_000; i++)
+        {
+            root.Children.Add(new NwcNode { Id = i + 2, Name = "Link", Class = "LcOpModelFile", Element = first, IsLinkPlacement = true, IsLinkRoot = true, Parent = root });
+        }
+
+        var ex = Assert.Throws<InvalidDataException>(() => NwcSceneReader.Read(
+            NwcDocument.Create(rootNode: root),
+            new NwcSceneOptions { ModelKey = "model.nwc", LengthUnit = NwcLengthUnit.Meters }));
+        Assert.Contains("100000", ex.Message);
+    }
+
+    [Fact]
+    public void Read_LinkedSubtreesWithTheSameName_GetOneModelPerRoot()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        for (int i = 1; i <= 2; i++)
+        {
+            var link = new NwcNode
+            {
+                Id = i,
+                Name = "Linked model",
+                Class = "LcOpModelFile",
+                IsLinkPlacement = true,
+            };
+            var child = new NwcNode
+            {
+                Id = 10 + i,
+                Name = $"Part {i}",
+                Class = "LcRevitData_Element",
+                IsElement = true,
+                Element = link,
+            };
+            link.Children.Add(child);
+            root.Children.Add(link);
+        }
+
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Equal(3, result.Document.Models.Count);
+        Assert.Equal(["model.nwc", "Linked model", "Linked model#2"],
+            result.Document.Models.Select(model => model.Key));
+        Assert.Equal(2, result.Document.Elements.Single(element => element.Name == "Part 1").ModelId);
+        Assert.Equal(3, result.Document.Elements.Single(element => element.Name == "Part 2").ModelId);
     }
 
     [Fact]

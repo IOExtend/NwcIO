@@ -5,6 +5,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ## [Unreleased]
 
 ### Added
+- `HierarchyParser` keeps linked Revit placements instead of throwing: a repeated element under another parent is marked `NwcNode.IsLinkPlacement` and points at the first placement. `NwcSceneReader` writes each placement as its own `SceneModel`, so its geometry and `SourceId` are preserved without duplicate ids inside one model.
 - `NwcIO.Scene` converts an `NwcAssembly` into one scene with one `SceneModel` per component document, unique keys from file names, and scene-wide element, geometry and material ids. The `.nwf` document itself is skipped when components exist.
 - `NwcIO.Scene` writes Revit level elevations in metres from the level's `LcRevitData_Parameter` length property; a missing, non-finite or unknown-unit value stays null.
 - `NwcIO.Scene` converts saved viewpoints to `SceneViewpoint`s (camera position, target, up, field of view in radians, near/far in metres and projection).
