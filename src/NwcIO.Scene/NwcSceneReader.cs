@@ -131,6 +131,7 @@ public static partial class NwcSceneReader
 
         bool revit = document.IsRevitSource;
         var levelElementIds = revit ? LevelElementIds(root) : [];
+        var levelElevations = revit ? LevelElevations(root, metresPerUnit) : new Dictionary<string, double>(StringComparer.Ordinal);
         int elementCount = 0;
         int leavesOutsideElements = 0;
         int elementsWithGeometry = 0;
@@ -174,7 +175,16 @@ public static partial class NwcSceneReader
             {
                 kind = SceneNodeKind.Level;
                 levelId = scene.Levels.Count + 1;
-                scene.Levels.Add(new SceneLevel { Id = levelId.Value, ModelId = ModelId, Name = node.Name });
+                string? levelElementId = LevelElementId(node, levelElementIds);
+                scene.Levels.Add(new SceneLevel
+                {
+                    Id = levelId.Value,
+                    ModelId = ModelId,
+                    Name = node.Name,
+                    Elevation = levelElementId is not null && levelElevations.TryGetValue(levelElementId, out double elevation)
+                        ? elevation
+                        : null,
+                });
             }
             else if (node.IsElement || node.Element is not null)
             {
@@ -304,10 +314,65 @@ public static partial class NwcSceneReader
         node.PropertyTabs.Any(t => t.InternalName == "LcRevitData_Element"
             && t.Properties.Any(p => p.InternalName == "LcRevitPropertyElementCategoryId" && p.Value == "-2000220"));
 
+    // The level's LcRevitId tab names its element id; the matching LcRevitData_Parameter tab holds the elevation.
+    private static string? LevelElementId(NwcNode node, HashSet<string> levelElementIds) =>
+        node.PropertyTabs
+            .Where(t => t.InternalName == "LcRevitId")
+            .SelectMany(t => t.Properties)
+            .Select(p => p.Value)
+            .FirstOrDefault(v => v is not null && levelElementIds.Contains(v));
+
+    private static Dictionary<string, double> LevelElevations(NwcNode root, double? metresPerUnit)
+    {
+        var result = new Dictionary<string, double>(StringComparer.Ordinal);
+        if (metresPerUnit is not double metres)
+        {
+            return result;
+        }
+
+        var pending = new Stack<NwcNode>();
+        pending.Push(root);
+        while (pending.TryPop(out var node))
+        {
+            foreach (var tab in node.PropertyTabs)
+            {
+                if (tab.InternalName != "LcRevitData_Parameter")
+                {
+                    continue;
+                }
+
+                string? id = null;
+                double? elevation = null;
+                foreach (var property in tab.Properties)
+                {
+                    if (property.InternalName == "LcRevitPropertyElementId" && property.Value is { } value)
+                    {
+                        id = value;
+                    }
+                    else if (property.Name == "Elevation" &&
+                             double.TryParse(property.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
+                    {
+                        elevation = parsed;
+                    }
+                }
+
+                if (id is not null && elevation is double e)
+                {
+                    result[id] = e * metres;
+                }
+            }
+
+            foreach (var child in node.Children)
+            {
+                pending.Push(child);
+            }
+        }
+        return result;
+    }
+
     // A grid is a line only when it has one line mesh of one segment that is horizontal within 1e-6 m; otherwise it stays an element.
     private static SceneGridLine? GridLine(NwcNode node, List<NwcMesh> meshes, double metresPerUnit)
-    {
-        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
+    {        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
         {
             return null;
         }

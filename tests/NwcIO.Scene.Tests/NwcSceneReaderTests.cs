@@ -99,7 +99,9 @@ public sealed class NwcSceneReaderTests
         Assert.Equal(("Lines", ""), (doc.Elements[13].Category, doc.Elements[13].TypeName));
         Assert.All(doc.Elements.Where(e => e.Kind != SceneNodeKind.Element), e => Assert.Equal(("", ""), (e.Category, e.TypeName)));
         var level = Assert.Single(doc.Levels);
-        Assert.Equal((1, 1, "Level 1", (double?)null), (level.Id, level.ModelId, level.Name, level.Elevation));
+        Assert.Equal((1, 1, "Level 1"), (level.Id, level.ModelId, level.Name));
+        Assert.NotNull(level.Elevation);
+        Assert.Equal(3.0, level.Elevation.Value, precision: 6);
         Assert.Equal([null, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, null, null, null], doc.Elements.Select(e => e.LevelId));
         Assert.Equal(4, result.ElementCount);
         AssertSampleDiagnostics(result);
