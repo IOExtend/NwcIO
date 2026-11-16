@@ -13,17 +13,45 @@ internal static class NwcElementGuid
     public static string ModelKey(NwcDocument document) =>
         document.FileInfo.SourcePath is { Length: > 0 } path ? path : "Model";
 
+    /// <summary>
+    /// One model key per assembly model. A source path is unique on its own; when several models share one
+    /// (or all use the fallback), the model position disambiguates them.
+    /// </summary>
+    public static string[] ModelKeys(IReadOnlyList<NwcDocument> models)
+    {
+        var baseKeys = new string[models.Count];
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < models.Count; i++)
+        {
+            baseKeys[i] = ModelKey(models[i]);
+            counts[baseKeys[i]] = counts.GetValueOrDefault(baseKeys[i]) + 1;
+        }
+
+        var result = new string[models.Count];
+        for (int i = 0; i < models.Count; i++)
+        {
+            result[i] = counts[baseKeys[i]] > 1
+                ? $"{baseKeys[i]}#{i.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                : baseKeys[i];
+        }
+
+        return result;
+    }
+
     public static string ForMesh(NwcMesh mesh, NwcDocument document) => ForMesh(mesh, ModelKey(document));
 
     public static string ForMesh(NwcMesh mesh, string modelKey)
     {
+        // One element usually owns several fragments (meshes); the element GUID alone would give every
+        // mesh the same GlobalId. Keep the authoring GUID as a stable prefix and add the mesh identity.
         NwcNode? node = mesh.Node;
         Guid? authoringGuid = node?.ElementGuid ?? node?.Element?.ElementGuid;
-        if (authoringGuid is { } guid)
+        string meshId = mesh.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (authoringGuid is { } guid && guid != Guid.Empty)
         {
-            return IfcGuid.ToIfcGuid(guid);
+            return IfcGuid.FromKey($"{modelKey}:element:{guid:D}:mesh:{meshId}");
         }
 
-        return IfcGuid.FromKey($"{modelKey}:mesh:{mesh.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        return IfcGuid.FromKey($"{modelKey}:mesh:{meshId}");
     }
 }

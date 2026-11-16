@@ -212,12 +212,14 @@ public sealed class NwcClashMatrix
                         var c1 = new NwcClashObject(mA.Name ?? $"Mesh_{mA.Id}", mA.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docA.FileInfo.SourcePath ?? "ModelA"),
-                            Mesh = mA
+                            Mesh = mA,
+                            IfcGuid = NwcElementGuid.ForMesh(mA, docA),
                         };
                         var c2 = new NwcClashObject(mB.Name ?? $"Mesh_{mB.Id}", mB.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docB.FileInfo.SourcePath ?? "ModelB"),
-                            Mesh = mB
+                            Mesh = mB,
+                            IfcGuid = NwcElementGuid.ForMesh(mB, docB),
                         };
 
                         var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, interBox.Center, -penetration);

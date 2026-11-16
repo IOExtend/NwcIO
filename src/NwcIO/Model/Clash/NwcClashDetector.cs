@@ -38,6 +38,7 @@ public static class NwcClashDetector
 
         var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
         var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
 
         for (int m = 0; m < assembly.Models.Count; m++)
         {
@@ -47,13 +48,13 @@ public static class NwcClashDetector
             var selA = ResolveSelection(doc, test.SelectionA);
             for (int i = 0; i < selA.Count; i++)
             {
-                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name, NwcElementGuid.ModelKey(doc)));
+                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name, modelKeys[m]));
             }
 
             var selB = ResolveSelection(doc, test.SelectionB);
             for (int i = 0; i < selB.Count; i++)
             {
-                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name, NwcElementGuid.ModelKey(doc)));
+                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name, modelKeys[m]));
             }
         }
 

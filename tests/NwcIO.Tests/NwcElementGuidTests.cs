@@ -1,0 +1,49 @@
+﻿using NwcIO.Internal.Export;
+using NwcIO.Model;
+using Xunit;
+
+namespace NwcIO.Tests;
+
+public class NwcElementGuidTests
+{
+    [Fact]
+    public void ForMesh_SameElementWithSeveralFragments_ProducesUniqueIds()
+    {
+        var element = new NwcNode { Id = 1, Name = "Door", Class = "LcRevitData_Element", ElementGuid = Guid.NewGuid() };
+        var leaf1 = new NwcNode { Id = 2, Name = "Panel", Class = "LcRevitData_Element", Element = element };
+        var leaf2 = new NwcNode { Id = 3, Name = "Frame", Class = "LcRevitData_Element", Element = element };
+        var mesh1 = new NwcMesh { Id = 10, Node = leaf1, Vertices = [], Indices = [] };
+        var mesh2 = new NwcMesh { Id = 11, Node = leaf2, Vertices = [], Indices = [] };
+        var doc = NwcDocument.Create();
+
+        Assert.NotEqual(NwcElementGuid.ForMesh(mesh1, doc), NwcElementGuid.ForMesh(mesh2, doc));
+    }
+
+    [Fact]
+    public void ForMesh_EmptyAuthoringGuid_FallsBackToTheMeshKey()
+    {
+        var element = new NwcNode { Id = 1, Name = "Door", Class = "LcRevitData_Element", ElementGuid = Guid.Empty };
+        var leaf = new NwcNode { Id = 2, Name = "Panel", Class = "LcRevitData_Element", Element = element };
+        var mesh = new NwcMesh { Id = 10, Node = leaf, Vertices = [], Indices = [] };
+        var doc = NwcDocument.Create();
+
+        Assert.Equal(IfcGuid.FromKey("Model.rvt:mesh:10"), NwcElementGuid.ForMesh(mesh, doc));
+    }
+
+    [Fact]
+    public void ModelKeys_DistinguishEqualSourcePathsOnlyWhenNeeded()
+    {
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.rvt" });
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.rvt" });
+        Assert.Equal(["first.rvt", "second.rvt"], NwcElementGuid.ModelKeys([first, second]));
+
+        var sameA = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" });
+        var sameB = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" });
+        var keys = NwcElementGuid.ModelKeys([sameA, sameB]);
+        Assert.Equal(["tower.rvt#0", "tower.rvt#1"], keys);
+        Assert.NotEqual(
+            NwcElementGuid.ForMesh(new NwcMesh { Id = 5, Vertices = [], Indices = [] }, keys[0]),
+            NwcElementGuid.ForMesh(new NwcMesh { Id = 5, Vertices = [], Indices = [] }, keys[1]));
+    }
+}
+

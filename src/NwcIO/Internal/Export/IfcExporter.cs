@@ -209,19 +209,19 @@ internal static class IfcExporter
             // Export properties if requested
             if (options.ExportProperties)
             {
-                WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
+                WriteMeshProperties(w, elemId, elemGuid, mesh, ownerHistoryId, vertices, scale, isIfc4);
             }
         }
 
         // 6. Type Definitions
         if (options.ExportTypeObjects)
         {
-            foreach (var (_, (typeId, elemIds)) in typeMap)
+            foreach (var (typeKey, (typeId, elemIds)) in typeMap)
             {
                 if (elemIds.Count > 0)
                 {
                     w.Add("IFCRELDEFINESBYTYPE",
-                        $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:type:{typeId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
+                        $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:type:{typeKey}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
                 }
             }
         }
@@ -230,7 +230,7 @@ internal static class IfcExporter
         if (elementIds.Count > 0)
         {
             w.Add("IFCRELCONTAINEDINSPATIALSTRUCTURE",
-                $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:contained:{storeyId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
+                $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:contained"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
         }
 
         // 8. Write complete STEP physical file
@@ -338,6 +338,7 @@ internal static class IfcExporter
 
         double scale = (options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres) ? 0.001 : 1.0;
         var storeyIds = new List<int>();
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
 
         var typeMap = new Dictionary<string, (int TypeId, List<int> ElementIds)>(StringComparer.OrdinalIgnoreCase);
 
@@ -412,7 +413,7 @@ internal static class IfcExporter
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
                 string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-                string elemGuid = NwcElementGuid.ForMesh(mesh, model);
+                string elemGuid = NwcElementGuid.ForMesh(mesh, modelKeys[modelIdx]);
                 string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -435,25 +436,25 @@ internal static class IfcExporter
 
                 if (options.ExportProperties)
                 {
-                    WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
+                    WriteMeshProperties(w, elemId, elemGuid, mesh, ownerHistoryId, vertices, scale, isIfc4);
                 }
             }
 
             if (modelElementIds.Count > 0)
             {
                 w.Add("IFCRELCONTAINEDINSPATIALSTRUCTURE",
-                    $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:contained:{storeyId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(modelElementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
+                    $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:contained:{modelIdx.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(modelElementIds.Select(StepWriter.Ref))},{StepWriter.Ref(storeyId)}");
             }
         }
 
         if (options.ExportTypeObjects)
         {
-            foreach (var (_, (typeId, elemIds)) in typeMap)
+            foreach (var (typeKey, (typeId, elemIds)) in typeMap)
             {
                 if (elemIds.Count > 0)
                 {
                     w.Add("IFCRELDEFINESBYTYPE",
-                        $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:type:{typeId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
+                        $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:type:{typeKey}"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.List(elemIds.Select(StepWriter.Ref))},{StepWriter.Ref(typeId)}");
                 }
             }
         }
@@ -589,6 +590,7 @@ internal static class IfcExporter
     private static void WriteMeshProperties(
         StepWriter w,
         int elementId,
+        string elemGuid,
         NwcMesh mesh,
         int ownerHistoryId,
         IReadOnlyList<Vector3d> vertices,
@@ -637,10 +639,10 @@ internal static class IfcExporter
         }
 
         int psetId = w.Add("IFCPROPERTYSET",
-            $"{StepWriter.Str(IfcGuid.FromKey($"ifc:pset:{elementId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},'Pset_NwcElementProperties',$,{StepWriter.List(propIds.Select(StepWriter.Ref))}");
+            $"{StepWriter.Str(IfcGuid.FromKey($"ifc:pset:{elemGuid}"))},{StepWriter.Ref(ownerHistoryId)},'Pset_NwcElementProperties',$,{StepWriter.List(propIds.Select(StepWriter.Ref))}");
 
         w.Add("IFCRELDEFINESBYPROPERTIES",
-            $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:props:{elementId.ToString(CultureInfo.InvariantCulture)}"))},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
+            $"{StepWriter.Str(IfcGuid.FromKey($"ifc:rel:props:{elemGuid}"))},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
 
         if (mesh.Node?.Hyperlinks is { Count: > 0 } hyperlinks)
         {
@@ -651,7 +653,7 @@ internal static class IfcExporter
                     : $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")}";
                 int docRefId = w.Add("IFCDOCUMENTREFERENCE", docRefArgs);
                 w.Add("IFCRELASSOCIATESDOCUMENT",
-                    $"{StepWriter.Str(IfcGuid.FromKey($"ifc:reldoc:{elementId.ToString(CultureInfo.InvariantCulture)}:{link.Url}"))},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(docRefId)}");
+                    $"{StepWriter.Str(IfcGuid.FromKey($"ifc:reldoc:{elemGuid}:{link.Url}"))},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(docRefId)}");
             }
         }
     }

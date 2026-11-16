@@ -127,6 +127,32 @@ public class IfcExportTests
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
     }
 
+    [Fact]
+    public void SaveIfc_PropertySetIdsFollowTheElementNotTheStepNumber()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        var other = new NwcMesh
+        {
+            Id = 2,
+            Vertices = [new(10, 0, 0), new(11, 0, 0), new(10, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        string one = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions());
+        string two = NwcDocument.Create(meshes: [mesh, other]).ToIfcString(new NwcIfcExportOptions());
+
+        static string FirstPropertySet(string ifc) =>
+            System.Text.RegularExpressions.Regex.Match(ifc, @"IFCPROPERTYSET\('([^']+)'").Groups[1].Value;
+
+        Assert.NotEmpty(FirstPropertySet(one));
+        Assert.Equal(FirstPropertySet(one), FirstPropertySet(two));
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]
