@@ -199,8 +199,8 @@ public static class MeshParser
                     continue;
                 }
 
-                int vBytes = vCount * 12;
-                if (i + 16 + vBytes > data.Length)
+                // vCount can reach int.MaxValue through MaxMeshVertices: compare without multiplying.
+                if (vCount > (data.Length - (i + 16)) / 12)
                 {
                     continue;
                 }
@@ -214,7 +214,7 @@ public static class MeshParser
                     }
 
                     meshes.Add(mesh);
-                    i += 12 + vBytes;
+                    i += 12 + vCount * 12;
                 }
             }
         }
@@ -222,6 +222,11 @@ public static class MeshParser
 
     private static NwcMesh? TryBuildMesh(byte[] buffer, int vertexOffset, int vertexCount, int meshId, bool lines)
     {
+        if (vertexOffset < 0 || vertexCount > (buffer.Length - vertexOffset) / 12)
+        {
+            return null;
+        }
+
         var vertices = new Vector3d[vertexCount];
         double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
         double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
@@ -263,7 +268,8 @@ public static class MeshParser
     }
 
     /// <summary>
-    /// Consecutive segment pairs over the vertices: (0,1), (1,2), ... — an open polyline.
+    /// Consecutive segment pairs over the vertices: (0,1), (1,2), ... — one open polyline. The lenient path does not read the polyline lengths,
+    /// so a record that holds several polylines gets a segment between each pair of neighbours.
     /// </summary>
     internal static int[] BuildLineIndices(int vertexCount)
     {
