@@ -113,7 +113,8 @@ public sealed class NwcDocument
 
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
-    /// <exception cref="InvalidDataException">The file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="InvalidDataException">The file is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
     {
@@ -129,14 +130,15 @@ public sealed class NwcDocument
     }
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>
-    /// <exception cref="InvalidDataException">The stream is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="InvalidDataException">The stream is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= NwcReaderOptions.Default;
 
-        var container = NwcContainerReader.Read(stream);
+        var container = NwcContainerReader.Read(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes);
         StreamClassifier.ClassifyAll(container.Streams);
         var segments = ModelGraphReader.Locate(container);
 
@@ -203,7 +205,14 @@ public sealed class NwcDocument
 
             if (options.ReadMeshes)
             {
-                meshes.AddRange(MeshParser.Parse(container, transforms));
+                IReadOnlyList<int>? transformIndices = null;
+                var linksStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.TransformLinks);
+                if (linksStream is not null)
+                {
+                    transformIndices = TransformLinkParser.TryParse(linksStream);
+                }
+
+                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices, transformIndices));
             }
 
             if (options.BuildSceneTree)
@@ -512,19 +521,26 @@ public sealed class NwcDocument
         return tests;
     }
 
-    /// <summary>Saves the document to an Autodesk Navisworks (.nwc) file.</summary>
+    /// <summary>
+    /// Saves the document to a .nwc file in NwcIO's own layout, not verified to open in Autodesk Navisworks. When <see cref="PropertyRecords"/> is non-empty it is the
+    /// source of truth for the scene tree; <see cref="RootNode"/> is serialized only when no records exist, so edits to the
+    /// tree of an opened document are not persisted unless the records are cleared first.
+    /// </summary>
     public void Save(string path, string? header = null)
     {
         NwcWriter.Write(this, path, header);
     }
 
-    /// <summary>Saves the document to an output stream in Autodesk Navisworks (.nwc) format.</summary>
+    /// <summary>Saves the document to an output stream in NwcIO's .nwc layout.</summary>
     public void Save(Stream stream, string? header = null)
     {
         NwcWriter.Write(this, stream, header);
     }
 
-    /// <summary>Serializes the document to a byte array in Autodesk Navisworks (.nwc) format.</summary>
+    /// <summary>
+    /// Serializes the document to a byte array in NwcIO's .nwc layout. See <see cref="Save(string, string?)"/>
+    /// for the <see cref="PropertyRecords"/> / <see cref="RootNode"/> precedence.
+    /// </summary>
     public byte[] ToByteArray(string? header = null)
     {
         return NwcWriter.WriteToBytes(this, header);

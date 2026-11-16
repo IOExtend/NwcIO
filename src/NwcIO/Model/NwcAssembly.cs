@@ -268,6 +268,7 @@ public sealed class NwcAssembly
         }
 
         var clashes = new List<NwcClash>();
+        var modelKeys = NwcElementGuid.ModelKeys(Models);
 
         // Build per-model spatial indexes
         var modelIndexes = new (NwcDocument Doc, NwcSpatialIndex Index)[Models.Count];
@@ -323,7 +324,11 @@ public sealed class NwcAssembly
                                 overlap = new BoundingBox3d(point, point);
                             }
 
-                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap));
+                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap)
+                            {
+                                ModelKeyA = modelKeys[i],
+                                ModelKeyB = modelKeys[j],
+                            });
                         }
                     }
                 }

@@ -228,12 +228,21 @@ public class ModelGraphReaderTests
         Assert.Equal(doc.Meshes.Select(m => m.Indices), reopened.Meshes.Select(m => m.Indices));
     }
 
-    [Fact]   // R2 holds three strips; the reader of a saved file would rebuild one strip over its seven vertices
-    public void Save_StrictlyReadMultiStripMesh_Rejects()
+    [Fact]   // R2 holds three strips; the saved trailer keeps them instead of rebuilding one strip over seven vertices
+    public void Save_StrictlyReadMultiStripMesh_RoundtripsTopology()
     {
         byte[] file = SyntheticNwcFile.Build(FormatVectors.H1, SyntheticFragments.Build(new Frag(2, Vector3d.Zero, 1, 3, 4, Rec: 1, MaxZ: 1)), [FormatVectors.R2], [152]);
         var doc = NwcDocument.Open(new MemoryStream(file), new NwcReaderOptions { BuildSceneTree = false, ReadPropertyRecords = false });
-        Assert.Contains("Mesh 0 has triangles the .nwc writer cannot store", Assert.Throws<ArgumentException>(() => doc.ToByteArray()).Message);
+
+        var reopened = NwcDocument.Open(
+            new MemoryStream(doc.ToByteArray()),
+            new NwcReaderOptions { BuildSceneTree = false, ReadPropertyRecords = false });
+
+        var source = Assert.Single(doc.Meshes);
+        var target = Assert.Single(reopened.Meshes);
+        Assert.Equal(source.Vertices, target.Vertices);
+        Assert.Equal(source.Indices, target.Indices);
+        Assert.Equal(source.Id, target.Id);
     }
 
     [Fact]

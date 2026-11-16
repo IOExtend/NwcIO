@@ -182,4 +182,28 @@ public class ClashMatrixTests
 
         Assert.Equal(new[] { (0, 2), (1, 2) }, matrix.Cells[0].Clashes.Select(c => (c.Item1.Mesh!.Id, c.Item2.Mesh!.Id)));
     }
+
+    [Fact]
+    public void ClashMatrix_SameSourcePathAndMeshId_UsesDistinctGlobalIds()
+    {
+        static NwcDocument Model(double x) => NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" },
+            meshes:
+            [
+                new NwcMesh
+                {
+                    Id = 1,
+                    Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+                    Indices = [0, 1, 2],
+                },
+            ]);
+
+        var matrix = new NwcClashMatrix();
+        matrix.AddDiscipline("All");
+        matrix.Cells.Add(new NwcClashMatrixCell("All", "All", tolerance: 0));
+        matrix.Run(NwcAssembly.Create("fed", Model(0), Model(0.5)));
+
+        var clash = Assert.Single(matrix.Cells[0].Clashes);
+        Assert.NotEqual(clash.Item1.IfcGuid, clash.Item2.IfcGuid);
+    }
 }

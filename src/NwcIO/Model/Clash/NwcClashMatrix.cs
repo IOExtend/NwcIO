@@ -163,6 +163,12 @@ public sealed class NwcClashMatrix
     public void Run(NwcAssembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
+        var keyByDocument = new Dictionary<NwcDocument, string>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < assembly.Models.Count; i++)
+        {
+            keyByDocument[assembly.Models[i]] = modelKeys[i];
+        }
 
         foreach (var cell in Cells)
         {
@@ -238,12 +244,14 @@ public sealed class NwcClashMatrix
                         var c1 = new NwcClashObject(mA.Name ?? $"Mesh_{mA.Id}", mA.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docA.FileInfo.SourcePath ?? "ModelA"),
-                            Mesh = mA
+                            Mesh = mA,
+                            IfcGuid = NwcElementGuid.ForMesh(mA, keyByDocument[docA]),
                         };
                         var c2 = new NwcClashObject(mB.Name ?? $"Mesh_{mB.Id}", mB.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docB.FileInfo.SourcePath ?? "ModelB"),
-                            Mesh = mB
+                            Mesh = mB,
+                            IfcGuid = NwcElementGuid.ForMesh(mB, keyByDocument[docB]),
                         };
 
                         var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, clashPoint, -penetration);
