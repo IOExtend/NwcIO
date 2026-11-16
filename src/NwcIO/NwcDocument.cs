@@ -164,14 +164,15 @@ public sealed class NwcDocument
             {
                 var scanner = new PropertyRecordScanner(s.Data);
                 records.AddRange(scanner.Scan());
-                if (scanner.FailureReason is not null)
+                if (segments is null && scanner.FailureReason is not null)
                 {
+                    // The lenient scanner searches forward; a rejected probe is not a lost record.
                     diagnostics.Add(new NwcDiagnostic(
-                        NwcDiagnosticSeverity.Error,
-                        "property-scan-stopped",
-                        $"{scanner.FailureReason} Stopped at byte {scanner.StoppedAt}.",
+                        NwcDiagnosticSeverity.Warning,
+                        "property-scan-failed",
+                        scanner.FailureReason,
                         s.Index,
-                        scanner.StoppedAt));
+                        scanner.FailureOffset));
                 }
             }
         }
