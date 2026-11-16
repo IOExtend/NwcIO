@@ -645,14 +645,14 @@ internal static class IfcExporter
             propIds.Add(pDimZ);
         }
 
-        if (owner is not null)
+        // Element properties live on the owning element node; the leaf that holds the fragment may add its own.
+        var writtenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            // Element properties live on the owning element node, not on the leaf that holds the fragment.
-            var writtenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "SourceMeshId", "TriangleCount", "VertexCount", "Material", "Length_X", "Width_Y", "Height_Z",
-            };
-            foreach (var record in owner.Properties)
+            "SourceMeshId", "TriangleCount", "VertexCount", "Material", "Length_X", "Width_Y", "Height_Z",
+        };
+        foreach (var node in SourceNodes(owner, mesh.Node))
+        {
+            foreach (var record in node.Properties)
             {
                 if (string.IsNullOrWhiteSpace(record.Name) ||
                     string.IsNullOrWhiteSpace(record.Value) ||
@@ -672,9 +672,9 @@ internal static class IfcExporter
         w.Add("IFCRELDEFINESBYPROPERTIES",
             $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
 
-        if (owner?.Hyperlinks is { Count: > 0 } hyperlinks)
+        foreach (var node in SourceNodes(owner, mesh.Node))
         {
-            foreach (var link in hyperlinks)
+            foreach (var link in node.Hyperlinks)
             {
                 string docRefArgs = isIfc4
                     ? $"{StepWriter.Str(link.Url)},{StepWriter.Str(link.Name)},{StepWriter.Str(link.Category ?? "Hyperlink")},$,$"
@@ -816,13 +816,27 @@ internal static class IfcExporter
         };
     }
 
+    /// <summary>The owning element node first, then the leaf that holds the fragment when it is another node.</summary>
+    private static IEnumerable<NwcNode> SourceNodes(NwcNode? owner, NwcNode? leaf)
+    {
+        if (owner is not null)
+        {
+            yield return owner;
+        }
+
+        if (leaf is not null && !ReferenceEquals(leaf, owner))
+        {
+            yield return leaf;
+        }
+    }
+
     /// <summary>Writes a scene-tree property as the nominal value of an <c>IfcPropertySingleValue</c>.</summary>
     private static string PropertyNominalValue(NwcPropertyRecord record, double scale)
     {
         string value = record.Value!;
         switch (record.ValueType)
         {
-            case 2 or 3 when int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer):
+            case 2 when int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer):
                 return $"IFCINTEGER({integer.ToString(CultureInfo.InvariantCulture)})";
             case 6 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var length):
                 return $"IFCLENGTHMEASURE({StepWriter.Real(length * scale)})";
@@ -832,7 +846,9 @@ internal static class IfcExporter
                 return $"IFCAREAMEASURE({StepWriter.Real(area * scale * scale)})";
             case 11 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var volume):
                 return $"IFCVOLUMEMEASURE({StepWriter.Real(volume * scale * scale * scale)})";
-            case 1 or 5 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var real):
+            case 3:
+                return $"IFCBOOLEAN({(value == "0" ? ".F." : ".T.")})";
+            case 1 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var real):
                 return $"IFCREAL({StepWriter.Real(real)})";
             default:
                 return $"IFCTEXT({StepWriter.Str(value)})";

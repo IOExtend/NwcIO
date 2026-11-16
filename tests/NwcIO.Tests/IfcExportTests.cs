@@ -68,8 +68,10 @@ public class IfcExportTests
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
     }
 
-    [Fact]
-    public void SaveIfc_MeshInsideCompositeElement_UsesOwnerIdentityAndProperties()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveIfc_MeshInsideCompositeElement_UsesOwnerIdentityAndProperties(bool assembly)
     {
         var element = new NwcNode
         {
@@ -100,8 +102,18 @@ public class IfcExportTests
 
         var firstLeaf = new NwcNode { Id = 2, Name = "Solid", Class = "LcRevitSolid", Element = element };
         var secondLeaf = new NwcNode { Id = 3, Name = "Panel", Class = "LcRevitSolid", Element = element };
-        string ifc = NwcDocument.Create(meshes: [Mesh(10, firstLeaf, 0), Mesh(11, secondLeaf, 2)])
-            .ToIfcString(new NwcIfcExportOptions());
+        var doc = NwcDocument.Create(meshes: [Mesh(10, firstLeaf, 0), Mesh(11, secondLeaf, 2)]);
+        string ifc;
+        if (assembly)
+        {
+            using var sw = new StringWriter();
+            NwcAssembly.Create("Composite", doc).SaveIfc(sw);
+            ifc = sw.ToString();
+        }
+        else
+        {
+            ifc = doc.ToIfcString(new NwcIfcExportOptions());
+        }
 
         Assert.Contains("IFCWALL(", ifc);
         Assert.Contains("IFCTEXT('2h')", ifc);
@@ -142,6 +154,71 @@ public class IfcExportTests
         Assert.Contains("IFCLENGTHMEASURE(0.5)", ifc);
         Assert.Contains("IFCAREAMEASURE(2.)", ifc);
         Assert.Contains("IFCVOLUMEMEASURE(3.)", ifc);
+    }
+
+    [Fact]
+    public void SaveIfc_LeafOfAnotherElement_KeepsItsOwnPropertiesAndHyperlinks()
+    {
+        var element = new NwcNode { Id = 1, Name = "Wall A", Class = "LcRevitComposite", IfcGlobalId = "2O2Fr$t4X7Zf8NOew3FL9r" };
+        element.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "Mark", Class = "Element", ValueType = 4, Value = "owner-mark" });
+        var leaf = new NwcNode { Id = 2, Name = "Solid", Class = "LcRevitSolid", Element = element };
+        leaf.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Name = "LeafOnly", Class = "Leaf", ValueType = 4, Value = "leaf-value" });
+        leaf.Properties.Add(new NwcPropertyRecord { FirstInt = 3, Tag = 52, Name = "Mark", Class = "Leaf", ValueType = 4, Value = "leaf-mark" });
+        leaf.Hyperlinks.Add(new NwcHyperlink { Url = "https://example.com/leaf", Name = "LeafLink" });
+        var mesh = new NwcMesh
+        {
+            Id = 10,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = leaf,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions());
+
+        Assert.Contains("IFCTEXT('owner-mark')", ifc);
+        Assert.DoesNotContain("leaf-mark", ifc);
+        Assert.Contains("IFCTEXT('leaf-value')", ifc);
+        Assert.Contains("https://example.com/leaf", ifc);
+    }
+
+    [Fact]
+    public void SaveIfc_PropertyValueTypes_DateTimeStaysTextAndBooleanIsBoolean()
+    {
+        var node = new NwcNode { Id = 1, Name = "Wall A", Class = "LcRevitData_Element", IfcGlobalId = "2O2Fr$t4X7Zf8NOew3FL9r" };
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "Created", Class = "Element", ValueType = 5, Value = "1700000000" });
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Name = "Load Bearing", Class = "Element", ValueType = 3, Value = "1" });
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 3, Tag = 52, Name = "Is Temp", Class = "Element", ValueType = 3, Value = "0" });
+        var mesh = new NwcMesh
+        {
+            Id = 10,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = node,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions());
+
+        Assert.Contains("'Created',$,IFCTEXT('1700000000')", ifc);
+        Assert.Contains("'Load Bearing',$,IFCBOOLEAN(.T.)", ifc);
+        Assert.Contains("'Is Temp',$,IFCBOOLEAN(.F.)", ifc);
+    }
+
+    [Fact]
+    public void SaveIfc_PropertyValues_AreNotScaledWhenGeometryIsMillimetres()
+    {
+        var node = new NwcNode { Id = 1, Name = "Wall A", Class = "LcRevitData_Element", IfcGlobalId = "2O2Fr$t4X7Zf8NOew3FL9r" };
+        node.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "Length", Class = "Element", ValueType = 6, Value = "500" });
+        var mesh = new NwcMesh
+        {
+            Id = 10,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = node,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions());
+
+        Assert.Contains("'Length',$,IFCLENGTHMEASURE(500.)", ifc);
     }
 
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
