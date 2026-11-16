@@ -45,7 +45,7 @@ public static class NwcTimeLinerPrimaveraXerSerializer
 
         // 2. PROJECT Table
         var overallStart = schedule.OverallStart ?? DateTimeOffset.UtcNow;
-        var overallEnd = schedule.OverallEnd ?? overallStart.AddDays(30);
+        var overallEnd = schedule.OverallEnd ?? NwcTimeLinerDates.AddDays(overallStart, 30);
 
         writer.WriteLine("%T\tPROJECT");
         writer.WriteLine("%F\tproj_id\tproj_short_name\tplan_start_date\tplan_end_date\tstatus_code");
@@ -167,7 +167,7 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                         string.IsNullOrWhiteSpace(endStr) ||
                         !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out end))
                     {
-                        end = start.AddDays(1);
+                        end = NwcTimeLinerDates.AddDays(start, 1);
                         warnings.Add($"Task '{id}': target end '{endStr}' is missing or invalid; using {end:o}.");
                     }
 

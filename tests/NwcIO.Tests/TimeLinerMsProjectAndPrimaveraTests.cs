@@ -418,4 +418,11 @@ public class TimeLinerMsProjectAndPrimaveraTests
         Assert.Contains(read.Warnings, w => w.Contains("target start", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(read.Warnings, w => w.Contains("target end", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void DateFallbackArithmetic_AtExtremes_Clamps()
+    {
+        Assert.Equal(DateTimeOffset.MaxValue, NwcTimeLinerDates.AddDays(DateTimeOffset.MaxValue, 1));
+        Assert.Equal(DateTimeOffset.MinValue, NwcTimeLinerDates.AddDays(DateTimeOffset.MinValue, -1));
+    }
 }

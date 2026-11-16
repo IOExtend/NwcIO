@@ -105,7 +105,7 @@ public static class NwcTimeLinerCsvSerializer
             }
             if (!DateTimeOffset.TryParse(plannedEndStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd))
             {
-                pEnd = pStart.AddDays(7);
+                pEnd = NwcTimeLinerDates.AddDays(pStart, 7);
                 schedule.Warnings.Add(
                     $"Row {rowNumber} ('{id}'): planned end '{plannedEndStr}' is missing or invalid; using {pEnd:o}.");
             }

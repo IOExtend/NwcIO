@@ -193,7 +193,7 @@ public static class NwcTimeLinerMsProjectXmlSerializer
             if (string.IsNullOrEmpty(finishStr) ||
                 !DateTimeOffset.TryParse(finishStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out finish))
             {
-                finish = start.AddDays(1);
+                finish = NwcTimeLinerDates.AddDays(start, 1);
                 schedule.Warnings.Add(
                     $"Task '{id}': finish '{finishStr}' is missing or invalid; using {finish:o}.");
             }
