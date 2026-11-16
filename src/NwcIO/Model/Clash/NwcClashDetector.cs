@@ -22,7 +22,7 @@ public static class NwcClashDetector
         var meshesA = ResolveSelection(document, test.SelectionA);
         var meshesB = ResolveSelection(document, test.SelectionB);
 
-        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model");
+        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model", document);
         return test;
     }
 
@@ -36,8 +36,9 @@ public static class NwcClashDetector
         ArgumentNullException.ThrowIfNull(test);
         ThrowIfSetIsMissing(assembly.Models, test);
 
-        var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
-        var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
+        var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
+        var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
 
         for (int m = 0; m < assembly.Models.Count; m++)
         {
@@ -47,13 +48,13 @@ public static class NwcClashDetector
             var selA = ResolveSelection(doc, test.SelectionA);
             for (int i = 0; i < selA.Count; i++)
             {
-                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name));
+                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name, modelKeys[m]));
             }
 
             var selB = ResolveSelection(doc, test.SelectionB);
             for (int i = 0; i < selB.Count; i++)
             {
-                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name));
+                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name, modelKeys[m]));
             }
         }
 
@@ -65,7 +66,8 @@ public static class NwcClashDetector
         IReadOnlyList<NwcMesh> meshesA,
         IReadOnlyList<NwcMesh> meshesB,
         NwcClashTest test,
-        string modelName)
+        string modelName,
+        NwcDocument document)
     {
         bool sameSelection = ReferenceEquals(meshesA, meshesB) ||
             meshesA.SequenceEqual(meshesB, ReferenceEqualityComparer.Instance);
@@ -137,7 +139,7 @@ public static class NwcClashDetector
                         Layer = meshA.Node?.Parent?.Name ?? "Default",
                         Node = meshA.Node,
                         Mesh = meshA,
-                        IfcGuid = IfcGuid.FromElementId(meshA.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(meshA, document),
                     };
 
                     var obj2 = new NwcClashObject(item2Name, meshB.Id, meshB.Node?.Name ?? item2Name)
@@ -146,7 +148,7 @@ public static class NwcClashDetector
                         Layer = meshB.Node?.Parent?.Name ?? "Default",
                         Node = meshB.Node,
                         Mesh = meshB,
-                        IfcGuid = IfcGuid.FromElementId(meshB.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(meshB, document),
                     };
 
                     var unionBox = boxA.Union(boxB);
@@ -165,8 +167,8 @@ public static class NwcClashDetector
     }
 
     private static void RunCoreMultiModel(
-        List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsA,
-        List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsB,
+        List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsA,
+        List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsB,
         NwcClashTest test)
     {
         bool sameSelection = itemsA.Select(item => item.Mesh)
@@ -236,7 +238,7 @@ public static class NwcClashDetector
                         Layer = itemA.Layer,
                         Node = itemA.Mesh.Node,
                         Mesh = itemA.Mesh,
-                        IfcGuid = IfcGuid.FromElementId(itemA.Mesh.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(itemA.Mesh, itemA.ModelKey),
                     };
 
                     var obj2 = new NwcClashObject(name2, itemB.Mesh.Id, $"{itemB.ModelName}/{name2}")
@@ -245,7 +247,7 @@ public static class NwcClashDetector
                         Layer = itemB.Layer,
                         Node = itemB.Mesh.Node,
                         Mesh = itemB.Mesh,
-                        IfcGuid = IfcGuid.FromElementId(itemB.Mesh.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(itemB.Mesh, itemB.ModelKey),
                     };
 
                     var unionBox = boxA.Union(boxB);
