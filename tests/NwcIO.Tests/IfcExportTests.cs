@@ -235,6 +235,93 @@ public class IfcExportTests
     }
 
     [Theory]
+    [InlineData("Pipe run", "Door mat", "IFCFLOWSEGMENT", "IFCDOOR")]
+    [InlineData("Drywall partition", null, null, "IFCWALL")]
+    [InlineData("Outdoor unit", null, null, "IFCDOOR")]
+    [InlineData("Стена монолитная", "Бетон", "IFCWALL", null)]
+    public void SaveIfc_ClassifiesOnWordTokensWithoutMaterial(
+        string meshName, string? materialName, string? expectedEntity, string? unexpectedEntity)
+    {
+        var material = materialName is null ? null : new NwcMaterial
+        {
+            Id = 1,
+            Name = materialName,
+            Color = RgbaColor.White,
+        };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = meshName,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = material,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh], materials: material is null ? [] : [material]).ToIfcString();
+
+        if (expectedEntity is not null)
+        {
+            Assert.Contains(expectedEntity + "(", ifc);
+        }
+
+        if (unexpectedEntity is not null)
+        {
+            Assert.DoesNotContain(unexpectedEntity + "(", ifc);
+        }
+    }
+
+    [Fact]
+    public void SaveIfc_NodeCategory_DrivesClassAndTypeNameOverMaterial()
+    {
+        var node = new NwcNode { Id = 7, Name = "Element 1", Class = "LcRevitData_Element" };
+        node.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 1, Tag = 52, Name = "Category", Class = "Item", ValueType = 4, Value = "Walls",
+        });
+        node.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 2, Tag = 52, Name = "Family", Class = "Item", ValueType = 4, Value = "Basic Wall",
+        });
+        var material = new NwcMaterial { Id = 1, Name = "Concrete C30", Color = RgbaColor.White };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Element 1",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = material,
+            Node = node,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh], materials: [material]).ToIfcString();
+
+        Assert.Contains("IFCWALL(", ifc);
+        var typeLine = System.Text.RegularExpressions.Regex.Match(ifc, @"IFCWALLTYPE\([^\r\n]*").Value;
+        Assert.Contains("'Basic Wall'", typeLine);
+        Assert.DoesNotContain("Concrete C30", typeLine);
+    }
+
+    [Fact]
+    public void SaveIfc_TypeNameWithoutNode_ComesFromNameNotMaterial()
+    {
+        var material = new NwcMaterial { Id = 1, Name = "Concrete C30", Color = RgbaColor.White };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Wall A",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = material,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh], materials: [material]).ToIfcString();
+
+        var typeLine = System.Text.RegularExpressions.Regex.Match(ifc, @"IFCWALLTYPE\([^\r\n]*").Value;
+        Assert.Contains("'Wall A'", typeLine);
+        Assert.DoesNotContain("Concrete C30", typeLine);
+    }
+
+    [Theory]
     [InlineData("Стена монолитная 200мм", "IFCWALL")]
     [InlineData("Плита перекрытия", "IFCSLAB")]
     [InlineData("Колонна К-1", "IFCCOLUMN")]
