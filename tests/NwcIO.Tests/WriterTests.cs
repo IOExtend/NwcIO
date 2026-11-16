@@ -211,18 +211,48 @@ public class WriterTests
         Assert.Equal(10, elementNode.Transform!.Translation.X);
     }
 
-    [Fact]
-    public void Writer_DuplicateTransformIdsWithDifferentValues_Rejects()
-    {
-        var first = new NwcTransform { Id = 7, Translation = new Vector3d(1, 0, 0) };
-        var second = new NwcTransform { Id = 7, Translation = new Vector3d(2, 0, 0) };
-        var doc = NwcDocument.Create(transforms: [first, second]);
-
-        Assert.Contains("Transform id 7", Assert.Throws<ArgumentException>(() => doc.ToByteArray()).Message);
-    }
-
     private static IEnumerable<NwcNode> Preorder(NwcNode node) =>
         [node, .. node.Children.SelectMany(Preorder)];
+
+    [Fact]
+    public void Writer_MergedMeshesWithEqualTransformIds_PreserveBothPlacements()
+    {
+        var first = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 0, Translation = new(1, 0, 0) },
+        };
+        var second = new NwcMesh
+        {
+            Id = 2,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 0, Translation = new(2, 0, 0) },
+        };
+
+        var reopened = NwcDocument.Open(new MemoryStream(
+            NwcDocument.Create(meshes: [first, second]).ToByteArray()));
+
+        Assert.Equal(2, reopened.Meshes.Count);
+        Assert.Equal(new Vector3d(1, 0, 0), reopened.Meshes[0].Transform!.Translation);
+        Assert.Equal(new Vector3d(2, 0, 0), reopened.Meshes[1].Transform!.Translation);
+    }
+
+    [Fact]
+    public void Writer_DuplicateTransformIdsInDocument_AreWrittenAsDistinctRecords()
+    {
+        var first = new NwcTransform { Id = 0, Translation = new(1, 0, 0) };
+        var second = new NwcTransform { Id = 0, Translation = new(2, 0, 0) };
+
+        var reopened = NwcDocument.Open(new MemoryStream(
+            NwcDocument.Create(transforms: [first, second]).ToByteArray()));
+
+        Assert.Equal(2, reopened.Transforms.Count);
+        Assert.Equal(new Vector3d(1, 0, 0), reopened.Transforms[0].Translation);
+        Assert.Equal(new Vector3d(2, 0, 0), reopened.Transforms[1].Translation);
+    }
 
     [Theory]
     [InlineData(-1.0)]

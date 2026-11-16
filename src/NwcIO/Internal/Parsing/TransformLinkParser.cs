@@ -3,7 +3,10 @@ using NwcIO.Internal.Container;
 
 namespace NwcIO.Internal.Parsing;
 
-/// <summary>Reads the writer's per-mesh transform link stream ("NWTL"): one transform id per mesh, -1 for none.</summary>
+/// <summary>
+/// Reads the writer's per-mesh transform link stream ("NWTL"): one index into the transform stream per
+/// mesh, -1 for none. Indices stay unique when merged documents repeat <see cref="NwcTransform.Id"/> values.
+/// </summary>
 internal static class TransformLinkParser
 {
     public static IReadOnlyList<int>? TryParse(LcRawStream stream)

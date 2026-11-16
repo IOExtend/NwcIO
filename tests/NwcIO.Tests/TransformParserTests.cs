@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using NwcIO.Internal.Container;
 using NwcIO.Internal.Parsing;
 using NwcIO.Model;
 using Xunit;
@@ -7,6 +8,44 @@ namespace NwcIO.Tests;
 
 public class TransformParserTests
 {
+    [Fact]
+    public void TransformLinkParser_ReadsTransformIndices()
+    {
+        var data = new byte[8 + 4 * 3];
+        BinaryPrimitives.WriteInt32LittleEndian(data, TransformStreamFormat.LinksMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 3);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), 2);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(12), -1);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(16), 0);
+
+        var links = TransformLinkParser.TryParse(RawStream(data));
+
+        Assert.Equal([2, -1, 0], links);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(2)]
+    public void TransformLinkParser_TruncatedOrNegativeCount_ReturnsNull(int count)
+    {
+        var data = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(data, TransformStreamFormat.LinksMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), count);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), 0);
+
+        Assert.Null(TransformLinkParser.TryParse(RawStream(data)));
+    }
+
+    private static LcRawStream RawStream(byte[] data) => new()
+    {
+        Index = 0,
+        FileOffset = 0,
+        CompressedLength = data.Length,
+        GapBefore = 0,
+        Data = data,
+        SectionIndex = 0,
+    };
+
     [Fact]
     public void Parse_SyntheticTransformStream_DecodesPoseAndBBox()
     {

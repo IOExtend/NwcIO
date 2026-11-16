@@ -203,14 +203,14 @@ public sealed class NwcDocument
 
             if (options.ReadMeshes)
             {
-                IReadOnlyList<int>? transformLinks = null;
+                IReadOnlyList<int>? transformIndices = null;
                 var linksStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.TransformLinks);
                 if (linksStream is not null)
                 {
-                    transformLinks = TransformLinkParser.TryParse(linksStream);
+                    transformIndices = TransformLinkParser.TryParse(linksStream);
                 }
 
-                meshes.AddRange(MeshParser.Parse(container, transforms, transformLinks));
+                meshes.AddRange(MeshParser.Parse(container, transforms, transformIndices));
             }
 
             if (options.BuildSceneTree)

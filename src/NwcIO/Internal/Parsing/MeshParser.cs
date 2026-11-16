@@ -19,19 +19,9 @@ public static class MeshParser
     public static IReadOnlyList<NwcMesh> Parse(
         NwcContainer container,
         IReadOnlyList<NwcTransform>? transforms = null,
-        IReadOnlyList<int>? transformIds = null)
+        IReadOnlyList<int>? transformIndices = null)
     {
         ArgumentNullException.ThrowIfNull(container);
-
-        Dictionary<int, NwcTransform>? transformsById = null;
-        if (transforms is not null)
-        {
-            transformsById = new Dictionary<int, NwcTransform>(transforms.Count);
-            foreach (var transform in transforms)
-            {
-                transformsById.TryAdd(transform.Id, transform);
-            }
-        }
 
         var meshes = new List<NwcMesh>();
 
@@ -39,13 +29,13 @@ public static class MeshParser
         var tocStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (tocStream is not null)
         {
-            ParseViaToc(container, tocStream, meshes, transforms, transformsById, transformIds);
+            ParseViaToc(container, tocStream, meshes, transforms, transformIndices);
         }
 
         // 2. Secondary fallback: if TOC yielded no meshes, scan individual streams for vertex buffers.
         if (meshes.Count == 0)
         {
-            ParseViaHeuristicScan(container, meshes, transforms, transformsById, transformIds);
+            ParseViaHeuristicScan(container, meshes, transforms, transformIndices);
         }
 
         return meshes;
@@ -55,17 +45,16 @@ public static class MeshParser
         NwcMesh mesh,
         int index,
         IReadOnlyList<NwcTransform>? transforms,
-        IReadOnlyDictionary<int, NwcTransform>? transformsById,
-        IReadOnlyList<int>? transformIds)
+        IReadOnlyList<int>? transformIndices)
     {
-        if (transformIds is not null)
+        if (transformIndices is not null)
         {
-            if (index < transformIds.Count)
+            if (index < transformIndices.Count)
             {
-                int id = transformIds[index];
-                if (id >= 0 && transformsById is not null && transformsById.TryGetValue(id, out var linked))
+                int transformIndex = transformIndices[index];
+                if (transformIndex >= 0 && transforms is not null && transformIndex < transforms.Count)
                 {
-                    mesh.Transform = linked;
+                    mesh.Transform = transforms[transformIndex];
                 }
             }
 
@@ -83,8 +72,7 @@ public static class MeshParser
         LcRawStream tocStream,
         List<NwcMesh> meshes,
         IReadOnlyList<NwcTransform>? transforms,
-        IReadOnlyDictionary<int, NwcTransform>? transformsById,
-        IReadOnlyList<int>? transformIds)
+        IReadOnlyList<int>? transformIndices)
     {
         var tocData = tocStream.Data;
         if (tocData.Length < 16)
@@ -185,7 +173,7 @@ public static class MeshParser
                         var mesh = TryBuildMesh(combined, curPos + 24, vCount, meshes.Count);
                         if (mesh is not null)
                         {
-                            AssignTransform(mesh, meshes.Count, transforms, transformsById, transformIds);
+                            AssignTransform(mesh, meshes.Count, transforms, transformIndices);
 
                             meshes.Add(mesh);
                         }
@@ -201,8 +189,7 @@ public static class MeshParser
         NwcContainer container,
         List<NwcMesh> meshes,
         IReadOnlyList<NwcTransform>? transforms,
-        IReadOnlyDictionary<int, NwcTransform>? transformsById,
-        IReadOnlyList<int>? transformIds)
+        IReadOnlyList<int>? transformIndices)
     {
         foreach (var stream in container.Streams)
         {
@@ -235,7 +222,7 @@ public static class MeshParser
                 var mesh = TryBuildMesh(data, i + 16, vCount, meshes.Count);
                 if (mesh is not null)
                 {
-                    AssignTransform(mesh, meshes.Count, transforms, transformsById, transformIds);
+                    AssignTransform(mesh, meshes.Count, transforms, transformIndices);
 
                     meshes.Add(mesh);
                     i += 12 + vBytes;

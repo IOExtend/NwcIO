@@ -30,8 +30,15 @@ internal static class NwcStreamSerializer
             streams.Add(sceneTree);
         }
 
-        // 3. Transforms stream and the writer-side mesh-to-transform links
+        // 3. Transforms stream and the writer-side mesh-to-transform links. Links use the index in
+        // this list, not NwcTransform.Id: ids repeat across merged documents and are not unique.
         var transforms = CollectTransforms(doc);
+        var transformIndices = new Dictionary<NwcTransform, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < transforms.Count; i++)
+        {
+            transformIndices[transforms[i]] = i;
+        }
+
         if (transforms.Count > 0)
         {
             streams.Add(BuildTransformsStream(transforms));
@@ -39,7 +46,7 @@ internal static class NwcStreamSerializer
 
         if (doc.Meshes.Count > 0)
         {
-            streams.Add(BuildTransformLinksStream(doc.Meshes));
+            streams.Add(BuildTransformLinksStream(doc.Meshes, transformIndices));
         }
 
         // 4. Guids stream
@@ -463,7 +470,9 @@ internal static class NwcStreamSerializer
         return ms.ToArray();
     }
 
-    public static byte[] BuildTransformLinksStream(IReadOnlyList<NwcMesh> meshes)
+    public static byte[] BuildTransformLinksStream(
+        IReadOnlyList<NwcMesh> meshes,
+        IReadOnlyDictionary<NwcTransform, int> transformIndices)
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
@@ -471,7 +480,9 @@ internal static class NwcStreamSerializer
         w.Write(meshes.Count);
         foreach (var mesh in meshes)
         {
-            w.Write(mesh.Transform?.Id ?? -1);
+            w.Write(mesh.Transform is { } transform && transformIndices.TryGetValue(transform, out int index)
+                ? index
+                : -1);
         }
 
         return ms.ToArray();
@@ -479,29 +490,15 @@ internal static class NwcStreamSerializer
 
     private static List<NwcTransform> CollectTransforms(NwcDocument doc)
     {
-        var byId = new Dictionary<int, NwcTransform>();
         var result = new List<NwcTransform>();
         var seen = new HashSet<NwcTransform>(ReferenceEqualityComparer.Instance);
 
         void Add(NwcTransform transform)
         {
-            if (!seen.Add(transform) && byId.ContainsKey(transform.Id))
+            if (seen.Add(transform))
             {
-                return;
+                result.Add(transform);
             }
-
-            if (byId.TryGetValue(transform.Id, out var existing))
-            {
-                if (!SamePlacement(existing, transform))
-                {
-                    throw new ArgumentException($"Transform id {transform.Id} appears twice with different values.", nameof(doc));
-                }
-
-                return;
-            }
-
-            byId[transform.Id] = transform;
-            result.Add(transform);
         }
 
         foreach (var transform in doc.Transforms)
@@ -519,13 +516,6 @@ internal static class NwcStreamSerializer
 
         return result;
     }
-
-    private static bool SamePlacement(NwcTransform a, NwcTransform b) =>
-        a.Translation == b.Translation &&
-        a.Rotation == b.Rotation &&
-        a.Scale == b.Scale &&
-        (a.Matrix ?? []).SequenceEqual(b.Matrix ?? []) &&
-        Nullable.Equals(a.BoundingBox, b.BoundingBox);
 
     public static byte[] BuildGuidsStream(IReadOnlyList<Guid> guids)
     {

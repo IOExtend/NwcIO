@@ -55,17 +55,19 @@ public static class StreamClassifier
             return NwcStreamKind.SceneTree;
         }
 
+        // Writer-side per-mesh transform links: [magic "NWTL"][count][indices]. A link stream with
+        // exactly 100 meshes whose first index is 13 also matches the legacy [n][100][13] layout,
+        // so the explicit magic must win.
+        if (data.Length >= 8 && ReadInt32(data, 0) == TransformStreamFormat.LinksMagic)
+        {
+            return NwcStreamKind.TransformLinks;
+        }
+
         // Transforms: writer marker "NWTR", or the Navisworks layout [n][100][13].
         if ((data.Length >= 4 && ReadInt32(data, 0) == TransformStreamFormat.TransformsMagic) ||
             (data.Length >= 12 && ReadInt32(data, 4) == 100 && ReadInt32(data, 8) == 13))
         {
             return NwcStreamKind.Transforms;
-        }
-
-        // Writer-side per-mesh transform links: [magic "NWTL"][count][ids].
-        if (data.Length >= 8 && ReadInt32(data, 0) == TransformStreamFormat.LinksMagic)
-        {
-            return NwcStreamKind.TransformLinks;
         }
 
         // Mesh record IDs are arbitrary. Recognize a vertex buffer before the GUID heuristic.
