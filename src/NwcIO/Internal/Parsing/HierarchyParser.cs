@@ -44,7 +44,7 @@ internal static class HierarchyParser
     /// after the hierarchy tail. It returns null, or is null, when the file has no such segment; an empty list is a segment without streams.
     /// </param>
     /// <returns>The nodes in preorder; [0] is the synthetic root (Id 0, Name <paramref name="rootName"/>, Class "Model", Tag 0).</returns>
-    /// <exception cref="NotSupportedException">One element index sits on nodes under different parents (a linked Revit model).</exception>
+    /// <exception cref="NotSupportedException">A partition (class-32) node or an unknown class is present.</exception>
     public static IReadOnlyList<NwcNode> Read(
         byte[] data,
         string rootName,
@@ -175,7 +175,26 @@ internal static class HierarchyParser
             }
             else
             {
-                throw new NotSupportedException("Revit links are not supported yet: one element index sits on nodes under different parents in LcOpNwdLogicalHierarchy.");
+                // A second placement of the same element under another parent is a linked Revit model.
+                // Keep it in the tree; the adapter can put each placement in its own scene model.
+                occurrence.Element = first;
+                occurrence.IsLinkPlacement = true;
+                // Mark one model root for the whole placed subtree: the element itself when it is a
+                // direct child, otherwise the highest group below the linking element or the root.
+                NwcNode linkRoot = parent;
+                while (linkRoot.Parent is not null && linkRoot.Parent.Id != 0 && !linkRoot.Parent.IsElement)
+                {
+                    linkRoot = linkRoot.Parent;
+                }
+
+                if (ReferenceEquals(linkRoot, parent) && (parent.Id == 0 || parent.IsElement))
+                {
+                    occurrence.IsLinkRoot = true;
+                }
+                else
+                {
+                    linkRoot.IsLinkRoot = true;
+                }
             }
 
             parent.Children.Add(occurrence);

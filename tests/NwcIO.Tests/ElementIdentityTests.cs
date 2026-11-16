@@ -57,25 +57,46 @@ public class ElementIdentityTests
     }
 
     [Fact]
-    public void Open_OneIndexUnderDifferentParents_ThrowsRevitLinks()
+    public void Open_OneIndexUnderDifferentParents_KeepsLinkedPlacement()
     {
-        var ex = Assert.Throws<NotSupportedException>(() => Open([
+        var doc = Open([
             new("A", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1)]),
-            new("B", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1)])], [G1]));
-        Assert.StartsWith("Revit links are not supported yet", ex.Message);
+            new("B", "LcRevitLayer", Children: [new("E", "LcRevitInstance", X: 1)])], [G1]);
+
+        var first = doc.RootNode!.Children[0].Children[0];
+        var linked = doc.RootNode.Children[1].Children[0];
+        Assert.True(first.IsElement);
+        Assert.False(linked.IsElement);
+        Assert.True(linked.IsLinkPlacement);
+        Assert.Same(first, linked.Element);
+        Assert.Null(linked.ElementGuid);
     }
 
     [Fact]
-    public void Open_ElementInASharedSubtree_ThrowsRevitLinks()
+    public void Open_ElementInASharedSubtree_KeepsLinkedPlacement()
     {
         var shared = new TreeNode("S", "LcRevitCollection", Children: [new("E", "LcRevitInstance", X: 1)]);
-        Assert.Throws<NotSupportedException>(() => Open([new("A", "LcRevitLayer", Children: [shared]), new("B", "LcRevitLayer", Children: [shared])], [G1]));
+        var doc = Open([new("A", "LcRevitLayer", Children: [shared]), new("B", "LcRevitLayer", Children: [shared])], [G1]);
+
+        var first = doc.RootNode!.Children[0].Children[0].Children[0];
+        var linked = doc.RootNode.Children[1].Children[0].Children[0];
+        Assert.True(first.IsElement);
+        Assert.True(linked.IsLinkPlacement);
+        Assert.Same(first, linked.Element);
     }
 
     [Fact]   // design 6.2.1 made the outer node the element here; never seen in the corpus, so the plan rejects it (Decision 3)
-    public void Open_OneIndexOnANodeAndItsDescendant_ThrowsRevitLinks() =>
-        Assert.Throws<NotSupportedException>(() => Open([new("L", "LcRevitLayer", Children: [
-            new("E", "LcRevitComposite", X: 1, Children: [new("P", "LcRevitInstance", X: 1)])])], [G1]));
+    public void Open_OneIndexOnANodeAndItsDescendant_KeepsLinkedPlacement()
+    {
+        var doc = Open([new("L", "LcRevitLayer", Children: [
+            new("E", "LcRevitComposite", X: 1, Children: [new("P", "LcRevitInstance", X: 1)])])], [G1]);
+
+        var element = doc.RootNode!.Children[0].Children[0];
+        var linked = element.Children[0];
+        Assert.True(element.IsElement);
+        Assert.True(linked.IsLinkPlacement);
+        Assert.Same(element, linked.Element);
+    }
 
     [Fact]   // 309 of the 334 real pairs have siblings between them; a pair takes two equal table entries, the next index is X + 2
     public void Open_SiblingPairWithASiblingBetween_StillPairs()

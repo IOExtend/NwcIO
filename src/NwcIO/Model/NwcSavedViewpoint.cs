@@ -11,6 +11,9 @@ public sealed record NwcSavedViewpoint
     /// <summary>Identifier of this saved viewpoint: generated for viewpoints made in code, null for viewpoints read from a file (none is stored).</summary>
     public Guid? Id { get; init; } = Guid.NewGuid();
 
+    /// <summary>True when the camera holds position and orientation read from a file but a field of view, projection and far distance that are assumed: the file stores no decoded values for them.</summary>
+    public bool IsCameraApproximated { get; init; }
+
     /// <summary>Display name of the saved viewpoint.</summary>
     public required string Name { get; init; }
 

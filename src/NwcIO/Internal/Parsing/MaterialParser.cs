@@ -3,46 +3,14 @@ using NwcIO.Model;
 namespace NwcIO.Internal.Parsing;
 
 /// <summary>
-/// Extracts material definitions, RGBA colors, and surface parameters from property streams
-/// and associates them with scene nodes and 3D meshes.
+/// Extracts material definitions and RGBA colors from property records for files read without
+/// the DbCache directory. A colour comes only from a <c>revit_Color</c> record; a material without
+/// one gets a neutral colour and <see cref="NwcMaterial.IsInferred"/>. Meshes without a material
+/// get one neutral inferred fallback.
 /// </summary>
-public static class MaterialParser
+internal static class MaterialParser
 {
-    private static readonly NwcMaterial DefaultConcrete = new()
-    {
-        Id = -1,
-        Name = "Default Concrete",
-        Color = RgbaColor.Concrete,
-        Metallic = 0.05f,
-        Roughness = 0.85f,
-    };
-
-    private static readonly NwcMaterial DefaultRebar = new()
-    {
-        Id = -2,
-        Name = "Default Rebar",
-        Color = RgbaColor.Rebar,
-        Metallic = 0.60f,
-        Roughness = 0.40f,
-    };
-
-    private static readonly NwcMaterial DefaultInsulation = new()
-    {
-        Id = -3,
-        Name = "Default Insulation",
-        Color = RgbaColor.Insulation,
-        Metallic = 0.0f,
-        Roughness = 0.95f,
-    };
-
-    private static readonly NwcMaterial DefaultGeneric = new()
-    {
-        Id = 0,
-        Name = "Default Material",
-        Color = new RgbaColor(0.70f, 0.72f, 0.75f, 1.0f),
-        Metallic = 0.10f,
-        Roughness = 0.70f,
-    };
+    private static readonly RgbaColor NeutralColor = new(0.70f, 0.72f, 0.75f, 1.0f);
 
     /// <summary>
     /// Parses materials from property records and assigns them to meshes and scene nodes.
@@ -87,7 +55,8 @@ public static class MaterialParser
                         {
                             Id = id ?? (materials.Count + 1),
                             Name = name,
-                            Color = InferColorByName(name),
+                            Color = NeutralColor,
+                            IsInferred = true,
                         };
                         materials[name] = mat;
                         materialsById[mat.Id] = mat;
@@ -100,6 +69,7 @@ public static class MaterialParser
                 if (materials.TryGetValue(currentMatName, out var mat) && RgbaColor.TryParse(p.Value, out var col))
                 {
                     mat.Color = col;
+                    mat.IsInferred = false;
                 }
             }
             // 3. Property referencing a material: "Материал" = Material "Name", #12345
@@ -122,7 +92,8 @@ public static class MaterialParser
                         {
                             Id = id ?? (materials.Count + 1),
                             Name = name,
-                            Color = InferColorByName(name),
+                            Color = NeutralColor,
+                            IsInferred = true,
                         };
                         materials[name] = mat;
                         materialsById[mat.Id] = mat;
@@ -131,23 +102,12 @@ public static class MaterialParser
             }
         }
 
-        // Add standard fallback presets if not already present
-        if (!materials.ContainsKey("Concrete") && !materials.ContainsKey("Бетон"))
-        {
-            materials["Concrete"] = DefaultConcrete;
-        }
-
-        if (!materials.ContainsKey("Rebar") && !materials.ContainsKey("Арматура"))
-        {
-            materials["Rebar"] = DefaultRebar;
-        }
-
         var resultList = materials.Values.ToList();
 
         // Assign materials to meshes
         if (meshes is not null && meshes.Count > 0)
         {
-            AssignMaterialsToMeshes(meshes, resultList);
+            AssignDefaultMaterial(meshes, resultList);
         }
 
         // Assign materials to scene tree nodes
@@ -159,34 +119,34 @@ public static class MaterialParser
         return resultList;
     }
 
-    private static void AssignMaterialsToMeshes(IReadOnlyList<NwcMesh> meshes, List<NwcMaterial> materials)
+    private static void AssignDefaultMaterial(IReadOnlyList<NwcMesh> meshes, List<NwcMaterial> materials)
     {
-        var rebarMat = materials.FirstOrDefault(m => m.Name.Contains("Арматур", StringComparison.OrdinalIgnoreCase) ||
-                                                    m.Name.Contains("Rebar", StringComparison.OrdinalIgnoreCase)) ?? DefaultRebar;
-        var concreteMat = materials.FirstOrDefault(m => m.Name.Contains("Бетон", StringComparison.OrdinalIgnoreCase) ||
-                                                       m.Name.Contains("Concrete", StringComparison.OrdinalIgnoreCase)) ?? DefaultConcrete;
-        var defaultMat = materials.Count > 0 ? materials[0] : DefaultGeneric;
-
-        for (int i = 0; i < meshes.Count; i++)
+        // The parser has no per-geometry appearance data, so every mesh without a
+        // material shares one neutral fallback marked inferred. It is listed with the
+        // document materials so a mesh never points at a material missing from the list.
+        NwcMaterial? fallback = null;
+        foreach (var mesh in meshes)
         {
-            var mesh = meshes[i];
-            if (mesh.Material is null)
+            if (mesh.Material is not null)
             {
-                // Infer from mesh name or vertex count (rebar profiles are linear solid strips with high length/width ratio)
-                if (mesh.Name.Contains("Rebar", StringComparison.OrdinalIgnoreCase) ||
-                    mesh.Name.Contains("Арматур", StringComparison.OrdinalIgnoreCase))
-                {
-                    mesh.Material = rebarMat;
-                }
-                else if (mesh.BoundingBox is { } bbox && (bbox.Size.X > 2000 || bbox.Size.Y > 2000 || bbox.Size.Z > 2000))
-                {
-                    mesh.Material = concreteMat;
-                }
-                else
-                {
-                    mesh.Material = defaultMat;
-                }
+                continue;
             }
+
+            if (fallback is null)
+            {
+                fallback = new NwcMaterial
+                {
+                    Id = materials.Count == 0 ? 0 : materials.Max(m => m.Id) + 1,
+                    Name = "Default Material",
+                    Color = NeutralColor,
+                    Metallic = 0.10f,
+                    Roughness = 0.70f,
+                    IsInferred = true,
+                };
+                materials.Add(fallback);
+            }
+
+            mesh.Material = fallback;
         }
     }
 
@@ -216,38 +176,5 @@ public static class MaterialParser
         {
             AssignMaterialsToNodesRecursive(child, materials, materialsById);
         }
-    }
-
-    private static RgbaColor InferColorByName(string name)
-    {
-        if (name.Contains("арматур", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("сталь", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("steel", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("rebar", StringComparison.OrdinalIgnoreCase))
-        {
-            return RgbaColor.Rebar;
-        }
-
-        if (name.Contains("бетон", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("concrete", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("железобетон", StringComparison.OrdinalIgnoreCase))
-        {
-            return RgbaColor.Concrete;
-        }
-
-        if (name.Contains("утеплител", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("полистирол", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("insulation", StringComparison.OrdinalIgnoreCase))
-        {
-            return RgbaColor.Insulation;
-        }
-
-        if (name.Contains("стекл", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("glass", StringComparison.OrdinalIgnoreCase))
-        {
-            return RgbaColor.Glass;
-        }
-
-        return RgbaColor.Gray;
     }
 }

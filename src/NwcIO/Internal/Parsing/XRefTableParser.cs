@@ -8,7 +8,7 @@ namespace NwcIO.Internal.Parsing;
 /// <summary>
 /// Parses the JSON XRefTable embedded in the <see cref="NwcStreamKind.XRefJson"/> stream.
 /// </summary>
-public static class XRefTableParser
+internal static class XRefTableParser
 {
     public static NwcXRefTable? Parse(LcRawStream stream)
     {

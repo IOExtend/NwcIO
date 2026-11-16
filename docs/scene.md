@@ -26,25 +26,28 @@ SceneJson.Save(result.Document, "Tower.scene.json");
 
 `NwcSceneReader.Read(NwcDocument, NwcSceneOptions)` converts a document that is already open. It needs `NwcSceneOptions.ModelKey`, because a document has no file name, and a document opened from a model file with the default `NwcReaderOptions`. It throws `ArgumentException` for a document without a scene tree. `NwcSceneOptions.LengthUnit` replaces the unit of the document (see [Limits](#limits)).
 
+`NwcSceneReader.Read(NwcAssembly, NwcSceneOptions)` converts an assembly loaded by NwcIO (a folder or a `.nwf`) into one scene with one model per component document. Model keys come from the source file name and are made unique with `#2`, `#3`; the `.nwf` document itself is skipped when component models exist. Each document keeps its own source unit. If the units differ, `NwcSceneResult.LengthUnit` is `Unknown` and `MetresPerUnit` is null.
+
 ## What the scene holds
 
-The scene has one model. Geometry and instance positions are in metres.
+The scene has one model per input document. Geometry and instance positions are in metres.
 
 | Scene part | Content |
 | --- | --- |
 | `SceneModel.Key`, `Name` | `NwcSceneOptions.ModelKey`, else the file name with its extension. |
 | `SceneModel` fields | `SourceFormat` is `nwc`; `Path` is set only when the scene is read from a path; `CreatedAt` is the source timestamp as `yyyy-MM-ddTHH:mm:ssZ`; `Application` is the loader plugin after its last `:` (for example `lcldrevit`, or `nwexportrevit` for the Revit NWC exporter); `SourceLengthUnit` is `ft` when the unit used is feet. |
 | Elements | One `SceneElement` per tree node, `Id` = the node's preorder index with the root as 0, `Name` = the node name. Kind: the root is `Model`; on Revit files a depth-1 node holding a Revit level is `Level`; every node that is a Revit element or lies inside one (its parts, and the second node of a sibling pair) is `Element`; a leaf outside elements (no children, tag other than 53) is `Element` too; every other node is `Group`. |
-| Sibling pair | A Revit export may write one element twice under one parent. The first in stored order is the element; the second maps as a part: its `ParentId` is the first, and it has no `SourceId`. The same element under different parents (a linked model) is not supported. |
+| Sibling pair | A Revit export may write one element twice under one parent. The first in stored order is the element; the second maps as a part: its `ParentId` is the first, and it has no `SourceId`. The same element under different parents is a linked placement: it becomes its own `SceneModel`, rooted at the placement or, for a shared subtree, at the highest group below the linking element or the root, with the same `SourceId` in that model. |
 | `SourceId` | The element's export GUID (`NwcNode.ElementGuid`) in format `D`, on element nodes only. This derivation does not change; a golden test pins it. |
 | `IfcGuid` | The element's IFC GlobalId (`NwcNode.IfcGlobalId`), on element nodes only. This derivation does not change; a golden test pins it. |
 | `Category`, `TypeName` | Revit files only, on `Element`-kind nodes only, by tree position: the category is the name at depth 2 on the path from the root, the type name the name at depth 4 when the element is at depth 5; otherwise empty. |
-| Levels | Revit files only. A depth-1 node whose `LcRevitId` tab holds the element id of a level (an `OST_Levels` reference tab) becomes a `SceneLevel` named like the node, and the node and all its descendants carry its `LevelId`. `Elevation` is not written. |
+| Levels | Revit files only. A depth-1 node whose `LcRevitId` tab holds the element id of a level (an `OST_Levels` reference tab) becomes a `SceneLevel` named like the node, and the node and all its descendants carry its `LevelId`. `Elevation` is written in metres from the level's `LcRevitData_Parameter` length property (`lcldrevit_parameter_-1007102`); it is null when that value is absent, not a length, not finite, or the unit is unknown. |
 | Property sets | One `ScenePropertySet` per property tab object, listed once for every element that refers to the tab (also when one element refers to it twice). A tab whose properties are all left out has no set. |
 | Keys | Set key `nwc:<tab internal name>` for the tabs `LcRevitData_Element`, `LcRevitData_Type`, `LcRevitMaterialProperties` and `LcRevitId`; property key `<set key>.<property internal name>` for the Revit element properties (category, category id, family, element id, name, type, `LcRevitId`) and for the names `lcldrevit_parameter_-<n>` and `revit_<name>`, except `revit_mat_cust_prop_*`. Other tabs and properties have no key. This derivation does not change; a golden test pins it. |
 | Geometry, instances | Shared geometry is written once per geometry record and instanced by each mesh with its transform (translation in metres). Triangles carry the stored normals, with a zero normal replaced by the area-weighted average of its triangles. Line meshes become `Lines` geometries (see [Limits](#limits)). |
 | Materials | Decoded from the file on the strict path: name, colour and alpha, one `SceneMaterial` per distinct name and colour, in order of first use. `Roughness` and `Metalness` keep IOScene's defaults. |
 | Grids | A Revit grid (category `OST_Grids`) with exactly one single-segment line mesh that is horizontal within 1e-6 m becomes a line of one grid system named `Grids`, with `Elevation` = the start Z. Other grids stay elements. |
+| Viewpoints | Saved viewpoints become `SceneViewpoint`s with camera position, target and up in metres, `FieldOfView` in radians, near/far distances in metres and perspective or orthographic projection. Views whose camera is not finite or whose document unit is unknown are left out with `viewpoints-skipped`. |
 
 ### Property text
 
@@ -73,7 +76,9 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 | `unit-unknown` | Warning | The length unit is unknown (the file does not name it and `LengthUnit` is not set, or `LengthUnit` is `Unknown`): geometry, grid lines and length, area, volume and angle values are left out. |
 | `line-colour-mixed` | Warning | Per geometry record: line segments join vertices of different colours and are drawn with the material colour. |
 | `line-colours-capped` | Warning | Per geometry record: the record has more than 64 line colours; segments of the further colours are drawn with the material colour. |
-| `viewpoints-skipped` | Warning | The document has saved viewpoints, or a saved-views entry; they are not written. |
+| `viewpoints-skipped` | Warning | Saved viewpoints could not be converted: the document unit is unknown, a camera value is not finite, or a saved-views entry could not be read. Converted views are written as `SceneViewpoint`s. |
+| `viewpoint-camera-approximated` | Info | Saved viewpoints read from a file carry an approximated projection, field of view and far distance: the file's stored values are not decoded yet (one aggregated entry with the count). |
+| `viewpoint-content-skipped` | Info | Saved viewpoints carry section planes, a section box, redlines or comments; only their camera is converted (one aggregated entry with the count). |
 | `xrefs-skipped` | Warning | The document lists external references (the models a `.nwf` file refers to): they are not loaded, so the scene holds none of their content (one entry with the count). |
 | `selection-sets-skipped` | Warning | The document has selection sets or search sets; they are not converted. |
 | `timeliner-skipped` | Warning | The document has a TimeLiner schedule; it is not converted. |
@@ -84,9 +89,9 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 
 ## Limits
 
-- `.nwd` partition trees and linked Revit models are not supported: `Read` throws `NotSupportedException`.
-- A `.nwf` file is read like a `.nwc`: the models it refers to are not loaded, so the scene holds only the content of the file itself (`xrefs-skipped`), and its `SourceFormat` is still `nwc`.
-- Level elevations are not written, and saved viewpoints are not written (`viewpoints-skipped`): Navisworks stores no stable viewpoint id.
+- `.nwd` partition trees (class 32) are not supported: `Read` throws `NotSupportedException`. Linked Revit placements are supported: each placement becomes its own `SceneModel`.
+- A `.nwf` file is read like a `.nwc` by `Read(string)`: the models it refers to are not loaded, so the scene holds only the content of the file itself (`xrefs-skipped`), and its `SourceFormat` is still `nwc`. Use `Read(NwcAssembly, ...)` with `NwcAssembly.OpenNwf` to convert the component models into one scene.
+- Level elevations are written in metres when the level carries its length parameter and the unit is known; otherwise they stay null. Saved viewpoints are written when their camera is finite and the document unit is known; otherwise they are reported with `viewpoints-skipped`. File viewpoints without the writer trailer (every Navisworks file) use an approximated projection, field of view and far distance (`viewpoint-camera-approximated`), and their section planes, section box, redlines and comments are not part of the scene (`viewpoint-content-skipped`).
 - Selection sets and search sets, the TimeLiner schedule and clash tests are not converted (`selection-sets-skipped`, `timeliner-skipped`, `clash-tests-skipped`).
 - A Revit file is one read by Navisworks from a `.rvt` (loader `LcNwcLoaderPlugin:lcldrevit`) or written by the Revit NWC exporter (loader `nwexportrevit`); the loader plugin is compared exactly, so any other loader is a non-Revit file. Files from a non-Revit loader name no unit: geometry, grid lines and dimensioned values are left out with a `unit-unknown` warning, and there are no categories or levels. Set `NwcSceneOptions.LengthUnit` to bring the geometry back in metres; the option always wins over the unit of the document.
 - A document not read through the file's DbCache directory has no geometry and no properties in the scene; both are reported (`unplaced-mesh`, `properties-outside-tabs`).
