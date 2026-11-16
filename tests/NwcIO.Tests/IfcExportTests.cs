@@ -167,16 +167,46 @@ public class IfcExportTests
             Id = 2,
             Vertices = [new(10, 0, 0), new(11, 0, 0), new(10, 1, 0)],
             Indices = [0, 1, 2],
+            // A material adds STEP entities, so no property set of `two` lands on the STEP number of `one`'s.
+            Material = new NwcMaterial { Id = 1, Name = "Steel", Color = new RgbaColor(0.5f, 0.5f, 0.5f, 1.0f) },
         };
 
         string one = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions());
-        string two = NwcDocument.Create(meshes: [mesh, other]).ToIfcString(new NwcIfcExportOptions());
+        // The extra mesh comes first, so the shared mesh's property set gets a different STEP number.
+        string two = NwcDocument.Create(meshes: [other, mesh]).ToIfcString(new NwcIfcExportOptions());
 
-        static string FirstPropertySet(string ifc) =>
-            System.Text.RegularExpressions.Regex.Match(ifc, @"IFCPROPERTYSET\('([^']+)'").Groups[1].Value;
+        static string[] PropertySetIds(string ifc) =>
+            System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCPROPERTYSET\('([^']+)'")
+                .Select(match => match.Groups[1].Value)
+                .ToArray();
 
-        Assert.NotEmpty(FirstPropertySet(one));
-        Assert.Equal(FirstPropertySet(one), FirstPropertySet(two));
+        var idsOne = PropertySetIds(one);
+        var idsTwo = PropertySetIds(two);
+        Assert.Single(idsOne);
+        Assert.Equal(2, idsTwo.Length);
+        Assert.Contains(idsOne[0], idsTwo);
+    }
+
+    [Fact]
+    public void SaveIfc_AllEntityGlobalIdsAreUnique()
+    {
+        NwcMesh Mesh(int id) => new()
+        {
+            Id = id,
+            Vertices = [new(id, 0, 0), new(id + 1, 0, 0), new(id, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = new NwcMaterial { Id = id, Name = $"Mat{id}", Color = new RgbaColor(0.5f, 0.5f, 0.5f, 1.0f) },
+        };
+
+        // Several elements, so a property set, its relationship or a product id shared between them is detected.
+        string ifc = NwcDocument.Create(meshes: [Mesh(1), Mesh(2), Mesh(3)]).ToIfcString(new NwcIfcExportOptions());
+
+        var guids = System.Text.RegularExpressions.Regex.Matches(
+                ifc, @"^#\d+=IFC[A-Z]+\('([0-9A-Za-z_$]{22})'", System.Text.RegularExpressions.RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        Assert.True(guids.Length >= 20, $"expected at least 20 rooted entities, got {guids.Length}");
+        Assert.Equal(guids.Length, guids.Distinct().Count());
     }
 
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
