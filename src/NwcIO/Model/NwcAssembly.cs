@@ -202,27 +202,116 @@ public sealed class NwcAssembly
     public static NwcAssembly LoadFromDirectory(
         string directoryPath,
         string searchPattern = "*.nwc",
+        NwcReaderOptions? options = null) =>
+        LoadFromDirectory(directoryPath, [searchPattern], recursive: false, options);
+
+    /// <summary>
+    /// Discovers and loads files matching any of <paramref name="searchPatterns"/> into a
+    /// single federated assembly, optionally recursing into subfolders. Files are opened
+    /// in a deterministic case-insensitive path order.
+    /// </summary>
+    public static NwcAssembly LoadFromDirectory(
+        string directoryPath,
+        IReadOnlyList<string> searchPatterns,
+        bool recursive = false,
         NwcReaderOptions? options = null)
     {
+        ArgumentNullException.ThrowIfNull(searchPatterns);
         if (!Directory.Exists(directoryPath))
         {
             throw new DirectoryNotFoundException($"Directory not found: {directoryPath}");
         }
+        if (searchPatterns.Count == 0)
+        {
+            throw new ArgumentException("At least one search pattern is required.", nameof(searchPatterns));
+        }
 
-        var files = Directory.GetFiles(directoryPath, searchPattern);
+        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var files = searchPatterns
+            .SelectMany(pattern => Directory.GetFiles(directoryPath, pattern, searchOption))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f, StringComparer.Ordinal)
+            .ToArray();
         if (files.Length == 0)
         {
-            throw new FileNotFoundException($"No files matching '{searchPattern}' found in {directoryPath}");
+            throw new FileNotFoundException(
+                $"No files matching '{string.Join(";", searchPatterns)}' found in {directoryPath}");
         }
 
         var docs = new List<NwcDocument>(files.Length);
-        foreach (var file in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        foreach (var file in files)
         {
             docs.Add(NwcDocument.Open(file, options));
         }
 
         string assemblyName = Path.GetFileName(directoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         return Create(assemblyName, docs);
+    }
+
+    /// <summary>
+    /// Opens a federation manifest (.nwf.xml) and loads the .nwc/.nwd models it lists.
+    /// Relative paths are resolved under the manifest folder; an absolute path is tried as written first
+    /// and then by its trailing segments under the manifest folder. Backslashes in stored paths are read as
+    /// directory separators on every platform. Only the model list is read: viewpoints, sets, appearance
+    /// rules and clash tests of the manifest are not loaded.
+    /// Missing and unsupported entries are recorded on <see cref="UnresolvedXRefs"/>
+    /// and <see cref="SkippedXRefs"/>.
+    /// </summary>
+    /// <exception cref="FileNotFoundException">The manifest is missing, or none of its models could be resolved.</exception>
+    public static NwcAssembly OpenManifest(string manifestPath, NwcReaderOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(manifestPath);
+        if (!File.Exists(manifestPath))
+        {
+            throw new FileNotFoundException($"Manifest file not found: {manifestPath}", manifestPath);
+        }
+
+        var manifest = Clash.NwcNwfManifest.Open(manifestPath);
+        var baseDir = Path.GetDirectoryName(Path.GetFullPath(manifestPath)) ?? ".";
+        var loadedDocs = new List<NwcDocument>();
+        var loadedPaths = new HashSet<string>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal);
+        var unresolved = new List<NwcXRef>();
+        var skipped = new List<NwcXRef>();
+
+        foreach (var modelPath in manifest.ModelPaths)
+        {
+            var xref = new NwcXRef(modelPath.Replace('\\', Path.DirectorySeparatorChar), "");
+            if (!xref.TryResolve(baseDir, out string resolved))
+            {
+                unresolved.Add(xref);
+                continue;
+            }
+
+            if (!resolved.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) &&
+                !resolved.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
+            {
+                skipped.Add(xref);
+                continue;
+            }
+
+            if (loadedPaths.Add(Path.GetFullPath(resolved)))
+            {
+                loadedDocs.Add(NwcDocument.Open(resolved, options));
+            }
+        }
+
+        if (loadedDocs.Count == 0)
+        {
+            throw new FileNotFoundException(
+                $"No .nwc or .nwd models listed in manifest '{manifestPath}' could be resolved.");
+        }
+
+        string fileName = Path.GetFileNameWithoutExtension(manifestPath);
+        string assemblyName = fileName.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetFileNameWithoutExtension(fileName)
+            : fileName;
+        var assembly = Create(assemblyName, loadedDocs);
+        assembly.UnresolvedXRefs = unresolved;
+        assembly.SkippedXRefs = skipped;
+        return assembly;
     }
 
     /// <summary>
