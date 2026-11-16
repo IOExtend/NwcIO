@@ -185,10 +185,11 @@ internal static class IfcExporter
             int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                 $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-            string elemName = !string.IsNullOrEmpty(mesh.Node?.Name)
-                ? mesh.Node.Name
+            var owner = mesh.Node?.Element ?? mesh.Node;
+            string elemName = !string.IsNullOrEmpty(owner?.Name)
+                ? owner.Name
                 : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-            string elemGuid = mesh.Node?.IfcGlobalId ?? IfcGuid.FromElementId(mesh.Id, "NwcMesh");
+            string elemGuid = ElementGuidOf(mesh, owner, modelIndex: 0, assembly: false);
             string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
             int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -212,7 +213,7 @@ internal static class IfcExporter
             // Export properties if requested
             if (options.ExportProperties)
             {
-                WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
+                WriteMeshProperties(w, elemId, owner, mesh, ownerHistoryId, vertices, scale, isIfc4);
             }
         }
 
@@ -415,11 +416,11 @@ internal static class IfcExporter
                 int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-                string elemName = !string.IsNullOrEmpty(mesh.Node?.Name)
-                    ? mesh.Node.Name
+                var owner = mesh.Node?.Element ?? mesh.Node;
+                string elemName = !string.IsNullOrEmpty(owner?.Name)
+                    ? owner.Name
                     : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
-                // A federated model's own GlobalId is stable, but a repeated Revit element across models keeps the per-model fallback.
-                string elemGuid = mesh.Node?.IfcGlobalId ?? IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
+                string elemGuid = ElementGuidOf(mesh, owner, modelIdx, assembly: true);
                 string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
@@ -442,7 +443,7 @@ internal static class IfcExporter
 
                 if (options.ExportProperties)
                 {
-                    WriteMeshProperties(w, elemId, mesh, ownerHistoryId, vertices, scale, isIfc4);
+                    WriteMeshProperties(w, elemId, owner, mesh, ownerHistoryId, vertices, scale, isIfc4);
                 }
             }
 
@@ -596,6 +597,7 @@ internal static class IfcExporter
     private static void WriteMeshProperties(
         StepWriter w,
         int elementId,
+        NwcNode? owner,
         NwcMesh mesh,
         int ownerHistoryId,
         IReadOnlyList<Vector3d> vertices,
@@ -643,14 +645,14 @@ internal static class IfcExporter
             propIds.Add(pDimZ);
         }
 
-        if (mesh.Node is not null)
+        if (owner is not null)
         {
-            // Element properties travel with the scene-tree node; the mesh alone carries statistics only.
+            // Element properties live on the owning element node, not on the leaf that holds the fragment.
             var writtenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "SourceMeshId", "TriangleCount", "VertexCount", "Material", "Length_X", "Width_Y", "Height_Z",
             };
-            foreach (var record in mesh.Node.Properties)
+            foreach (var record in owner.Properties)
             {
                 if (string.IsNullOrWhiteSpace(record.Name) ||
                     string.IsNullOrWhiteSpace(record.Value) ||
@@ -660,7 +662,7 @@ internal static class IfcExporter
                 }
 
                 propIds.Add(w.Add("IFCPROPERTYSINGLEVALUE",
-                    $"{StepWriter.Str(record.Name)},$,{PropertyNominalValue(record)},$"));
+                    $"{StepWriter.Str(record.Name)},$,{PropertyNominalValue(record, scale)},$"));
             }
         }
 
@@ -670,7 +672,7 @@ internal static class IfcExporter
         w.Add("IFCRELDEFINESBYPROPERTIES",
             $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,({StepWriter.Ref(elementId)}),{StepWriter.Ref(psetId)}");
 
-        if (mesh.Node?.Hyperlinks is { Count: > 0 } hyperlinks)
+        if (owner?.Hyperlinks is { Count: > 0 } hyperlinks)
         {
             foreach (var link in hyperlinks)
             {
@@ -815,7 +817,7 @@ internal static class IfcExporter
     }
 
     /// <summary>Writes a scene-tree property as the nominal value of an <c>IfcPropertySingleValue</c>.</summary>
-    private static string PropertyNominalValue(NwcPropertyRecord record)
+    private static string PropertyNominalValue(NwcPropertyRecord record, double scale)
     {
         string value = record.Value!;
         switch (record.ValueType)
@@ -823,12 +825,37 @@ internal static class IfcExporter
             case 2 or 3 when int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer):
                 return $"IFCINTEGER({integer.ToString(CultureInfo.InvariantCulture)})";
             case 6 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var length):
-                return $"IFCLENGTHMEASURE({StepWriter.Real(length)})";
-            case 1 or 7 or 10 or 11 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var real):
+                return $"IFCLENGTHMEASURE({StepWriter.Real(length * scale)})";
+            case 7 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var angle):
+                return $"IFCPLANEANGLEMEASURE({StepWriter.Real(angle)})";
+            case 10 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var area):
+                return $"IFCAREAMEASURE({StepWriter.Real(area * scale * scale)})";
+            case 11 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var volume):
+                return $"IFCVOLUMEMEASURE({StepWriter.Real(volume * scale * scale * scale)})";
+            case 1 or 5 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var real):
                 return $"IFCREAL({StepWriter.Real(real)})";
             default:
                 return $"IFCTEXT({StepWriter.Str(value)})";
         }
+    }
+
+    /// <summary>
+    /// GlobalId of one mesh product. The authoring element id is only the base: several fragments of one
+    /// element, and copies of one element across assembly models, must still get distinct IfcRoot ids.
+    /// </summary>
+    private static string ElementGuidOf(NwcMesh mesh, NwcNode? owner, int modelIndex, bool assembly)
+    {
+        if (!string.IsNullOrEmpty(owner?.IfcGlobalId))
+        {
+            return IfcGuid.FromKey($"ifc:element:{owner.IfcGlobalId}:mesh:{mesh.Id}:model:{modelIndex}");
+        }
+
+        if (owner?.ElementGuid is { } elementGuid && elementGuid != Guid.Empty)
+        {
+            return IfcGuid.FromKey($"ifc:element:{elementGuid:D}:mesh:{mesh.Id}:model:{modelIndex}");
+        }
+
+        return IfcGuid.FromElementId(mesh.Id + modelIndex * 1_000_000, assembly ? "NwcAssemblyMesh" : "NwcMesh");
     }
 
     private static string CleanTypeName(string elemName, string? matName, string ifcType)

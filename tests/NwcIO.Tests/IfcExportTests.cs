@@ -68,6 +68,82 @@ public class IfcExportTests
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
     }
 
+    [Fact]
+    public void SaveIfc_MeshInsideCompositeElement_UsesOwnerIdentityAndProperties()
+    {
+        var element = new NwcNode
+        {
+            Id = 1,
+            Name = "Wall A",
+            Class = "LcRevitComposite",
+            IfcGlobalId = "2O2Fr$t4X7Zf8NOew3FL9r",
+            ElementGuid = Guid.NewGuid(),
+        };
+        element.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 1,
+            Tag = 52,
+            Name = "FireRating",
+            Class = "Element",
+            ValueType = 4,
+            Value = "2h",
+        });
+
+        NwcMesh Mesh(int id, NwcNode leaf, double x) => new()
+        {
+            Id = id,
+            Name = $"Mesh {id}",
+            Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = leaf,
+        };
+
+        var firstLeaf = new NwcNode { Id = 2, Name = "Solid", Class = "LcRevitSolid", Element = element };
+        var secondLeaf = new NwcNode { Id = 3, Name = "Panel", Class = "LcRevitSolid", Element = element };
+        string ifc = NwcDocument.Create(meshes: [Mesh(10, firstLeaf, 0), Mesh(11, secondLeaf, 2)])
+            .ToIfcString(new NwcIfcExportOptions());
+
+        Assert.Contains("IFCWALL(", ifc);
+        Assert.Contains("IFCTEXT('2h')", ifc);
+        var guids = System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCWALL\('([^']+)'")
+            .Select(m => m.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(2, guids.Distinct().Count());
+    }
+
+    [Fact]
+    public void SaveIfc_PropertyValuesFollowTheGeometryScale()
+    {
+        var element = new NwcNode
+        {
+            Id = 1,
+            Name = "Wall A",
+            Class = "LcRevitComposite",
+            IfcGlobalId = "2O2Fr$t4X7Zf8NOew3FL9r",
+        };
+        element.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "Length", Class = "Element", ValueType = 6, Value = "500" });
+        element.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Name = "Area", Class = "Element", ValueType = 10, Value = "2000000" });
+        element.Properties.Add(new NwcPropertyRecord { FirstInt = 3, Tag = 52, Name = "Volume", Class = "Element", ValueType = 11, Value = "3000000000" });
+        var leaf = new NwcNode { Id = 2, Name = "Solid", Class = "LcRevitSolid", Element = element };
+        var mesh = new NwcMesh
+        {
+            Id = 10,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = leaf,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            LengthUnit = NwcIfcLengthUnit.Metre,
+            ConvertMmToMetres = true,
+        });
+
+        Assert.Contains("IFCLENGTHMEASURE(0.5)", ifc);
+        Assert.Contains("IFCAREAMEASURE(2.)", ifc);
+        Assert.Contains("IFCVOLUMEMEASURE(3.)", ifc);
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]
@@ -616,7 +692,8 @@ public class IfcExportTests
         }
 
         string ifc = sw.ToString();
-        Assert.Contains($"IFCWALL('{globalId}',", ifc);
+        string expectedGuid = NwcIO.Internal.Export.IfcGuid.FromKey($"ifc:element:{globalId}:mesh:42:model:0");
+        Assert.Contains($"IFCWALL('{expectedGuid}',", ifc);
         Assert.Contains("'Concrete Wall 200'", ifc);
         Assert.Contains("IFCPROPERTYSINGLEVALUE('Fire Rating',$,IFCTEXT('2 h'),$)", ifc);
         Assert.DoesNotContain("Mesh_42", ifc);
