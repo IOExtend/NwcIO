@@ -217,10 +217,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   </div>
   <div id="viewport-container">
     <div class="hud-stats" id="hud-stats">Meshes: 0 | Vertices: 0</div>
-    <canvas id="glcanvas"></canvas>
-    <canvas id="overlay"></canvas>
+    <canvas id="glcanvas" tabindex="0" role="application" aria-label="3D model view"></canvas>
+    <canvas id="overlay" aria-hidden="true"></canvas>
     <div class="measure-panel" id="measure-panel" style="display:none;">
-      <div class="title"><span>3D Measure</span><span id="measure-clear" style="cursor:pointer;color:#888;">&times;</span></div>
+      <div class="title"><span>3D Measure</span><button type="button" id="measure-clear" aria-label="Clear measurement" style="background:none;border:none;color:#888;cursor:pointer;font-size:16px;">&times;</button></div>
       <div id="measure-status" style="color:#aaa;margin-bottom:4px;">Click 2 points to measure</div>
       <div id="measure-results" style="display:none;">
         <div class="row"><span>Distance:</span><span class="val" id="m-dist">0.00 m</span></div>
@@ -231,9 +231,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     </div>
     <div class="timeliner-bar" id="timeliner-bar" style="display:none;">
       <button id="tl-play">▶ Play</button>
-      <input type="range" id="tl-slider" min="0" max="1000" value="0">
+      <input type="range" id="tl-slider" min="0" max="1000" value="0" aria-label="TimeLiner date">
       <span class="timeliner-date" id="tl-date">--/--/----</span>
-      <select id="tl-speed" style="background:#222;color:#ccc;border:1px solid #444;border-radius:3px;padding:3px;font-size:11px;">
+      <select id="tl-speed" aria-label="TimeLiner playback speed" style="background:#222;color:#ccc;border:1px solid #444;border-radius:3px;padding:3px;font-size:11px;">
         <option value="1">1x</option>
         <option value="5">5x</option>
         <option value="15">15x</option>
@@ -929,6 +929,37 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     requestAnimationFrame(render);
   }, { passive: false });
 
+  canvas.addEventListener('keydown', e => {
+    switch (e.key) {
+      case 'ArrowLeft': camPhi -= 0.1; break;
+      case 'ArrowRight': camPhi += 0.1; break;
+      case 'ArrowUp': camTheta = Math.max(0.01, camTheta - 0.1); break;
+      case 'ArrowDown': camTheta = Math.min(Math.PI - 0.01, camTheta + 0.1); break;
+      case '+': case '=': camRadius = Math.max(0.2, camRadius * 0.9); break;
+      case '-': case '_': camRadius *= 1.1; break;
+      case 'Escape':
+        measureMode = false;
+        measureP1 = null;
+        measureP2 = null;
+        document.getElementById('measure-panel').style.display = 'none';
+        document.getElementById('measure-results').style.display = 'none';
+        document.getElementById('measure-status').textContent = 'Click 2 points to measure';
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    requestAnimationFrame(render);
+  });
+
+  document.addEventListener('keydown', e => {
+    const item = e.target && e.target.closest ? e.target.closest('.tree-item[role="button"]') : null;
+    if (item && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      item.click();
+    }
+  });
+
   // Element Selection & Property Inspector & Measure
   canvas.addEventListener('click', e => {
     if (Math.abs(e.clientX - lastMouseX) > 3 || Math.abs(e.clientY - lastMouseY) > 3) return;
@@ -1018,6 +1049,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     modelData.viewpoints.forEach(vp => {
       const item = document.createElement('div');
       item.className = 'tree-item';
+      item.setAttribute('role', 'button');
+      item.tabIndex = 0;
       item.textContent = vp.name;
       item.addEventListener('click', () => {
         if (vp.camera && vp.camera.position && vp.camera.target) {
@@ -1051,6 +1084,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       (test.allClashes || []).forEach(clash => {
         const cItem = document.createElement('div');
         cItem.className = 'tree-item';
+        cItem.setAttribute('role', 'button');
+        cItem.tabIndex = 0;
         cItem.textContent = `${clash.name}: ${clash.item1?.name || 'A'} vs ${clash.item2?.name || 'B'}`;
         cItem.addEventListener('click', () => {
           if (clash.point) {
@@ -1102,6 +1137,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         } else {
           const itemDiv = document.createElement('div');
           itemDiv.className = 'tree-item';
+        itemDiv.setAttribute('role', 'button');
+        itemDiv.tabIndex = 0;
           itemDiv.textContent = (item.type === 'search' ? '🔍 ' : '📌 ') + item.name;
           itemDiv.addEventListener('click', () => {
             selectedSetMeshIndices.clear();

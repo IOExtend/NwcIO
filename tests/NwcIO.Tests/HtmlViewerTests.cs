@@ -318,7 +318,7 @@ public sealed class HtmlViewerTests
             string html = File.ReadAllText(tempPath);
             Assert.Contains("<!DOCTYPE html>", html, StringComparison.Ordinal);
             Assert.Contains("<title>Test Building Viewer</title>", html, StringComparison.Ordinal);
-            Assert.Contains("<canvas id=\"glcanvas\">", html, StringComparison.Ordinal);
+            Assert.Contains("<canvas id=\"glcanvas\" tabindex=\"0\"", html, StringComparison.Ordinal);
             Assert.Contains("id=\"nwc-data\"", html, StringComparison.Ordinal);
             Assert.Contains("Overview Entrance", html, StringComparison.Ordinal);
             Assert.Contains("Pipe Penetrations", html, StringComparison.Ordinal);
@@ -412,7 +412,7 @@ public sealed class HtmlViewerTests
             Assert.True(File.Exists(viewerPath));
             string html = File.ReadAllText(viewerPath);
             Assert.Contains("<!DOCTYPE html>", html, StringComparison.Ordinal);
-            Assert.Contains("<canvas id=\"glcanvas\">", html, StringComparison.Ordinal);
+            Assert.Contains("<canvas id=\"glcanvas\" tabindex=\"0\"", html, StringComparison.Ordinal);
         }
         finally
         {
