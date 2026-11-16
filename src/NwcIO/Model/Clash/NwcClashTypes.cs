@@ -294,8 +294,8 @@ public sealed class NwcClashTest
     public string Status { get; set; } = "active";
     /// <summary>
     /// Tolerance in document length units (the unit reported by <see cref="NwcDocument.LengthUnit"/>; default 0.001).
-    /// For <see cref="NwcClashTestType.Hard"/>, intersections whose penetration is below it are ignored; for
-    /// <see cref="NwcClashTestType.Clearance"/>, pairs closer than it are reported.
+    /// The detector expands the broad-phase bounding boxes by this value; it does not filter by penetration depth.
+    /// Clearance tests are not implemented by <see cref="NwcClashDetector"/>.
     /// </summary>
     public double Tolerance { get; set; } = 0.001; // document units
     public NwcClashSelection SelectionA { get; set; } = NwcClashSelection.All();

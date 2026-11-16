@@ -21,7 +21,7 @@ public class NwcLengthUnitTests
     }
 
     [Fact]
-    public void Document_LengthUnit_InfersFeetForRevitAndMillimetresOtherwise()
+    public void Document_LengthUnit_InfersFeetForRevitAndUnknownOtherwise()
     {
         var revit = NwcDocument.Open(new MemoryStream(NwcDocument.Create(fileInfo: new NwcFileInfo
         {
@@ -62,8 +62,49 @@ public class NwcLengthUnitTests
         var meters = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Meters });
         var same = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Meters });
 
+        var unknown = NwcDocument.Create(fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Unknown });
+
         Assert.True(NwcAssembly.Create("mixed", feet, meters).HasMixedLengthUnits);
         Assert.False(NwcAssembly.Create("same", meters, same).HasMixedLengthUnits);
+        Assert.False(NwcAssembly.Create("nwf", unknown, feet, feet).HasMixedLengthUnits);
+        Assert.False(NwcAssembly.Create("unknown", unknown, unknown).HasMixedLengthUnits);
+    }
+
+    [Fact]
+    public void GridLocation_UsesTheDocumentUnitSymbol()
+    {
+        var grids = new NwcIO.Model.Grids.NwcGridSystem { LengthUnit = NwcLengthUnit.Feet };
+        grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
+        grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(30, 0, 0));
+
+        Assert.Equal("A (+20.00ft) / 1", grids.FormatLocation(new Vector3d(20, 0, 0)));
+    }
+
+    [Fact]
+    public void Measurement_UsesTheRequestedUnitSymbol()
+    {
+        var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureDistance(
+            new Vector3d(0, 0, 0), new Vector3d(3, 4, 0), NwcLengthUnit.Millimeters);
+
+        Assert.Contains("5.000 mm", measurement.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IfcExport_ConvertsKnownFeetCoordinatesToTheOutputUnit()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        var doc = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { LengthUnit = NwcLengthUnit.Feet },
+            meshes: [mesh]);
+
+        string ifc = doc.ToIfcString(new NwcIfcExportOptions { LengthUnit = NwcIfcLengthUnit.Millimetre });
+
+        Assert.Contains("304.8", ifc, StringComparison.Ordinal);
     }
 
     [Fact]

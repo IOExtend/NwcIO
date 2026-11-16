@@ -42,7 +42,7 @@ public sealed class NwcReaderOptions
 
     /// <summary>
     /// Override the document length unit when the source unit is known. Null (default) infers feet for the Revit
-    /// loader/exporter and millimetres for everything else. Exposed as <see cref="NwcDocument.LengthUnit"/>.
+    /// loader/exporter and leaves the unit Unknown for everything else. Exposed as <see cref="NwcDocument.LengthUnit"/>.
     /// </summary>
     public NwcLengthUnit? LengthUnit { get; set; }
 }

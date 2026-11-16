@@ -18,7 +18,11 @@ public sealed class NwcAssembly
 
     /// <summary>True when the contributing models report different length units; the assembly does not rescale them.</summary>
     public bool HasMixedLengthUnits =>
-        Models.Select(model => model.LengthUnit).Distinct().Skip(1).Any();
+        Models.Select(model => model.LengthUnit)
+            .Where(unit => unit != NwcLengthUnit.Unknown)
+            .Distinct()
+            .Skip(1)
+            .Any();
     public NwcNode RootNode { get; }
     public IReadOnlyList<NwcMesh> AllMeshes { get; }
     public IReadOnlyList<NwcMaterial> AllMaterials { get; }

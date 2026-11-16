@@ -121,7 +121,7 @@ internal static class IfcExporter
         string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
         string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
 
-        double scale = (options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres) ? 0.001 : 1.0;
+        double scale = GetSourceScale(doc, options);
         var elementIds = new List<int>(doc.Meshes.Count);
 
         var typeMap = new Dictionary<string, (int TypeId, List<int> ElementIds)>(StringComparer.OrdinalIgnoreCase);
@@ -337,7 +337,6 @@ internal static class IfcExporter
         string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
         string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
 
-        double scale = (options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres) ? 0.001 : 1.0;
         var storeyIds = new List<int>();
 
         var typeMap = new Dictionary<string, (int TypeId, List<int> ElementIds)>(StringComparer.OrdinalIgnoreCase);
@@ -346,6 +345,8 @@ internal static class IfcExporter
         for (int modelIdx = 0; modelIdx < assembly.Models.Count; modelIdx++)
         {
             var model = assembly.Models[modelIdx];
+            // Each contributing model carries its own unit; convert it to the single IFC output unit.
+            double scale = GetSourceScale(model, options);
             string subStoreyName = !string.IsNullOrEmpty(model.FileInfo.SourcePath)
                 ? Path.GetFileNameWithoutExtension(model.FileInfo.SourcePath)
                 : $"Model_{modelIdx + 1}";
@@ -586,6 +587,20 @@ internal static class IfcExporter
             "IFCDUCTSEGMENT" => w.Add(isIfc4 ? "IFCDUCTSEGMENT" : "IFCFLOWSEGMENT", commonArgs),
             _ => w.Add("IFCBUILDINGELEMENTPROXY", $"{commonArgs},.ELEMENT."),
         };
+    }
+
+    /// <summary>Converts source coordinates to the IFC output unit, using the document unit when known.</summary>
+    private static double GetSourceScale(NwcDocument document, NwcIfcExportOptions options)
+    {
+        if (document.MetresPerUnit is double metresPerUnit)
+        {
+            return options.LengthUnit == NwcIfcLengthUnit.Millimetre
+                ? metresPerUnit * 1000.0
+                : metresPerUnit;
+        }
+
+        // Unknown source unit: keep the historical millimetre assumption.
+        return options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres ? 0.001 : 1.0;
     }
 
     private static void WriteMeshProperties(
