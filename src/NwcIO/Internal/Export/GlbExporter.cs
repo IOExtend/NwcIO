@@ -50,8 +50,11 @@ public static class GlbExporter
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(output);
 
-        // 1. Pack binary buffer (positions, normals, indices)
-        using var binMs = new MemoryStream();
+        // 1. Pack binary buffer (positions, normals, indices) into a temporary file, so the BIN payload
+        // is not held in a single managed array.
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.bin");
+        using Stream binMs = new FileStream(
+            tempPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose);
         var bufferViews = new List<BufferViewDef>();
         var accessors = new List<AccessorDef>();
         var gltfMeshes = new List<MeshDef>();
@@ -128,7 +131,7 @@ public static class GlbExporter
 
             // A. Vertex Positions
             AlignStream(binMs, 4);
-            int posOffset = (int)binMs.Position;
+            long posOffset = binMs.Position;
             double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
             double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
 
@@ -177,7 +180,7 @@ public static class GlbExporter
             {
                 var normals = ComputeNormals(vertices, indices);
                 AlignStream(binMs, 4);
-                int normOffset = (int)binMs.Position;
+                long normOffset = binMs.Position;
                 var normSpan = new byte[vCount * 12];
                 for (int v = 0; v < vCount; v++)
                 {
@@ -210,7 +213,7 @@ public static class GlbExporter
             if (lineColors is not null)
             {
                 AlignStream(binMs, 4);
-                int colOffset = (int)binMs.Position;
+                long colOffset = binMs.Position;
                 var colSpan = new byte[vCount * 16];
                 for (int v = 0; v < vCount; v++)
                 {
@@ -241,7 +244,7 @@ public static class GlbExporter
             if (indices.Count > 0)
             {
                 AlignStream(binMs, 4);
-                int idxOffset = (int)binMs.Position;
+                long idxOffset = binMs.Position;
                 int idxCount = indices.Count;
                 bool useShort = vCount <= 65535;
 
@@ -283,7 +286,7 @@ public static class GlbExporter
             if (lineIndices.Count > 0)
             {
                 AlignStream(binMs, 4);
-                int idxOffset = (int)binMs.Position;
+                long idxOffset = binMs.Position;
                 int idxCount = lineIndices.Count;
                 bool useShort = vCount <= 65535;
 
@@ -396,7 +399,11 @@ public static class GlbExporter
 
         // Align BIN chunk to 4 bytes
         AlignStream(binMs, 4);
-        byte[] binData = binMs.ToArray();
+        long binLength = binMs.Position;
+        if (binLength > uint.MaxValue)
+        {
+            throw new InvalidOperationException($"The glTF binary payload is {binLength} bytes; the GLB format supports at most {uint.MaxValue} bytes.");
+        }
 
         // 2. Build JSON chunk
         byte[] jsonData = BuildJsonChunk(
@@ -404,7 +411,7 @@ public static class GlbExporter
             gltfMeshes,
             accessors,
             bufferViews,
-            binData.Length,
+            binLength,
             generatorName ?? "NwcIO glTF 2.0 Exporter",
             viewpoints,
             materialsWithBlend);
@@ -414,7 +421,11 @@ public static class GlbExporter
         int jsonChunkLength = jsonData.Length + jsonPadding;
 
         // 3. Write binary GLB container
-        int totalLength = 12 + (8 + jsonChunkLength) + (binData.Length > 0 ? 8 + binData.Length : 0);
+        long totalLength = 12 + (8 + jsonChunkLength) + (binLength > 0 ? 8 + binLength : 0);
+        if (totalLength > uint.MaxValue)
+        {
+            throw new InvalidOperationException($"The GLB file would be {totalLength} bytes; the format supports at most {uint.MaxValue} bytes.");
+        }
 
         using var bw = new BinaryWriter(output, System.Text.Encoding.UTF8, leaveOpen: true);
 
@@ -432,12 +443,14 @@ public static class GlbExporter
             bw.Write((byte)0x20); // space padding
         }
 
-        // Chunk 1: BIN
-        if (binData.Length > 0)
+        // Chunk 1: BIN, copied from the temporary file without a managed array copy
+        if (binLength > 0)
         {
-            bw.Write((uint)binData.Length);
+            bw.Write((uint)binLength);
             bw.Write(ChunkTypeBin);
-            bw.Write(binData);
+            bw.Flush();
+            binMs.Position = 0;
+            binMs.CopyTo(output);
         }
 
         bw.Flush();
@@ -448,7 +461,7 @@ public static class GlbExporter
         List<MeshDef> meshes,
         List<AccessorDef> accessors,
         List<BufferViewDef> bufferViews,
-        int binByteLength,
+        long binByteLength,
         string generator,
         IReadOnlyList<NwcSavedViewpoint>? viewpoints = null,
         HashSet<int>? materialsWithBlend = null)
@@ -779,7 +792,7 @@ public static class GlbExporter
         }
     }
 
-    private readonly record struct BufferViewDef(int ByteOffset, int ByteLength, int Target);
+    private readonly record struct BufferViewDef(long ByteOffset, int ByteLength, int Target);
 
     private readonly record struct AccessorDef(
         int BufferView,

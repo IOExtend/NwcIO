@@ -302,6 +302,8 @@ public static class JsonExporter
         Write(document, stream, options);
     }
 
+    private const int FlushThreshold = 64 * 1024;
+
     private static void WriteNodeRecursive(Utf8JsonWriter writer, NwcNode node)
     {
         writer.WriteNumber("id", node.Id);
@@ -409,6 +411,11 @@ public static class JsonExporter
             }
 
             writer.WriteEndArray();
+        }
+
+        if (writer.BytesPending > FlushThreshold)
+        {
+            writer.Flush();
         }
     }
 

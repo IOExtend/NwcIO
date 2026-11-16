@@ -37,7 +37,10 @@ internal static class IfcExporter
         options ??= NwcIfcExportOptions.Default;
         fileName ??= Path.GetFileName(doc.FileInfo.SourcePath) ?? "model.ifc";
 
-        var w = new StepWriter();
+        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
+        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
+        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
+        var w = new StepWriter(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
 
         // 1. Project infrastructure & Owner History
         int personId = w.Add("IFCPERSON", $"$,{StepWriter.Str(options.Author)},$,$,$,$,$,$");
@@ -116,10 +119,7 @@ internal static class IfcExporter
         }
 
         // 5. Export Meshes as IFC Products
-        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
         bool useTessellation = isIfc4 && options.UseTessellationInIfc4;
-        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
-        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
 
         double scale = (options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres) ? 0.001 : 1.0;
         var elementIds = new List<int>(doc.Meshes.Count);
@@ -235,7 +235,7 @@ internal static class IfcExporter
         }
 
         // 8. Write complete STEP physical file
-        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
+        w.Complete();
     }
 
     /// <summary>Writes a federated <see cref="NwcAssembly"/> to an IFC file.</summary>
@@ -262,7 +262,10 @@ internal static class IfcExporter
         options ??= NwcIfcExportOptions.Default;
         fileName ??= $"{assembly.Name}.ifc";
 
-        var w = new StepWriter();
+        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
+        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
+        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
+        var w = new StepWriter(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
 
         // 1. Project infrastructure & Owner History
         int personId = w.Add("IFCPERSON", $"$,{StepWriter.Str(options.Author)},$,$,$,$,$,$");
@@ -332,10 +335,7 @@ internal static class IfcExporter
         }
 
         // 5. Storeys per Model or Global Storey
-        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
         bool useTessellation = isIfc4 && options.UseTessellationInIfc4;
-        string schemaName = isIfc4 ? "IFC4" : "IFC2X3";
-        string viewDef = isIfc4 ? "ViewDefinition [DesignTransferView_1.0]" : "ViewDefinition [CoordinationView_V2.0]";
 
         double scale = (options.LengthUnit == NwcIfcLengthUnit.Metre && options.ConvertMmToMetres) ? 0.001 : 1.0;
         var storeyIds = new List<int>();
@@ -466,7 +466,7 @@ internal static class IfcExporter
                 $"{StepWriter.Str(IfcGuid.NewGuid())},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},{StepWriter.List(storeyIds.Select(StepWriter.Ref))}");
         }
 
-        w.WriteTo(writer, fileName, schemaName, viewDef, options.Application, options.Organization, options.Author);
+        w.Complete();
     }
 
     private static int WriteMeshFacetedBrep(
