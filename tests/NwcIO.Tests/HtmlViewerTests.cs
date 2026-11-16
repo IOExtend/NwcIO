@@ -37,15 +37,15 @@ public sealed class HtmlViewerTests
             source.GetProperty("color").EnumerateArray().Select(v => v.GetDouble()));
         Assert.Equal("68", source.GetProperty("properties").GetProperty("General").GetProperty("Source").GetString());
         var chunks = source.GetProperty("chunks").EnumerateArray().ToArray();
-        Assert.Equal<int>([65535, 3], chunks.Select(c => c.GetProperty("vertices").GetArrayLength() / 3));
+        Assert.Equal<int>([65535, 3], chunks.Select(c => DecodePositions(c).Length / 3));
         var reconstructed = new List<Vector3d>();
         foreach (var chunk in chunks)
         {
-            var positions = chunk.GetProperty("vertices").EnumerateArray().Select(v => v.GetDouble()).ToArray();
-            foreach (var index in chunk.GetProperty("indices").EnumerateArray().Select(v => v.GetInt32()))
+            var positions = DecodePositions(chunk);
+            foreach (var index in DecodeIndices(chunk))
             {
                 Assert.InRange(index, 0, positions.Length / 3 - 1);
-                reconstructed.Add(new Vector3d(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]));
+                reconstructed.Add(DecodePosition(chunk, positions, index));
             }
         }
         Assert.Equal(vertices, reconstructed);
@@ -63,8 +63,8 @@ public sealed class HtmlViewerTests
         Assert.Contains("const chunks = m.chunks.map(chunk =>", html);
         Assert.Contains("raw: m, index: idx, bounds: m.bounds", html);
         Assert.Contains("for (const chunk of gm.chunks)", html);
-        Assert.Contains("new Float32Array(chunk.vertices)", html);
-        Assert.Contains("new Uint16Array(chunk.indices)", html);
+        Assert.Contains("decodePositions(chunk.positions)", html);
+        Assert.Contains("decodeIndices(chunk.indices, chunk.indexBits)", html);
         Assert.Contains("selectedMeshIndex = idx;", html);
         Assert.Contains("gm.index === selectedMeshIndex", html);
         Assert.Contains("const gm = gpuMeshes[selectedMeshIndex];\n        const b = gm.bounds;", html);
@@ -117,15 +117,15 @@ public sealed class HtmlViewerTests
         var reconstructed = new List<Vector3d>();
         foreach (var chunk in chunks)
         {
-            var positions = chunk.GetProperty("vertices").EnumerateArray().Select(v => v.GetDouble()).ToArray();
+            var positions = DecodePositions(chunk);
             var vertexCount = positions.Length / 3;
             Assert.InRange(vertexCount, 1, 65535);
-            var triangles = chunk.GetProperty("indices").EnumerateArray().Select(v => v.GetInt32()).ToArray();
+            var triangles = DecodeIndices(chunk);
             Assert.Equal(0, triangles.Length % 3);
             foreach (var index in triangles)
             {
                 Assert.InRange(index, 0, vertexCount - 1);
-                reconstructed.Add(new Vector3d(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]));
+                reconstructed.Add(DecodePosition(chunk, positions, index));
             }
             Assert.False(chunk.TryGetProperty("lineIndices", out _));
         }
@@ -149,16 +149,16 @@ public sealed class HtmlViewerTests
         using var payload = ReadPayload(html);
         var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
         var exported = Assert.Single(source.GetProperty("chunks").EnumerateArray());
-        Assert.Equal(mesh.Indices, exported.GetProperty("indices").EnumerateArray().Select(v => v.GetInt32()));
+        Assert.Equal(mesh.Indices, DecodeIndices(exported));
         Assert.False(exported.TryGetProperty("lineIndices", out _));
-        Assert.Contains("const lineIndices = new Uint16Array(Math.floor(chunk.indices.length / 3) * 6)", html);
-        Assert.Contains("i + 2 < chunk.indices.length; i += 3", html);
-        Assert.Contains("const a = chunk.indices[i], b = chunk.indices[i + 1], c = chunk.indices[i + 2]", html);
+        Assert.Contains("const lineIndices = new LineArray(Math.floor(indices.length / 3) * 6)", html);
+        Assert.Contains("i + 2 < indices.length; i += 3", html);
+        Assert.Contains("const a = indices[i], b = indices[i + 1], c = indices[i + 2]", html);
         Assert.Contains("lineIndices.set([a, b, b, c, c, a], i * 2)", html);
         Assert.Contains("gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lineIndices, gl.STATIC_DRAW)", html);
         Assert.Contains("lineCount: lineIndices.length", html);
         Assert.Contains("gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, wireframeMode ? chunk.lineIbo : chunk.ibo)", html);
-        Assert.Contains("wireframeMode ? chunk.lineCount : chunk.count, gl.UNSIGNED_SHORT", html);
+        Assert.Contains("wireframeMode ? chunk.lineCount : chunk.count, indexType", html);
     }
 
     [Theory]
@@ -182,14 +182,14 @@ public sealed class HtmlViewerTests
         using var payload = ReadPayload(ExportMesh(mesh));
         var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
         var chunk = Assert.Single(source.GetProperty("chunks").EnumerateArray());
-        var positions = chunk.GetProperty("vertices").EnumerateArray().Select(v => v.GetDouble()).ToArray();
-        var triangles = chunk.GetProperty("indices").EnumerateArray().Select(v => v.GetInt32()).ToArray();
+        var positions = DecodePositions(chunk);
+        var triangles = DecodeIndices(chunk);
         Assert.Equal(validIndices.Length * 3, positions.Length);
         Assert.Equal(validIndices.Length, triangles.Length);
         var reconstructed = triangles.Select(index =>
         {
             Assert.InRange(index, 0, positions.Length / 3 - 1);
-            return new Vector3d(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+            return DecodePosition(chunk, positions, index);
         });
         Assert.Equal(validIndices.Select(index => vertices[index]), reconstructed);
         Assert.False(chunk.TryGetProperty("lineIndices", out _));
@@ -214,8 +214,100 @@ public sealed class HtmlViewerTests
         using var payload = ReadPayload(ExportMesh(mesh));
         var source = Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray());
         var chunk = Assert.Single(source.GetProperty("chunks").EnumerateArray());
-        Assert.Equal(9, chunk.GetProperty("vertices").GetArrayLength());
-        Assert.Equal(3, chunk.GetProperty("indices").GetArrayLength());
+        Assert.Equal(9, DecodePositions(chunk).Length);
+        Assert.Equal(3, DecodeIndices(chunk).Length);
+    }
+
+    [Fact]
+    public void Write_Truncation_SkipsOnlyMeshesOverBudgetAndReportsCounts()
+    {
+        var meshes = Enumerable.Range(0, 4)
+            .Select(i => new NwcMesh
+            {
+                Id = i + 1,
+                Name = $"Mesh {i + 1}",
+                Vertices = Enumerable.Range(0, 2000).Select(v => new Vector3d(v, i, 0)).ToArray(),
+                Indices = [0, 1, 2],
+            })
+            .ToArray();
+
+        var options = new NwcHtmlViewerOptions { MaxMeshVertices = 5000 };
+        using var writer = new StringWriter();
+        var result = NwcHtmlViewerExporter.WriteWithResult(writer, meshes, [], [], BoundingBox3d.Empty, options);
+        var html = writer.ToString();
+        using var payload = ReadPayload(html);
+
+        Assert.True(result.Truncated);
+        Assert.Equal(4, result.TotalMeshes);
+        Assert.Equal(2, result.ExportedMeshes);
+        Assert.Equal(2, result.SkippedMeshes);
+        Assert.Equal(8000, result.TotalVertices);
+        Assert.Equal(4000, result.ExportedVertices);
+        Assert.Equal(4000, result.SkippedVertices);
+
+        Assert.True(payload.RootElement.GetProperty("truncated").GetBoolean());
+        Assert.Equal(4, payload.RootElement.GetProperty("totalMeshes").GetInt32());
+        Assert.Equal(2, payload.RootElement.GetProperty("exportedMeshes").GetInt32());
+        Assert.Equal(2, payload.RootElement.GetProperty("skippedMeshes").GetInt32());
+        Assert.Equal(8000, payload.RootElement.GetProperty("totalVertices").GetInt64());
+        Assert.Equal(4000, payload.RootElement.GetProperty("exportedVertices").GetInt64());
+        Assert.Equal(4000, payload.RootElement.GetProperty("skippedVertices").GetInt64());
+        Assert.Equal(2, payload.RootElement.GetProperty("meshes").GetArrayLength());
+
+        Assert.Contains("id=\"hud-truncated\"", html);
+        Assert.Contains("Showing ${exportedMeshCount} of ${totalMeshCount} meshes", html);
+    }
+
+    [Fact]
+    public void Write_Truncation_LaterSmallMeshStillFitsAfterSkippedLargeMesh()
+    {
+        var meshes = new[]
+        {
+            new NwcMesh { Id = 1, Vertices = Enumerable.Range(0, 2000).Select(v => new Vector3d(v, 0, 0)).ToArray(), Indices = [0, 1, 2] },
+            new NwcMesh { Id = 2, Vertices = Enumerable.Range(0, 5000).Select(v => new Vector3d(v, 1, 0)).ToArray(), Indices = [0, 1, 2] },
+            new NwcMesh { Id = 3, Vertices = Enumerable.Range(0, 1000).Select(v => new Vector3d(v, 2, 0)).ToArray(), Indices = [0, 1, 2] },
+        };
+
+        var options = new NwcHtmlViewerOptions { MaxMeshVertices = 3000 };
+        using var writer = new StringWriter();
+        var result = NwcHtmlViewerExporter.WriteWithResult(writer, meshes, [], [], BoundingBox3d.Empty, options);
+        using var payload = ReadPayload(writer.ToString());
+
+        Assert.Equal(2, result.ExportedMeshes);
+        Assert.Equal(1, result.SkippedMeshes);
+        Assert.Equal(3000, result.ExportedVertices);
+        Assert.Equal(5000, result.SkippedVertices);
+        Assert.Equal<int>([1, 3], payload.RootElement.GetProperty("meshes").EnumerateArray().Select(m => m.GetProperty("id").GetInt32()));
+    }
+
+    [Fact]
+    public void Write_Geometry_IsBase64Float32AndNotJsonNumberArrays()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(1000000, 2000000, 3000000), new(1000001, 2000000, 3000000), new(1000000, 2000001, 3000000)],
+            Indices = [0, 1, 2],
+        };
+
+        using var writer = new StringWriter();
+        var result = NwcHtmlViewerExporter.WriteWithResult(writer, [mesh], [], [], BoundingBox3d.Empty, new NwcHtmlViewerOptions());
+        using var payload = ReadPayload(writer.ToString());
+        var chunk = Assert.Single(Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray())
+            .GetProperty("chunks").EnumerateArray());
+
+        Assert.Equal(JsonValueKind.String, chunk.GetProperty("positions").ValueKind);
+        Assert.Equal(JsonValueKind.String, chunk.GetProperty("indices").ValueKind);
+        Assert.Equal(16, chunk.GetProperty("indexBits").GetInt32());
+        Assert.Equal(36, Convert.FromBase64String(chunk.GetProperty("positions").GetString()!).Length);
+        Assert.Equal(6, Convert.FromBase64String(chunk.GetProperty("indices").GetString()!).Length);
+
+        // Positions are relative to the chunk centre, so large coordinates keep
+        // their Float32 precision while the decoded world position stays correct.
+        var positions = DecodePositions(chunk);
+        Assert.Equal(3, positions.Length / 3);
+        Assert.Equal(new Vector3d(1000000, 2000000, 3000000), DecodePosition(chunk, positions, 0));
+        Assert.False(result.Truncated);
     }
 
     private static string ExportMesh(NwcMesh mesh)
@@ -230,6 +322,40 @@ public sealed class HtmlViewerTests
         var start = html.IndexOf('>', html.IndexOf("id=\"nwc-data\"", StringComparison.Ordinal)) + 1;
         var end = html.IndexOf("</script>", start, StringComparison.Ordinal);
         return JsonDocument.Parse(html[start..end]);
+    }
+
+    private static float[] DecodePositions(JsonElement chunk)
+    {
+        var bytes = Convert.FromBase64String(chunk.GetProperty("positions").GetString()!);
+        var result = new float[bytes.Length / sizeof(float)];
+        for (var i = 0; i < result.Length; i++)
+        {
+            result[i] = BitConverter.ToSingle(bytes, i * sizeof(float));
+        }
+        return result;
+    }
+
+    private static int[] DecodeIndices(JsonElement chunk)
+    {
+        var bytes = Convert.FromBase64String(chunk.GetProperty("indices").GetString()!);
+        var bits = chunk.GetProperty("indexBits").GetInt32();
+        var result = new int[bytes.Length / (bits / 8)];
+        for (var i = 0; i < result.Length; i++)
+        {
+            result[i] = bits == 32
+                ? checked((int)BitConverter.ToUInt32(bytes, i * 4))
+                : BitConverter.ToUInt16(bytes, i * 2);
+        }
+        return result;
+    }
+
+    private static Vector3d DecodePosition(JsonElement chunk, float[] positions, int index)
+    {
+        var offset = chunk.GetProperty("offset").EnumerateArray().Select(v => v.GetDouble()).ToArray();
+        return new Vector3d(
+            positions[index * 3] + offset[0],
+            positions[index * 3 + 1] + offset[1],
+            positions[index * 3 + 2] + offset[2]);
     }
 
     [Fact]
