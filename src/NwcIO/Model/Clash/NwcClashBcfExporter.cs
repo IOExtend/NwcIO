@@ -218,7 +218,7 @@ public static class NwcClashBcfExporter
         descBuilder.Append(CultureInfo.InvariantCulture, $"Clash {clash.Name} between {clash.Item1.Name} and {clash.Item2.Name}.");
         if (clash.Distance != 0.0)
         {
-            descBuilder.Append(CultureInfo.InvariantCulture, $" Distance: {clash.Distance:F3} m.");
+            descBuilder.Append(CultureInfo.InvariantCulture, $" Distance: {clash.Distance:F3} document units.");
         }
         if (!string.IsNullOrEmpty(clash.GridLocation))
         {
@@ -348,11 +348,11 @@ public static class NwcClashBcfExporter
             sb.AppendLine(group.Description);
         }
         sb.AppendLine(CultureInfo.InvariantCulture, $"Clash Group: {group.Name} with {group.Clashes.Count} collisions.");
-        sb.AppendLine(CultureInfo.InvariantCulture, $"Worst Penetration: {group.Distance:F4} m");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Worst Penetration: {group.Distance:F4} document units");
         sb.AppendLine("Participating Items:");
         foreach (var c in group.Clashes.Take(20))
         {
-            sb.AppendLine(CultureInfo.InvariantCulture, $" - {c.Name}: {c.Item1.Name} vs {c.Item2.Name} (Distance: {c.Distance:F3}m)");
+            sb.AppendLine(CultureInfo.InvariantCulture, $" - {c.Name}: {c.Item1.Name} vs {c.Item2.Name} (Distance: {c.Distance:F3} document units)");
         }
         if (group.Clashes.Count > 20)
         {

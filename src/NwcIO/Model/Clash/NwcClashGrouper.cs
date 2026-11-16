@@ -13,7 +13,7 @@ public static class NwcClashGrouper
     /// are clustered into unified <see cref="NwcClashGroup"/> containers.
     /// </summary>
     /// <param name="test">The clash test whose standalone results will be grouped.</param>
-    /// <param name="clusterDistance">Maximum distance in meters between two clashes to belong to the same cluster (default: 1.0m).</param>
+    /// <param name="clusterDistance">Maximum distance in document length units (see <see cref="NwcDocument.LengthUnit"/>) between two clashes to belong to the same cluster (default: 1.0).</param>
     /// <param name="groupPrefix">Name prefix for created clash groups (default: "Cluster").</param>
     /// <param name="minClusterSize">Minimum number of clashes required to form a group (default: 2).</param>
     /// <returns>The number of new clash groups created.</returns>
@@ -101,7 +101,7 @@ public static class NwcClashGrouper
                 string groupName = $"{groupPrefix} {test.Groups.Count + 1}";
                 var group = new NwcClashGroup(groupName, clusterList[0].Status)
                 {
-                    Description = $"Spatial cluster of {clusterList.Count} clashes within {clusterDistance:F2} m proximity."
+                    Description = $"Spatial cluster of {clusterList.Count} clashes within {clusterDistance:F2} document units proximity."
                 };
 
                 foreach (var clash in clusterList)

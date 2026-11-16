@@ -7,7 +7,7 @@ namespace NwcIO.Internal.Container;
 /// Writes the LcUStream container of NWC/NWD files:
 /// ASCII section header line followed by back-to-back zlib compressed streams.
 /// </summary>
-public static class NwcContainerWriter
+internal static class NwcContainerWriter
 {
     public const string DefaultHeader = "#LcUStream-V1.1 binary double release utf8 navisworks:448 lizlib\n";
 

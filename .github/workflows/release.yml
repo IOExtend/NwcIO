@@ -39,6 +39,7 @@ jobs:
           $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
       - run: dotnet restore NwcIO.slnx
       - run: dotnet build NwcIO.slnx -c Release --no-restore
+      - run: dotnet format NwcIO.slnx --verify-no-changes --severity error --no-restore
       - run: dotnet test NwcIO.slnx -c Release --no-build
       - name: Pack release
         shell: pwsh
