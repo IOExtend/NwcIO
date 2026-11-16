@@ -826,6 +826,360 @@ public sealed class ClashDetectiveTests
         }
     }
 
+    [Fact]
+    public void IgnoreSameLayer_DoesNotDropMeshesWithoutNodes()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("layers", NwcClashTestType.Hard, 0.0);
+        test.Rules.Add(NwcClashRule.SameLayer());
+        doc.RunClashDetection(test);
+
+        Assert.Single(test.Results);
+    }
+
+    [Fact]
+    public void MinPenetrationRule_FiltersShallowClash()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.99, 0.2, 0.2), new Vector3d(2, 0.8, 0.8));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("penetration", NwcClashTestType.Hard, 0.0);
+        test.Rules.Add(NwcClashRule.MinPenetration(0.5));
+        doc.RunClashDetection(test);
+
+        Assert.Empty(test.Results);
+    }
+
+    [Fact]
+    public void CustomRule_IsEvaluated()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("custom", NwcClashTestType.Hard, 0.0);
+        test.Rules.Add(new NwcClashRule("custom", NwcClashRuleType.Custom) { CustomPredicate = _ => true });
+        doc.RunClashDetection(test);
+
+        Assert.Empty(test.Results);
+    }
+
+    [Fact]
+    public void SameGroupRule_UsesTheSharedParent()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+        var group = new NwcNode { Id = 10, Name = "Group", Class = "LcRevitCollection", Parent = root };
+        var nodeA = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element", Parent = group, Mesh = a };
+        var nodeB = new NwcNode { Id = 2, Name = "B", Class = "LcRevitData_Element", Parent = group, Mesh = b };
+        a.Node = nodeA;
+        b.Node = nodeB;
+        group.Children.Add(nodeA);
+        group.Children.Add(nodeB);
+        root.Children.Add(group);
+        var doc = NwcDocument.Create(meshes: [a, b], rootNode: root);
+
+        var filtered = new NwcClashTest("group", NwcClashTestType.Hard, 0.0);
+        filtered.Rules.Add(NwcClashRule.SameGroup());
+        doc.RunClashDetection(filtered);
+        Assert.Empty(filtered.Results);
+
+        var unfiltered = new NwcClashTest("all", NwcClashTestType.Hard, 0.0);
+        doc.RunClashDetection(unfiltered);
+        Assert.Single(unfiltered.Results);
+    }
+
+    [Fact]
+    public void ShouldIgnore_HandlesSameFilePropertyAndMissingLayer()
+    {
+        var nodeA = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element" };
+        var nodeB = new NwcNode { Id = 2, Name = "B", Class = "LcRevitData_Element" };
+        nodeA.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "System", Class = "Item", Value = "Exhaust" });
+        nodeB.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Name = "System", Class = "Item", Value = "Exhaust" });
+        var first = new NwcClashObject("A", 1) { ModelName = "model", Node = nodeA };
+        var second = new NwcClashObject("B", 2) { ModelName = "model", Node = nodeB };
+        var result = new NwcClashResult("clash", first, second, Vector3d.Zero, 0);
+
+        Assert.True(NwcClashRule.SameFile().ShouldIgnore(result));
+        Assert.True(new NwcClashRule("property", NwcClashRuleType.IgnoreSpecifiedProperty)
+        {
+            PropertyName = "System",
+            PropertyValue = "Exhaust",
+        }.ShouldIgnore(result));
+
+        // No layer on either item must not count as the same layer.
+        Assert.False(NwcClashRule.SameLayer().ShouldIgnore(result));
+    }
+
+    [Fact]
+    public void ClashMatrix_DisciplineSetName_FiltersMeshes()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var node = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element", Mesh = a };
+        a.Node = node;
+        var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+        root.Children.Add(node);
+        var first = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "first.nwc" },
+            meshes: [a],
+            rootNode: root,
+            selectionSets: [new NwcIO.Model.Sets.NwcSelectionSet("OnlyA", [1])]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [b]);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "first").SetName = "OnlyA";
+        matrix.AddDiscipline("B", "second");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.0);
+        matrix.Cells[0].TestType = NwcClashTestType.Conservative;
+
+        matrix.Run(NwcAssembly.Create("Federation", first, second));
+
+        Assert.Equal(1, matrix.Cells[0].ClashCount);
+
+        matrix.Disciplines[0].SetName = "Missing";
+        Assert.Throws<ArgumentException>(() => matrix.Run(NwcAssembly.Create("Federation", first, second)));
+    }
+
+    [Fact]
+    public void ClashMatrix_DisciplineSetName_FindsSetInsideFolder()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var node = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element", Mesh = a };
+        a.Node = node;
+        var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+        root.Children.Add(node);
+        var folder = new NwcIO.Model.Sets.NwcSelectionSetFolder("MEP");
+        folder.Children.Add(new NwcIO.Model.Sets.NwcSelectionSet("OnlyA", [1]));
+        var first = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "first.nwc" }, meshes: [a], rootNode: root, selectionSets: [folder]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [b]);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "first").SetName = "OnlyA";
+        matrix.AddDiscipline("B", "second");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.0);
+        matrix.Cells[0].TestType = NwcClashTestType.Conservative;
+
+        matrix.Run(NwcAssembly.Create("Federation", first, second));
+
+        Assert.Equal(1, matrix.Cells[0].ClashCount);
+    }
+
+    [Fact]
+    public void ClashMatrix_GlobalSameGroupRule_IgnoresSiblings()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var parent = new NwcNode { Id = 0, Name = "Group", Class = "Group" };
+        var nodeA = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element", Mesh = a, Parent = parent };
+        var nodeB = new NwcNode { Id = 2, Name = "B", Class = "LcRevitData_Element", Mesh = b, Parent = parent };
+        a.Node = nodeA;
+        b.Node = nodeB;
+        parent.Children.Add(nodeA);
+        parent.Children.Add(nodeB);
+        var doc = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "one.nwc" }, meshes: [a, b], rootNode: parent);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "one");
+        matrix.AddDiscipline("B", "one");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.0);
+        matrix.Cells[0].TestType = NwcClashTestType.Conservative;
+
+        matrix.Run(NwcAssembly.Create("Federation", doc));
+        Assert.True(matrix.Cells[0].ClashCount > 0);
+
+        matrix.GlobalRules.Add(NwcClashRule.SameGroup());
+        matrix.Run(NwcAssembly.Create("Federation", doc));
+        Assert.Equal(0, matrix.Cells[0].ClashCount);
+    }
+
+
+    [Theory]
+    [InlineData(0.0001, 0.001, 0)]
+    [InlineData(0.002, 0.001, 1)]
+    public void HardTolerance_FiltersOnlyShallowPenetration(double overlap, double tolerance, int expected)
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(1 - overlap, 0, 0), new Vector3d(2 - overlap, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("tolerance", NwcClashTestType.Hard, tolerance);
+        doc.RunClashDetection(test);
+
+        Assert.Equal(expected, test.Results.Count);
+    }
+
+    [Theory]
+    [InlineData(0.0005, 0.001, 1)]
+    [InlineData(0.0005, 0.0001, 0)]
+    public void ClearanceTolerance_ReportsGapsBelowTolerance(double gap, double tolerance, int expected)
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(1 + gap, 0, 0), new Vector3d(2 + gap, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("clearance", NwcClashTestType.Clearance, tolerance);
+        doc.RunClashDetection(test);
+
+        Assert.Equal(expected, test.Results.Count);
+        if (expected == 1)
+        {
+            Assert.Equal(gap, test.Results[0].Distance, 9); // positive for clearance
+        }
+    }
+
+    [Fact]
+    public void ClearanceTolerance_LineMesh_ReportsNoClash()
+    {
+        var box = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var line = new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
+        var doc = new NwcDocumentBuilder().AddMesh(box).AddMesh(line).Build();
+        var test = new NwcClashTest("Lines", NwcClashTestType.Clearance, tolerance: 0.05);
+        doc.RunClashDetection(test);
+        Assert.Empty(test.Results);
+    }
+
+    [Fact]
+    public void Duplicates_ReportsIdenticalGeometryButNotOverlappingBoxes()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var c = CreateBoxMesh(3, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+
+        var identical = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+        var duplicateTest = new NwcClashTest("duplicates", NwcClashTestType.Duplicates, 0.001);
+        identical.RunClashDetection(duplicateTest);
+        Assert.Single(duplicateTest.Results);
+
+        var overlapping = new NwcDocumentBuilder().AddMesh(a).AddMesh(c).Build();
+        var overlapTest = new NwcClashTest("duplicates", NwcClashTestType.Duplicates, 0.001);
+        overlapping.RunClashDetection(overlapTest);
+        Assert.Empty(overlapTest.Results);
+    }
+
+    [Fact]
+    public void Conservative_ReportsBoundingBoxOverlapWithoutTriangleIntersection()
+    {
+        var horizontal = new NwcMesh
+        {
+            Id = 1,
+            Name = "Horizontal",
+            Vertices = [new(-10, 0, 0), new(10, 0, 0)],
+            Indices = [],
+            LineIndices = [0, 1],
+        };
+        var vertical = new NwcMesh
+        {
+            Id = 2,
+            Name = "Vertical",
+            Vertices = [new(5, 0, 5), new(5, 0, -5)],
+            Indices = [],
+            LineIndices = [0, 1],
+        };
+        var doc = new NwcDocumentBuilder().AddMesh(horizontal).AddMesh(vertical).Build();
+
+        var hard = new NwcClashTest("hard", NwcClashTestType.Hard, 0.0);
+        doc.RunClashDetection(hard);
+        Assert.Empty(hard.Results);
+
+        var conservative = new NwcClashTest("conservative", NwcClashTestType.Conservative, 0.0);
+        doc.RunClashDetection(conservative);
+        Assert.Single(conservative.Results);
+    }
+
+    [Fact]
+    public void Clearance_DistanceIsPositiveForSeparation()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(1.2, 0, 0), new Vector3d(2.2, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("clearance", NwcClashTestType.Clearance, 0.5);
+        doc.RunClashDetection(test);
+
+        var result = Assert.Single(test.Results);
+        Assert.Equal(0.2, result.Distance, 3);
+    }
+
+    [Fact]
+    public void ClashMatrix_CellTestType_IsHonoured()
+    {
+        // b duplicates a; c only overlaps a. Hard reports both pairs, Duplicates only a-b.
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var c = CreateBoxMesh(3, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.nwc" }, meshes: [a]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [b, c]);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "first");
+        matrix.AddDiscipline("B", "second");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.001);
+
+        matrix.Run(assembly);
+        Assert.Equal(2, matrix.Cells[0].ClashCount);
+
+        matrix.Cells[0].TestType = NwcClashTestType.Duplicates;
+        matrix.Run(assembly);
+        Assert.Equal(1, matrix.Cells[0].ClashCount);
+    }
+
+    [Fact]
+    public void ClashMatrix_Duplicates_SkipsEmptyMeshes()
+    {
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.nwc" }, meshes: [new NwcMesh { Id = 1, Vertices = [], Indices = [] }]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [new NwcMesh { Id = 2, Vertices = [], Indices = [] }]);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "first");
+        matrix.AddDiscipline("B", "second");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.001);
+        matrix.Cells[0].TestType = NwcClashTestType.Duplicates;
+
+        matrix.Run(assembly);
+
+        Assert.Equal(0, matrix.Cells[0].ClashCount);
+    }
+
+    [Theory]
+    [InlineData(0.0005, 0.001, true)]
+    [InlineData(0.002, 0.001, false)]
+    [InlineData(0.0005, double.NaN, false)]
+    public void IsDuplicate_HonoursVertexTolerance(double shift, double tolerance, bool expected)
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(shift, 0, 0), new Vector3d(1 + shift, 1, 1));
+
+        Assert.Equal(expected, NwcClashDetector.IsDuplicate(a, b, tolerance));
+    }
+
+    [Fact]
+    public void IsDuplicate_RejectsDifferentTopologyAndAppliesTransform()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var reordered = new NwcMesh { Id = 2, Vertices = a.Vertices, Indices = a.Indices.Reverse().ToArray() };
+        Assert.False(NwcClashDetector.IsDuplicate(a, reordered, 0.001));
+
+        // Same local vertices, but b is moved by its transform, so the world geometry differs.
+        var moved = CreateBoxMesh(3, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        moved.Transform = new NwcTransform { Id = 1, Translation = new Vector3d(5, 0, 0) };
+        Assert.False(NwcClashDetector.IsDuplicate(a, moved, 0.001));
+
+        // Local vertices shifted by -5 and transform +5 give the same world geometry.
+        var shifted = CreateBoxMesh(4, new Vector3d(-5, 0, 0), new Vector3d(-4, 1, 1));
+        shifted.Transform = new NwcTransform { Id = 1, Translation = new Vector3d(5, 0, 0) };
+        Assert.True(NwcClashDetector.IsDuplicate(a, shifted, 0.001));
+    }
+
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)
     {
         var vertices = new Vector3d[]
