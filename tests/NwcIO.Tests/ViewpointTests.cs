@@ -166,6 +166,13 @@ public class ViewpointTests
     [InlineData("Navisworks коллизии")]
     [InlineData("План 1 этаж")]
     [InlineData("Разрез А-А")]
+    [InlineData("УЗЕЛ 1")]
+    [InlineData("ХВС")]
+    [InlineData("ШУМ 1")]
+    [InlineData("ДУ")]
+    [InlineData("ВЕНТИЛЯЦИЯ")]
+    [InlineData("шахты")]
+    [InlineData("тур")]
     public void ViewpointParser_DecodesLegacyCyrillicNamesInBothCodePages(string name)
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
