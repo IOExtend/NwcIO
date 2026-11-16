@@ -6,7 +6,7 @@ namespace NwcIO.Internal.Parsing;
 /// Extracts material definitions, RGBA colors, and surface parameters from property streams
 /// and associates them with scene nodes and 3D meshes.
 /// </summary>
-public static class MaterialParser
+internal static class MaterialParser
 {
     private static readonly NwcMaterial DefaultConcrete = new()
     {

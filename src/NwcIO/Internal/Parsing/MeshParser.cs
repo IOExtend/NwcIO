@@ -7,7 +7,7 @@ namespace NwcIO.Internal.Parsing;
 /// <summary>
 /// Extracts 3D polygon meshes from Navisworks geometry streams and TOC tables.
 /// </summary>
-public static class MeshParser
+internal static class MeshParser
 {
     internal const int MinMeshVertices = 3;
     internal const int MaxPlausibleVertices = 200_000;

@@ -7,7 +7,7 @@ namespace NwcIO.Internal.Parsing;
 /// hierarchical <see cref="NwcNode"/> scene graph (matching the Navisworks selection tree:
 /// Model -&gt; Layers -&gt; Categories -&gt; Families -&gt; Types -&gt; Composites/Elements).
 /// </summary>
-public static class SceneTreeBuilder
+internal static class SceneTreeBuilder
 {
     public static NwcNode Build(
         string rootName,

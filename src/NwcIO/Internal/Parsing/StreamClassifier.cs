@@ -8,7 +8,7 @@ namespace NwcIO.Internal.Parsing;
 /// Classification is best-effort: unrecognized streams stay <see cref="NwcStreamKind.Unknown"/>
 /// rather than being guessed into a wrong category.
 /// </summary>
-public static class StreamClassifier
+internal static class StreamClassifier
 {
     public static void ClassifyAll(IReadOnlyList<LcRawStream> streams)
     {

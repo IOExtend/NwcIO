@@ -5,7 +5,7 @@ using NwcIO.Model;
 namespace NwcIO.Internal.Json;
 
 /// <summary>Writes a parsed <see cref="NwcDocument"/> to JSON.</summary>
-public static class JsonExporter
+internal static class JsonExporter
 {
     public static void Write(NwcDocument document, Stream output, NwcJsonExportOptions options)
     {

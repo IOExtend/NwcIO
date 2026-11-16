@@ -11,7 +11,7 @@ namespace NwcIO.Internal.Parsing;
 /// [int64 timestamp][int64 source size][len-prefixed loader plugin][zero pad to 4]
 /// followed by export options (partially decoded). It stops at the first unexpected field.
 /// </summary>
-public static class PartitionHeaderParser
+internal static class PartitionHeaderParser
 {
     public static NwcFileInfo Parse(LcRawStream stream)
     {
