@@ -235,4 +235,86 @@ public class CliArgumentValidationTests
             if (File.Exists(model)) File.Delete(model);
         }
     }
+
+    [Fact]
+    public void SingleFile_AssemblyOnlyOptions_AreRejected()
+    {
+        string model = TempModel();
+        try
+        {
+            var (exit1, _, err1) = Run([model, "--nwf-xml", model + ".nwf.xml"]);
+            Assert.Equal(1, exit1);
+            Assert.Contains("--nwf-xml is only supported for folder and .nwf assembly inputs", err1);
+
+            var (exit2, _, err2) = Run([model, "--clashes"]);
+            Assert.Equal(1, exit2);
+            Assert.Contains("--clashes is only supported for folder and .nwf assembly inputs", err2);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+        }
+    }
+
+    [Fact]
+    public void Folder_SetsXml_WritesFile()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            new NwcDocumentBuilder().SetFileInfo("test.rvt")
+                .AddMesh(new NwcMesh
+                {
+                    Id = 1,
+                    Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                    Indices = [0, 1, 2],
+                    BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+                })
+                .Build()
+                .Save(Path.Combine(dir, "a.nwc"));
+
+            string sets = Path.Combine(dir, "sets.xml");
+            var (exit, _, err) = Run([dir, Path.Combine(dir, "out.glb"), "--sets-xml", sets]);
+
+            Assert.Equal(0, exit);
+            Assert.True(File.Exists(sets), err);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Folder_OptionsThatNeedAssemblyData_FailWithClearErrors()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            new NwcDocumentBuilder().SetFileInfo("test.rvt")
+                .AddMesh(new NwcMesh
+                {
+                    Id = 1,
+                    Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                    Indices = [0, 1, 2],
+                    BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+                })
+                .Build()
+                .Save(Path.Combine(dir, "a.nwc"));
+
+            var (exit1, _, err1) = Run([dir, Path.Combine(dir, "out.glb"), "--timeliner-csv", Path.Combine(dir, "tl.csv")]);
+            Assert.Equal(2, exit1);
+            Assert.Contains("does not contain a TimeLiner schedule", err1);
+
+            var (exit2, _, err2) = Run([dir, Path.Combine(dir, "out.glb"), "--export-grids", Path.Combine(dir, "grids.xml")]);
+            Assert.Equal(2, exit2);
+            Assert.Contains("does not contain a grid system", err2);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }

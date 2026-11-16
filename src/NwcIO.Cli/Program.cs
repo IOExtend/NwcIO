@@ -76,6 +76,11 @@ internal static class Program
           -h, --help         Show this help message and exit
           -v, --version      Show version information and exit
 
+        Input-type scope:
+          --nwf-xml and --clashes require folder or .nwf assembly input.
+          --sets-xml, --timeliner-csv, --grids and --export-grids work for
+          single files, folders and .nwf assemblies.
+
         Exit codes:
           0  Success
           1  Usage error (missing or invalid arguments)
@@ -433,6 +438,32 @@ internal static class Program
             return 2;
         }
 
+        var readerOptions = new NwcReaderOptions
+        {
+            ReadMeshes = readMeshes,
+            ReadMaterials = readMaterials,
+            ReadPropertyRecords = true,
+            ReadGuids = true,
+            ReadTransforms = includeTransforms,
+            BuildSceneTree = includeTree,
+            KeepStreamCatalog = includeCatalog,
+        };
+
+        bool isNwf = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
+        if (!isDirectory && !isNwf)
+        {
+            if (!string.IsNullOrEmpty(explicitNwfXmlPath))
+            {
+                @err.WriteLine("Error: --nwf-xml is only supported for folder and .nwf assembly inputs.");
+                return 1;
+            }
+            if (checkClashes)
+            {
+                @err.WriteLine("Error: --clashes is only supported for folder and .nwf assembly inputs.");
+                return 1;
+            }
+        }
+
         var sw = Stopwatch.StartNew();
 
         var ifcExportOptions = new NwcIfcExportOptions
@@ -457,7 +488,9 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                    readerOptions, explicitSetsXmlPath, explicitTimeLinerCsvPath, explicitGridsPath, explicitExportGridsPath,
+                    includeTree,
                     stdoutStream, @out, @err);
             }
 
@@ -469,7 +502,9 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                    readerOptions, explicitSetsXmlPath, explicitTimeLinerCsvPath, explicitGridsPath, explicitExportGridsPath,
+                    includeTree,
                     stdoutStream, @out, @err);
             }
         }
@@ -486,16 +521,7 @@ internal static class Program
         NwcDocument doc;
         try
         {
-            doc = NwcDocument.Open(inputPath, new NwcReaderOptions
-            {
-                ReadMeshes = readMeshes,
-                ReadMaterials = readMaterials,
-                ReadPropertyRecords = true,
-                ReadGuids = true,
-                ReadTransforms = includeTransforms,
-                BuildSceneTree = includeTree,
-                KeepStreamCatalog = includeCatalog,
-            });
+            doc = NwcDocument.Open(inputPath, readerOptions);
         }
         catch (InvalidDataException ex)
         {
@@ -995,6 +1021,66 @@ internal static class Program
         return 0;
     }
 
+    private static int ExportAssemblyExtras(
+        NwcAssembly assembly,
+        string? explicitSetsXmlPath,
+        string? explicitTimeLinerCsvPath,
+        string? explicitGridsPath,
+        string? explicitExportGridsPath,
+        bool printReport,
+        TextWriter @err)
+    {
+        if (!string.IsNullOrEmpty(explicitTimeLinerCsvPath))
+        {
+            if (assembly.TimeLiner is null)
+            {
+                @err.WriteLine("Error: The assembly does not contain a TimeLiner schedule.");
+                return 2;
+            }
+            EnsureParentDirectory(explicitTimeLinerCsvPath);
+            Model.TimeLiner.NwcTimeLinerCsvSerializer.Save(assembly.TimeLiner, explicitTimeLinerCsvPath);
+        }
+
+        if (!string.IsNullOrEmpty(explicitSetsXmlPath))
+        {
+            EnsureParentDirectory(explicitSetsXmlPath);
+            Model.Sets.NwcXmlSetSerializer.Save(assembly.SelectionSets, explicitSetsXmlPath);
+        }
+
+        if (!string.IsNullOrEmpty(explicitGridsPath))
+        {
+            if (!File.Exists(explicitGridsPath))
+            {
+                @err.WriteLine($"Error: Grids file '{explicitGridsPath}' not found.");
+                return 2;
+            }
+            var grids = Model.Grids.NwcGridSystem.LoadXml(explicitGridsPath);
+            assembly.GridSystem = grids;
+            int assigned = assembly.AssignGridLocations(grids);
+            if (printReport)
+            {
+                @err.WriteLine($"Loaded grid system '{grids.Name}' with {grids.Lines.Count} lines. Assigned grid locations to {assigned} clashes.");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(explicitExportGridsPath))
+        {
+            if (assembly.GridSystem is null)
+            {
+                @err.WriteLine("Error: The assembly does not contain a grid system to export.");
+                return 2;
+            }
+            EnsureParentDirectory(explicitExportGridsPath);
+            assembly.GridSystem.SaveXml(explicitExportGridsPath);
+            if (printReport)
+            {
+                @err.WriteLine($"Exported grid system '{assembly.GridSystem.Name}' ({assembly.GridSystem.Lines.Count} lines) to '{explicitExportGridsPath}'.");
+            }
+        }
+
+        return 0;
+    }
+
     private static int ProcessAssemblyDirectory(
         string dirPath,
         string? outputPath,
@@ -1030,6 +1116,11 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
+        NwcReaderOptions? readerOptions = null,
+        string? explicitSetsXmlPath = null,
+        string? explicitTimeLinerCsvPath = null,
+        string? explicitGridsPath = null,
+        string? explicitExportGridsPath = null,
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
@@ -1044,7 +1135,7 @@ internal static class Program
             outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
         }
 
-        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: new NwcReaderOptions { BuildSceneTree = includeTree });
+        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1095,6 +1186,13 @@ internal static class Program
         {
             int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
             infoOut.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+        }
+
+        int extrasExit = ExportAssemblyExtras(
+            assembly, explicitSetsXmlPath, explicitTimeLinerCsvPath, explicitGridsPath, explicitExportGridsPath, printReport, @err);
+        if (extrasExit != 0)
+        {
+            return extrasExit;
         }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
@@ -1330,6 +1428,11 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
+        NwcReaderOptions? readerOptions = null,
+        string? explicitSetsXmlPath = null,
+        string? explicitTimeLinerCsvPath = null,
+        string? explicitGridsPath = null,
+        string? explicitExportGridsPath = null,
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
@@ -1343,7 +1446,7 @@ internal static class Program
         {
             outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         }
-        var assembly = NwcAssembly.OpenNwf(nwfPath, new NwcReaderOptions { BuildSceneTree = includeTree });
+        var assembly = NwcAssembly.OpenNwf(nwfPath, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1394,6 +1497,13 @@ internal static class Program
         {
             int linked = Model.TimeLiner.NwcTimeLinerLinker.AutoLink(assembly.TimeLiner, assembly.SelectionSets);
             infoOut.WriteLine($"Linked {linked} TimeLiner tasks to assembly elements.");
+        }
+
+        int extrasExit = ExportAssemblyExtras(
+            assembly, explicitSetsXmlPath, explicitTimeLinerCsvPath, explicitGridsPath, explicitExportGridsPath, printReport, @err);
+        if (extrasExit != 0)
+        {
+            return extrasExit;
         }
 
         if (!string.IsNullOrEmpty(explicitProfilerPath))
@@ -1573,6 +1683,11 @@ internal static class Program
             @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
             @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
             @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
+            if (bvhStats)
+            {
+                var idx = assembly.SpatialIndex;
+                @err.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
+            }
             foreach (var xref in assembly.UnresolvedXRefs)
             {
                 @err.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
