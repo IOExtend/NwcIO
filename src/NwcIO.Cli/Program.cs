@@ -27,6 +27,10 @@ internal static class Program
 
         Options:
           --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
+          -i, --input <path> Add an input model; repeat to build a federation
+          -o, --output <path> Explicit output path (required with multiple -i inputs)
+          --recursive        Search subfolders for folder input
+          --pattern <globs>  Semicolon-separated folder patterns (default: *.nwc)
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
@@ -110,6 +114,10 @@ internal static class Program
 
         string? inputPath = null;
         string? outputPath = null;
+        var explicitInputPaths = new List<string>();
+        string? explicitOutputPath = null;
+        bool recursiveFolders = false;
+        string? folderPattern = null;
         string? explicitObjPath = null;
         string? explicitGlbPath = null;
         string? explicitIfcPath = null;
@@ -178,6 +186,21 @@ internal static class Program
                     return 0;
                 case "--catalog":
                     includeCatalog = true;
+                    break;
+                case "-i":
+                case "--input":
+                    if (!TryConsumeValue(args, ref i, arg, out string inputValue, @err)) return 1;
+                    explicitInputPaths.Add(inputValue);
+                    break;
+                case "-o":
+                case "--output":
+                    if (!TryConsumeValue(args, ref i, arg, out explicitOutputPath, @err)) return 1;
+                    break;
+                case "--recursive":
+                    recursiveFolders = true;
+                    break;
+                case "--pattern":
+                    if (!TryConsumeValue(args, ref i, "--pattern", out folderPattern, @err)) return 1;
                     break;
                 case "--no-transforms":
                     includeTransforms = false;
@@ -402,6 +425,32 @@ internal static class Program
             }
         }
 
+        bool multipleInputs = explicitInputPaths.Count > 1;
+        if (explicitInputPaths.Count > 0)
+        {
+            if (inputPath is not null || outputPath is not null)
+            {
+                @err.WriteLine("Error: -i/--input and -o/--output cannot be combined with positional input or output paths.");
+                return 1;
+            }
+            if (multipleInputs && string.IsNullOrEmpty(explicitOutputPath))
+            {
+                @err.WriteLine("Error: -o/--output is required when using multiple -i/--input paths.");
+                return 1;
+            }
+            inputPath = explicitInputPaths[0];
+            outputPath = explicitOutputPath;
+        }
+        else if (explicitOutputPath is not null)
+        {
+            if (outputPath is not null)
+            {
+                @err.WriteLine("Error: -o/--output cannot be combined with a positional output path.");
+                return 1;
+            }
+            outputPath = explicitOutputPath;
+        }
+
         if (string.IsNullOrWhiteSpace(inputPath))
         {
             @err.WriteLine("Error: Missing input file path.");
@@ -417,8 +466,9 @@ internal static class Program
 
         bool isDirectory = Directory.Exists(inputPath);
         bool isFile = File.Exists(inputPath);
+        bool isNwf = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
 
-        if (isDirectory || inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
+        if (isDirectory || isNwf || multipleInputs)
         {
             if (explicitDiffBaseline != null || explicitDiffJsonPath != null || explicitDiffBcfPath != null || diffToleranceSpecified)
             {
@@ -449,8 +499,7 @@ internal static class Program
             KeepStreamCatalog = includeCatalog,
         };
 
-        bool isNwf = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
-        if (!isDirectory && !isNwf)
+        if (!multipleInputs && !isDirectory && !isNwf)
         {
             if (!string.IsNullOrEmpty(explicitNwfXmlPath))
             {
@@ -474,12 +523,52 @@ internal static class Program
             ExportMaterials = readMaterials,
         };
 
+        int ProcessLoadedAssembly(NwcAssembly preloaded, string displayPath, string? outPath) =>
+            ProcessNwfAssembly(
+                displayPath, outPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
+                explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
+                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
+                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
+                explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                readerOptions, explicitSetsXmlPath, explicitTimeLinerCsvPath, explicitGridsPath, explicitExportGridsPath,
+                includeTree, stdoutStream, @out, @err, preloadedAssembly: preloaded);
+
         // Handle multi-model directory assembly and NWF assembly files with the same
         // exit-code mapping as the single-file path: a missing folder or a folder with
         // no models is a level-2 error, anything thrown while reading model data is a
         // data format error (3) — never an unhandled exception with a stack trace.
         try
         {
+            if (multipleInputs)
+            {
+                var docs = new List<NwcDocument>(explicitInputPaths.Count);
+                foreach (var path in explicitInputPaths)
+                {
+                    if (!File.Exists(path))
+                    {
+                        @err.WriteLine($"Error: Input '{path}' does not exist as a file.");
+                        return 2;
+                    }
+                    if (!path.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) &&
+                        !path.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
+                    {
+                        @err.WriteLine($"Error: Multiple inputs must be .nwc or .nwd files; '{path}' is not supported.");
+                        return 1;
+                    }
+                    docs.Add(NwcDocument.Open(path, readerOptions));
+                }
+
+                return ProcessLoadedAssembly(NwcAssembly.Create("Federation", docs), "Federation", outputPath);
+            }
+
+            if (inputPath.EndsWith(".nwf.xml", StringComparison.OrdinalIgnoreCase))
+            {
+                var manifestAssembly = NwcAssembly.OpenManifest(inputPath, readerOptions);
+                outputPath ??= Path.ChangeExtension(inputPath[..^".nwf.xml".Length], ".glb");
+                return ProcessLoadedAssembly(manifestAssembly, inputPath, outputPath);
+            }
+
             if (isDirectory)
             {
                 return ProcessAssemblyDirectory(
@@ -491,7 +580,7 @@ internal static class Program
                     explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
                     readerOptions, explicitSetsXmlPath, explicitTimeLinerCsvPath, explicitGridsPath, explicitExportGridsPath,
                     includeTree,
-                    stdoutStream, @out, @err);
+                    stdoutStream, @out, @err, recursiveFolders: recursiveFolders, folderPattern: folderPattern);
             }
 
             if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
@@ -1124,7 +1213,9 @@ internal static class Program
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
-        TextWriter? errorWriter = null)
+        TextWriter? errorWriter = null,
+        bool recursiveFolders = false,
+        string? folderPattern = null)
     {
         var @out = outWriter ?? Console.Out;
         var @err = errorWriter ?? Console.Error;
@@ -1135,7 +1226,11 @@ internal static class Program
             outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
         }
 
-        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
+        var patterns = string.IsNullOrWhiteSpace(folderPattern)
+            ? new[] { "*.nwc" }
+            : folderPattern.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var assembly = NwcAssembly.LoadFromDirectory(
+            dirPath, patterns, recursiveFolders, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1430,7 +1525,8 @@ internal static class Program
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
-        TextWriter? errorWriter = null)
+        TextWriter? errorWriter = null,
+        NwcAssembly? preloadedAssembly = null)
     {
         var @out = outWriter ?? Console.Out;
         var @err = errorWriter ?? Console.Error;
@@ -1440,7 +1536,7 @@ internal static class Program
         {
             outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         }
-        var assembly = NwcAssembly.OpenNwf(nwfPath, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
+        var assembly = preloadedAssembly ?? NwcAssembly.OpenNwf(nwfPath, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1664,10 +1760,19 @@ internal static class Program
 
         if (printReport)
         {
-            @err.WriteLine("=== NwcIO NWF Assembly Report ===");
-            @err.WriteLine($"NWF File:         {nwfPath}");
-            // Models[0] is the .nwf document itself; report the component files separately.
-            @err.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
+            if (preloadedAssembly is null)
+            {
+                @err.WriteLine("=== NwcIO NWF Assembly Report ===");
+                @err.WriteLine($"NWF File:         {nwfPath}");
+                // Models[0] is the .nwf document itself; report the component files separately.
+                @err.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
+            }
+            else
+            {
+                @err.WriteLine("=== NwcIO Assembly Report ===");
+                @err.WriteLine($"Assembly:         {assembly.Name}");
+                @err.WriteLine($"Models:           {assembly.Models.Count}");
+            }
             @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
             @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
             @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");

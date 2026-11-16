@@ -221,6 +221,44 @@ public class CliArgumentValidationTests
     }
 
     [Fact]
+    public void MultipleInputsWithoutOutput_Exits1()
+    {
+        string first = TempModel();
+        string second = TempModel();
+        try
+        {
+            var (exit, _, err) = Run(["-i", first, "-i", second]);
+            Assert.Equal(1, exit);
+            Assert.Contains("--output is required", err);
+        }
+        finally
+        {
+            if (File.Exists(first)) File.Delete(first);
+            if (File.Exists(second)) File.Delete(second);
+        }
+    }
+
+    [Fact]
+    public void MultipleInputs_BuildOneAssembly()
+    {
+        string first = TempModel();
+        string second = TempModel();
+        string output = Path.Combine(Path.GetTempPath(), "cli-asm-" + Guid.NewGuid().ToString("N") + ".glb");
+        try
+        {
+            var (exit, _, err) = Run(["-i", first, "-i", second, "-o", output]);
+            Assert.Equal(0, exit);
+            Assert.True(File.Exists(output), err);
+        }
+        finally
+        {
+            if (File.Exists(first)) File.Delete(first);
+            if (File.Exists(second)) File.Delete(second);
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    [Fact]
     public void IfcSchema_InvalidVersion_Exits1()
     {
         string model = TempModel();
