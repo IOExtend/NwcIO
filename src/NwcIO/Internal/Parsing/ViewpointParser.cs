@@ -51,9 +51,11 @@ internal static class ViewpointParser
         while (pos <= maxOffset)
         {
             int tag = ReadInt32(data, pos);
+            int projection = ReadInt32(data, pos + 4);
 
-            // Tag 517 (0x0205) is the primary Navisworks camera viewpoint record marker
-            if (tag == 517 && ReadInt32(data, pos + 4) == 1)
+            // Tag 517 (0x0205) is the primary Navisworks camera viewpoint record marker.
+            // The int after it is the projection: 0 perspective, 1 orthographic.
+            if (tag == 517 && projection is 0 or 1)
             {
                 double qx = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 36));
                 double qy = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 44));
@@ -90,7 +92,9 @@ internal static class ViewpointParser
                             AspectRatio = aspect > 0 ? aspect : 1.0,
                             NearDistance = nearDist > 0 ? nearDist : 0.1,
                             FarDistance = focal > 0 ? focal * 10.0 : 10000.0,
-                            Projection = NwcCameraProjection.Perspective,
+                            Projection = projection == 1
+                                ? NwcCameraProjection.Orthographic
+                                : NwcCameraProjection.Perspective,
                         };
 
                         results.Add(new NwcSavedViewpoint

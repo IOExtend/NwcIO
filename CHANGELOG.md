@@ -12,6 +12,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
 
 ### Fixed
+- The saved-view reader now accepts perspective records (`projection = 0`) as well as orthographic ones and sets `NwcCamera.Projection` from the stored flag; the stored field-of-view/height double is still not decoded and defaults to 60°.
 - `NwcSceneResult.Diagnostics` and `docs/scene.md` say what the conversion reports: what it left out of the document and could detect, not what a document read with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off already lacked. `docs/scene.md` names `.nwf` under Limits and says that length, area, volume and angle values are left out while the unit is unknown, not while it is not feet.
 - The release workflow runs on tag pushes only and fails before anything is built or pushed unless the tag equals `v<Version>`. It can no longer be started by hand from a branch, and its release step runs `gh release create --verify-tag`, so it never creates a tag and the release tag is always the commit the packages were built from.
 
