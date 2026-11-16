@@ -17,6 +17,10 @@ public enum NwcSearchOperator
     LessThan,
     GreaterThanOrEqual,
     LessThanOrEqual,
+    /// <summary>The property exists (any value).</summary>
+    Defined,
+    /// <summary>The property does not exist.</summary>
+    Undefined,
 }
 
 /// <summary>
@@ -105,6 +109,24 @@ public sealed class NwcSearchCondition
     public NwcSearchOperator Operator { get; set; } = NwcSearchOperator.Equals;
     public string Value { get; set; } = string.Empty;
 
+    /// <summary>Raw condition <c>flags</c> attribute, preserved for round-trips.</summary>
+    public string? Flags { get; set; }
+
+    /// <summary>Internal category name stored next to the display name, if present.</summary>
+    public string? InternalCategory { get; set; }
+
+    /// <summary>Internal property name stored next to the display name, if present.</summary>
+    public string? InternalProperty { get; set; }
+
+    /// <summary>Value data type, for example <c>wstring</c> or <c>double</c>; written as the XML <c>type</c> attribute.</summary>
+    public string ValueType { get; set; } = "wstring";
+
+    /// <summary>Inverts the condition result.</summary>
+    public bool Negate { get; set; }
+
+    /// <summary>Optional OR-group number: conditions with the same value are OR-ed as one unit.</summary>
+    public int? Group { get; set; }
+
     public NwcSearchCondition() { }
 
     public NwcSearchCondition(string category, string property, NwcSearchOperator op, string value)
@@ -118,7 +140,9 @@ public sealed class NwcSearchCondition
     /// <summary>
     /// Evaluates whether a given scene graph node satisfies this search condition.
     /// </summary>
-    public bool Evaluate(NwcNode node)
+    public bool Evaluate(NwcNode node) => Negate ? !EvaluateCore(node) : EvaluateCore(node);
+
+    private bool EvaluateCore(NwcNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
 
@@ -154,6 +178,11 @@ public sealed class NwcSearchCondition
             {
                 candidates.Add((p.Value, false));
             }
+        }
+
+        if (Operator is NwcSearchOperator.Defined or NwcSearchOperator.Undefined)
+        {
+            return (candidates.Count > 0) == (Operator == NwcSearchOperator.Defined);
         }
 
         var comparison = Operator == NwcSearchOperator.NotEquals ? NwcSearchOperator.Equals : Operator;
@@ -318,19 +347,54 @@ public sealed class NwcSearchSet : NwcSetItem
     {
         if (Conditions.Count == 0) return true;
 
+        // Conditions with the same Group number are OR-ed; ungrouped conditions are one unit each.
+        var units = new List<List<NwcSearchCondition>>();
+        var grouped = new Dictionary<int, List<NwcSearchCondition>>();
+        foreach (var condition in Conditions)
+        {
+            if (condition.Group is { } group)
+            {
+                if (!grouped.TryGetValue(group, out var list))
+                {
+                    list = [];
+                    grouped[group] = list;
+                }
+
+                list.Add(condition);
+            }
+            else
+            {
+                units.Add([condition]);
+            }
+        }
+
+        units.AddRange(grouped.Values);
+
+        bool MatchesUnit(List<NwcSearchCondition> unit)
+        {
+            for (int i = 0; i < unit.Count; i++)
+            {
+                if (unit[i].Evaluate(node)) return true;
+            }
+
+            return false;
+        }
+
         if (MatchAllConditions)
         {
-            for (int i = 0; i < Conditions.Count; i++)
+            for (int i = 0; i < units.Count; i++)
             {
-                if (!Conditions[i].Evaluate(node)) return false;
+                if (!MatchesUnit(units[i])) return false;
             }
+
             return true;
         }
 
-        for (int i = 0; i < Conditions.Count; i++)
+        for (int i = 0; i < units.Count; i++)
         {
-            if (Conditions[i].Evaluate(node)) return true;
+            if (MatchesUnit(units[i])) return true;
         }
+
         return false;
     }
 }

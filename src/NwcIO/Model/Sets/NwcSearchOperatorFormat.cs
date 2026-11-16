@@ -20,6 +20,8 @@ internal static class NwcSearchOperatorFormat
         NwcSearchOperator.LessThan => "less_than",
         NwcSearchOperator.GreaterThanOrEqual => "greater_or_equal",
         NwcSearchOperator.LessThanOrEqual => "less_or_equal",
+        NwcSearchOperator.Defined => "defined",
+        NwcSearchOperator.Undefined => "undefined",
         _ => throw new ArgumentOutOfRangeException(nameof(op), op, "Unknown search operator."),
     };
 
@@ -42,6 +44,8 @@ internal static class NwcSearchOperatorFormat
         "less_than" or "lessthan" or "<" => NwcSearchOperator.LessThan,
         "greater_or_equal" or "greater_equal" or ">=" => NwcSearchOperator.GreaterThanOrEqual,
         "less_or_equal" or "less_equal" or "<=" => NwcSearchOperator.LessThanOrEqual,
+        "defined" or "exists" => NwcSearchOperator.Defined,
+        "undefined" or "not_defined" or "notexists" => NwcSearchOperator.Undefined,
         _ => throw new FormatException($"Unknown search condition operator '{opStr}'."),
     };
 }

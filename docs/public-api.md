@@ -53,8 +53,8 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 | `NwcTimeLinerCsvSerializer` | CSV schedule export. Frozen: bug fixes only. |
 | `NwcTimeLinerLinker` | Rule-based automated linking of schedule tasks to geometry. Frozen: bug fixes only. |
 | `NwcSelectionSet`, `NwcSearchSet`, `NwcSelectionSetFolder`, `NwcSetItem` | Manual selection sets, dynamic query search sets, and set folders. Frozen: bug fixes only. |
-| `NwcSearchCondition` & `NwcSearchOperator` | Search criteria over node built-ins and property records (equals, contains, wildcard, comparisons). |
-| `NwcXmlSetSerializer` | Navisworks selection-set XML exchange. Frozen: bug fixes only. |
+| `NwcSearchCondition` & `NwcSearchOperator` | Search criteria over node built-ins and property records (equals, contains, wildcard, comparisons, defined/undefined), with per-condition negation, OR groups and preserved XML `flags`/internal names/value type. |
+| `NwcXmlSetSerializer` | Navisworks selection-set XML exchange; condition flags, internal names, value types, negation and OR groups round-trip. Compatibility with every Navisworks-written attribute is not verified. Frozen: bug fixes only. |
 | `NwcQuickProperties` | Curated quick-properties view over property records. |
 | `NwcAppearanceProfiler`, `NwcAppearanceRule`, `NwcXmlAppearanceProfilerSerializer` | Rule-based colouring by search conditions and its XML exchange format. Frozen: bug fixes only. |
 
