@@ -6,6 +6,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner schedules to/from CSV format.
 /// Fully compatible with Navisworks TimeLiner "Import/Export Tasks to CSV", Microsoft Project, and Primavera P6.
+/// CSV has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerCsvSerializer
 {
@@ -36,10 +37,10 @@ public static class NwcTimeLinerCsvSerializer
                 EscapeCsv(task.Id),
                 EscapeCsv(task.Name),
                 task.TaskType.ToString(),
-                task.PlannedStart.ToString(DateFormat, CultureInfo.InvariantCulture),
-                task.PlannedEnd.ToString(DateFormat, CultureInfo.InvariantCulture),
-                task.ActualStart?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
-                task.ActualEnd?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
+                task.PlannedStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture),
+                task.PlannedEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture),
+                task.ActualStart?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
+                task.ActualEnd?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty,
                 task.PlannedCost?.ToString("F2", CultureInfo.InvariantCulture) ?? string.Empty,
                 task.ActualCost?.ToString("F2", CultureInfo.InvariantCulture) ?? string.Empty,
                 EscapeCsv(task.AttachedSelectionSetName ?? string.Empty),
@@ -97,15 +98,18 @@ public static class NwcTimeLinerCsvSerializer
                 taskType = NwcTimeLinerTaskType.Construct;
             }
 
-            if (!DateTimeOffset.TryParse(plannedStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pStart))
+            bool hasStart = DateTimeOffset.TryParse(plannedStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pStart);
+            bool hasEnd = DateTimeOffset.TryParse(plannedEndStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd);
+            if (!hasStart)
             {
-                pStart = DateTimeOffset.UnixEpoch;
+                // A valid end pins the task; only with no dates at all does the epoch placeholder remain.
+                pStart = hasEnd ? NwcTimeLinerDates.AddDays(pEnd, -7) : DateTimeOffset.UnixEpoch;
                 schedule.Warnings.Add(
                     $"Row {rowNumber} ('{id}'): planned start '{plannedStartStr}' is missing or invalid; using {pStart:o}.");
             }
-            if (!DateTimeOffset.TryParse(plannedEndStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd))
+            if (!hasEnd)
             {
-                pEnd = pStart.AddDays(7);
+                pEnd = NwcTimeLinerDates.AddDays(pStart, 7);
                 schedule.Warnings.Add(
                     $"Row {rowNumber} ('{id}'): planned end '{plannedEndStr}' is missing or invalid; using {pEnd:o}.");
             }

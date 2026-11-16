@@ -7,7 +7,7 @@ title: NwcIO
 **NwcIO** is a fast, 100% managed .NET library and CLI tool that reads Autodesk Navisworks files (`.nwc`, `.nwd`, `.nwf`) directly from disk **without requiring Autodesk Navisworks or the Navisworks API to be installed**.
 
 - **Reading the format (`NwcDocument`)**: the scene hierarchy, geometry meshes, transforms, GUID tables, materials, and property categories of a Navisworks cache or document.
-- **Writing `.nwc` (`NwcWriter` / `NwcDocumentBuilder`)**: create and save valid `#LcUStream-V1.1` Navisworks files directly from code.
+- **Writing `.nwc` (`NwcWriter` / `NwcDocumentBuilder`)**: create an `#LcUStream-V1.1` container from code that NwcIO reads back. The output uses NwcIO's own layout and has not been verified to open in Autodesk Navisworks; see the writer limitations in the README.
 - **JSON export (`NwcDocument.SaveJson`)**: writes structured JSON with the file information, property records, GUIDs, transforms, scene tree (each node with its id, name, class, value, element GUID, transform, properties, and hyperlinks), materials, XRefs, DbCache entries, and saved viewpoints, plus optional mesh summaries (id, name, vertex and triangle counts, material, bounding box) and a catalog of the container's sections and streams. It is core and grows with the reader.
 - **Scene adapter (`NwcIO.Scene`)**: turns a Navisworks model into an `IOScene` document for IOViewer. See the [scene adapter](scene.md).
 

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -24,7 +25,36 @@ public sealed class NwcHtmlViewerOptions
     public IReadOnlyList<Sets.NwcSetItem>? SelectionSets { get; set; }
     public Grids.NwcGridSystem? GridSystem { get; set; }
     public string Theme { get; set; } = "dark";
+
+    /// <summary>
+    /// Maximum number of mesh vertices written to the viewer. Meshes that would
+    /// exceed the budget are skipped and reported through
+    /// <see cref="NwcHtmlViewerExportResult"/> and the viewer HUD. A value of
+    /// zero or less disables geometry.
+    /// </summary>
     public int MaxMeshVertices { get; set; } = 500000;
+}
+
+/// <summary>
+/// Describes what an HTML viewer export actually wrote when
+/// <see cref="NwcHtmlViewerOptions.MaxMeshVertices"/> limited the geometry.
+/// </summary>
+/// <param name="TotalMeshes">Number of meshes in the source.</param>
+/// <param name="ExportedMeshes">Number of meshes written to the viewer.</param>
+/// <param name="SkippedMeshes">Number of meshes dropped because of the vertex budget.</param>
+/// <param name="TotalVertices">Number of vertices across all meshes as the viewer stores them (meshes above 65,535 vertices are split into chunks, so vertices shared between chunks count once per chunk).</param>
+/// <param name="ExportedVertices">Number of those vertices written to the viewer; never above <see cref="NwcHtmlViewerOptions.MaxMeshVertices"/>.</param>
+/// <param name="SkippedVertices">Number of those vertices dropped with the skipped meshes.</param>
+public sealed record NwcHtmlViewerExportResult(
+    int TotalMeshes,
+    int ExportedMeshes,
+    int SkippedMeshes,
+    long TotalVertices,
+    long ExportedVertices,
+    long SkippedVertices)
+{
+    /// <summary>True when at least one mesh was left out of the export.</summary>
+    public bool Truncated => SkippedMeshes > 0;
 }
 
 /// <summary>
@@ -38,6 +68,15 @@ public static class NwcHtmlViewerExporter
     /// </summary>
     public static void Save(string path, NwcDocument doc, NwcHtmlViewerOptions? options = null)
     {
+        SaveWithResult(path, doc, options);
+    }
+
+    /// <summary>
+    /// Exports an <see cref="NwcDocument"/> and returns what was written, including
+    /// how many meshes the vertex budget skipped.
+    /// </summary>
+    public static NwcHtmlViewerExportResult SaveWithResult(string path, NwcDocument doc, NwcHtmlViewerOptions? options = null)
+    {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(doc);
 
@@ -50,13 +89,22 @@ public static class NwcHtmlViewerExporter
         options.SelectionSets ??= doc.SelectionSets;
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
-        Write(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options);
+        return WriteWithResult(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options);
     }
 
     /// <summary>
     /// Exports an <see cref="NwcAssembly"/> to a standalone interactive 3D HTML viewer file.
     /// </summary>
     public static void Save(string path, NwcAssembly assembly, NwcHtmlViewerOptions? options = null)
+    {
+        SaveWithResult(path, assembly, options);
+    }
+
+    /// <summary>
+    /// Exports an <see cref="NwcAssembly"/> and returns what was written, including
+    /// how many meshes the vertex budget skipped.
+    /// </summary>
+    public static NwcHtmlViewerExportResult SaveWithResult(string path, NwcAssembly assembly, NwcHtmlViewerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(assembly);
@@ -69,7 +117,7 @@ public static class NwcHtmlViewerExporter
         options.SelectionSets ??= assembly.SelectionSets;
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
-        Write(writer, assembly.AllMeshes, assembly.SavedViewpoints, assembly.ClashTests, assembly.BoundingBox, options);
+        return WriteWithResult(writer, assembly.AllMeshes, assembly.SavedViewpoints, assembly.ClashTests, assembly.BoundingBox, options);
     }
 
     /// <summary>
@@ -107,11 +155,26 @@ public static class NwcHtmlViewerExporter
         BoundingBox3d bounds,
         NwcHtmlViewerOptions options)
     {
+        WriteWithResult(writer, meshes, viewpoints, clashTests, bounds, options);
+    }
+
+    /// <summary>
+    /// Writes the standalone 3D HTML WebGL viewer to a <see cref="TextWriter"/> and
+    /// returns what was written, including how many meshes the vertex budget skipped.
+    /// </summary>
+    public static NwcHtmlViewerExportResult WriteWithResult(
+        TextWriter writer,
+        IReadOnlyList<NwcMesh> meshes,
+        IReadOnlyList<NwcSavedViewpoint> viewpoints,
+        IReadOnlyList<NwcClashTest> clashTests,
+        BoundingBox3d bounds,
+        NwcHtmlViewerOptions options)
+    {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(meshes);
         options ??= new NwcHtmlViewerOptions();
 
-        string jsonPayload = BuildJsonPayload(meshes, viewpoints, clashTests, bounds, options);
+        var (jsonPayload, result) = BuildJsonPayload(meshes, viewpoints, clashTests, bounds, options);
 
         writer.WriteLine("<!DOCTYPE html>");
         writer.WriteLine("<html lang=\"en\">");
@@ -131,6 +194,7 @@ public static class NwcHtmlViewerExporter
         writer.WriteLine(GetViewerScript());
         writer.WriteLine("</body>");
         writer.WriteLine("</html>");
+        return result;
     }
 
     private static string GetCss()
@@ -169,6 +233,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 .section-panel label { font-size: 11px; color: #bbb; display: flex; align-items: center; gap: 6px; }
 .section-panel input[type=range] { width: 100px; }
 .hud-stats { position: absolute; top: 12px; left: 12px; font-size: 11px; color: #777; background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px; pointer-events: none; }
+.hud-warning { position: absolute; top: 36px; left: 12px; font-size: 11px; color: #ffd43b; background: rgba(60,44,0,0.9); border: 1px solid #b8860b; padding: 4px 8px; border-radius: 4px; pointer-events: none; display: none; max-width: 70%; }
 .measure-panel { position: absolute; top: 16px; right: 16px; background: rgba(25,25,25,0.92); border: 1px solid #007acc; border-radius: 6px; padding: 10px 14px; font-size: 11px; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,0.5); min-width: 180px; }
 .measure-panel .title { font-weight: 600; color: #4dabf7; margin-bottom: 4px; display: flex; justify-content: space-between; }
 .measure-panel .row { display: flex; justify-content: space-between; margin: 2px 0; color: #ccc; }
@@ -217,6 +282,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   </div>
   <div id="viewport-container">
     <div class="hud-stats" id="hud-stats">Meshes: 0 | Vertices: 0</div>
+    <div class="hud-warning" id="hud-truncated"></div>
     <canvas id="glcanvas"></canvas>
     <canvas id="overlay"></canvas>
     <div class="measure-panel" id="measure-panel" style="display:none;">
@@ -286,6 +352,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     alert('WebGL is not supported by your browser.');
     return;
   }
+  // 32-bit indices are only used for chunks above 65535 vertices; the normal
+  // chunks stay on 16-bit indices and do not need this extension.
+  gl.getExtension('OES_element_index_uint');
 
   // Camera State
   let camTarget = [0, 0, 0];
@@ -341,8 +410,34 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   let currentCamAnim = null;
 
   // Update HUD
-  const totalVerts = modelData.meshes.reduce((acc, m) => acc + m.chunks.reduce((sum, chunk) => sum + chunk.vertices.length / 3, 0), 0);
-  document.getElementById('hud-stats').textContent = `Meshes: ${modelData.meshes.length} | Vertices: ${Math.round(totalVerts).toLocaleString()}`;
+  const shownVertices = modelData.meshes.reduce((acc, m) => acc + m.chunks.reduce((sum, chunk) => sum + (chunk.count || 0), 0), 0);
+  const totalMeshCount = modelData.totalMeshes !== undefined ? modelData.totalMeshes : modelData.meshes.length;
+  const exportedMeshCount = modelData.exportedMeshes !== undefined ? modelData.exportedMeshes : modelData.meshes.length;
+  document.getElementById('hud-stats').textContent = `Meshes: ${exportedMeshCount}${exportedMeshCount !== totalMeshCount ? ' of ' + totalMeshCount : ''} | Vertices: ${Math.round(shownVertices).toLocaleString()}`;
+  if (modelData.truncated) {
+    const notice = document.getElementById('hud-truncated');
+    notice.textContent = `Showing ${exportedMeshCount} of ${totalMeshCount} meshes (vertex budget reached: ${modelData.skippedMeshes} skipped, ${Math.round(modelData.skippedVertices || 0).toLocaleString()} vertices)`;
+    notice.style.display = 'block';
+  }
+
+  function decodeBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  function decodePositions(base64) {
+    const bytes = decodeBytes(base64);
+    return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+  }
+
+  function decodeIndices(base64, indexBits) {
+    const bytes = decodeBytes(base64);
+    return indexBits === 32
+      ? new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4)
+      : new Uint16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
+  }
 
   // Shaders
   const vsSource = `
@@ -352,11 +447,12 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     uniform mat4 uProjection;
     uniform mat4 uView;
     uniform mat4 uModel;
+    uniform vec3 uChunkOffset;
     varying vec3 vNormal;
     varying vec3 vFragPos;
     varying vec4 vColor;
     void main() {
-      vec4 worldPos = uModel * vec4(aPosition, 1.0);
+      vec4 worldPos = uModel * vec4(aPosition + uChunkOffset, 1.0);
       vFragPos = worldPos.xyz;
       vNormal = (uModel * vec4(aNormal, 0.0)).xyz;
       vColor = aColor;
@@ -424,6 +520,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     uProj: gl.getUniformLocation(prog, 'uProjection'),
     uView: gl.getUniformLocation(prog, 'uView'),
     uModel: gl.getUniformLocation(prog, 'uModel'),
+    uChunkOffset: gl.getUniformLocation(prog, 'uChunkOffset'),
     uLight: gl.getUniformLocation(prog, 'uLightDir'),
     uHigh: gl.getUniformLocation(prog, 'uHighlightColor'),
     uClipX: gl.getUniformLocation(prog, 'uClipX'),
@@ -436,16 +533,21 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   // Upload Meshes to GPU
   const gpuMeshes = modelData.meshes.map((m, idx) => {
     const chunks = m.chunks.map(chunk => {
+      const positions = decodePositions(chunk.positions);
+      const indices = decodeIndices(chunk.indices, chunk.indexBits);
+      const offset = chunk.offset || [0, 0, 0];
+      chunk._positions = positions;
+
       const vbo = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(chunk.vertices), gl.STATIC_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 
       // Compute normals
-      const norms = new Float32Array(chunk.vertices.length);
-      for (let i = 0; i < chunk.indices.length; i += 3) {
-        const i0 = chunk.indices[i]*3, i1 = chunk.indices[i+1]*3, i2 = chunk.indices[i+2]*3;
-        const ax = chunk.vertices[i1]-chunk.vertices[i0], ay = chunk.vertices[i1+1]-chunk.vertices[i0+1], az = chunk.vertices[i1+2]-chunk.vertices[i0+2];
-        const bx = chunk.vertices[i2]-chunk.vertices[i0], by = chunk.vertices[i2+1]-chunk.vertices[i0+1], bz = chunk.vertices[i2+2]-chunk.vertices[i0+2];
+      const norms = new Float32Array(positions.length);
+      for (let i = 0; i < indices.length; i += 3) {
+        const i0 = indices[i]*3, i1 = indices[i+1]*3, i2 = indices[i+2]*3;
+        const ax = positions[i1]-positions[i0], ay = positions[i1+1]-positions[i0+1], az = positions[i1+2]-positions[i0+2];
+        const bx = positions[i2]-positions[i0], by = positions[i2+1]-positions[i0+1], bz = positions[i2+2]-positions[i0+2];
         const nx = ay*bz - az*by, ny = az*bx - ax*bz, nz = ax*by - ay*bx;
         norms[i0]+=nx; norms[i0+1]+=ny; norms[i0+2]+=nz;
         norms[i1]+=nx; norms[i1+1]+=ny; norms[i1+2]+=nz;
@@ -456,7 +558,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       gl.bufferData(gl.ARRAY_BUFFER, norms, gl.STATIC_DRAW);
 
       // Colors
-      const colArr = new Float32Array(chunk.vertices.length / 3 * 4);
+      const colArr = new Float32Array(positions.length / 3 * 4);
       const c = m.color || [0.8, 0.8, 0.8, 1.0];
       for (let i = 0; i < colArr.length; i += 4) {
         colArr[i]=c[0]; colArr[i+1]=c[1]; colArr[i+2]=c[2]; colArr[i+3]=c[3];
@@ -467,19 +569,20 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
       const ibo = gl.createBuffer();
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(chunk.indices), gl.STATIC_DRAW);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
       // Each triangle contributes its three edges, without joining adjacent triangles.
-      const lineIndices = new Uint16Array(Math.floor(chunk.indices.length / 3) * 6);
-      for (let i = 0; i + 2 < chunk.indices.length; i += 3) {
-        const a = chunk.indices[i], b = chunk.indices[i + 1], c = chunk.indices[i + 2];
+      const LineArray = chunk.indexBits === 32 ? Uint32Array : Uint16Array;
+      const lineIndices = new LineArray(Math.floor(indices.length / 3) * 6);
+      for (let i = 0; i + 2 < indices.length; i += 3) {
+        const a = indices[i], b = indices[i + 1], c = indices[i + 2];
         lineIndices.set([a, b, b, c, c, a], i * 2);
       }
       const lineIbo = gl.createBuffer();
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, lineIbo);
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, lineIndices, gl.STATIC_DRAW);
 
-      return { vbo, nbo, cbo, ibo, lineIbo, lineCount: lineIndices.length, count: chunk.indices.length };
+      return { vbo, nbo, cbo, ibo, lineIbo, lineCount: lineIndices.length, count: indices.length, indexBits: chunk.indexBits || 16, offset };
     });
     return { chunks, raw: m, index: idx, bounds: m.bounds };
   });
@@ -571,6 +674,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       }
 
       for (const chunk of gm.chunks) {
+        gl.uniform3f(loc.uChunkOffset, chunk.offset[0], chunk.offset[1], chunk.offset[2]);
         gl.bindBuffer(gl.ARRAY_BUFFER, chunk.vbo);
         gl.vertexAttribPointer(loc.aPos, 3, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(loc.aPos);
@@ -586,7 +690,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, wireframeMode ? chunk.lineIbo : chunk.ibo);
 
         const mode = wireframeMode ? gl.LINES : gl.TRIANGLES;
-        gl.drawElements(mode, wireframeMode ? chunk.lineCount : chunk.count, gl.UNSIGNED_SHORT, 0);
+        const indexType = chunk.indexBits === 32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+        gl.drawElements(mode, wireframeMode ? chunk.lineCount : chunk.count, indexType, 0);
       }
     }
 
@@ -865,9 +970,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
     for (const m of modelData.meshes) {
       for (const chunk of m.chunks) {
-        const v = chunk.vertices;
+        const v = chunk._positions || (chunk._positions = decodePositions(chunk.positions));
+        const offset = chunk.offset || [0, 0, 0];
         for (let i = 0; i < v.length; i += 3) {
-          const pt = [v[i], v[i+1], v[i+2]];
+          const pt = [v[i] + offset[0], v[i+1] + offset[1], v[i+2] + offset[2]];
           const sp = worldToScreen(pt, lastPMat, lastVMat);
           if (sp) {
             const d = Math.hypot(sp[0] - mx, sp[1] - my);
@@ -1155,9 +1261,37 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       return new Date(tlStart + (val / 1000.0) * tlSpan);
     }
 
+    // The slider ends exactly at the last task end; the end of a task is inclusive (as in
+    // NwcTimeLinerSchedule.GetNodeStateAt), so the last position counts as just after it.
+    function tlEffectiveTime(simDate, sliderValue) {
+      return simDate.getTime() + (sliderValue >= 1000 ? 1 : 0);
+    }
+
+    // The task that drives a node at simTime: one in progress; otherwise the latest completed one
+    // (its type decides what the node looks like after it); otherwise the earliest upcoming one.
+    function computeTlNodeState(tasks, simTime) {
+      let driver = null;
+      let driverState = 'NotStarted';
+      tasks.forEach(t => {
+        const tStart = new Date(t.start).getTime();
+        const tEnd = new Date(t.end).getTime();
+        const state = simTime > tEnd ? 'Completed' : (simTime >= tStart ? 'InProgress' : 'NotStarted');
+        const rank = { InProgress: 2, Completed: 1, NotStarted: 0 };
+        let better = driver === null || rank[state] > rank[driverState];
+        if (!better && state === driverState) {
+          if (state === 'Completed') better = tEnd > new Date(driver.end).getTime();
+          else if (state === 'NotStarted') better = tStart < new Date(driver.start).getTime();
+        }
+        if (better) { driver = t; driverState = state; }
+      });
+      return { type: driver.taskType, state: driverState };
+    }
+    // end tl helpers
+
     function updateTlSimulation() {
       const simDate = getSimDate(parseFloat(tlSlider.value));
-      tlDate.textContent = simDate.toISOString().slice(0, 10);
+      const offsetMs = (modelData.timeliner.offsetMinutes || 0) * 60000;
+      tlDate.textContent = new Date(simDate.getTime() + offsetMs).toISOString().slice(0, 10);
 
       if (!tlActive) {
         gpuMeshes.forEach(gm => { gm.hidden = false; gm.simColor = null; });
@@ -1165,19 +1299,17 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         return;
       }
 
-      const simTime = simDate.getTime();
-      const nodeState = new Map();
+      const simTime = tlEffectiveTime(simDate, parseFloat(tlSlider.value));
+      const nodeTasks = new Map();
       modelData.timeliner.tasks.forEach(t => {
-        const tStart = new Date(t.start).getTime();
-        const tEnd = new Date(t.end).getTime();
-        let state = 'NotStarted';
-        if (simTime >= tEnd) state = 'Completed';
-        else if (simTime >= tStart) state = 'InProgress';
-
         (t.nodeIds || []).forEach(nid => {
-          nodeState.set(nid, { type: t.taskType, state: state });
+          if (!nodeTasks.has(nid)) nodeTasks.set(nid, []);
+          nodeTasks.get(nid).push(t);
         });
       });
+
+      const nodeState = new Map();
+      nodeTasks.forEach((tasks, nid) => nodeState.set(nid, computeTlNodeState(tasks, simTime)));
 
       gpuMeshes.forEach(gm => {
         const nid = gm.raw.nodeId !== undefined ? gm.raw.nodeId : gm.raw.id;
@@ -1451,7 +1583,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         const int maxVertices = 65535;
         if (mesh.Vertices.Count <= maxVertices)
         {
-            yield return (mesh.Vertices, mesh.Indices);
+            yield return (mesh.Vertices, ValidTriangles(mesh));
             yield break;
         }
 
@@ -1499,7 +1631,102 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         }
     }
 
-    private static string BuildJsonPayload(
+    // Indices are written as unsigned integers, so a triangle that references a
+    // missing vertex (or a trailing partial triangle) is dropped, as SplitMesh does.
+    private static IReadOnlyList<int> ValidTriangles(NwcMesh mesh)
+    {
+        var count = mesh.Vertices.Count;
+        var indices = mesh.Indices;
+        if (indices.Count % 3 == 0 && indices.All(i => i >= 0 && i < count))
+        {
+            return indices;
+        }
+
+        var valid = new List<int>(indices.Count);
+        for (var i = 0; i + 2 < indices.Count; i += 3)
+        {
+            int a = indices[i], b = indices[i + 1], c = indices[i + 2];
+            if (a >= 0 && a < count && b >= 0 && b < count && c >= 0 && c < count)
+            {
+                valid.Add(a);
+                valid.Add(b);
+                valid.Add(c);
+            }
+        }
+        return valid;
+    }
+
+    private static void WriteChunk(
+        Utf8JsonWriter writer,
+        (IReadOnlyList<Vector3d> Vertices, IReadOnlyList<int> Indices) chunk,
+        ref BoundingBox3d meshBounds)
+    {
+        var vertices = chunk.Vertices;
+
+        // Store the Float32 positions relative to the chunk centre so large world
+        // coordinates are not rounded to the Float32 grid at their magnitude when
+        // stored. The viewer adds the centre back in double for picking and measuring.
+        var min = new Vector3d(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity);
+        var max = new Vector3d(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
+        foreach (var v in vertices)
+        {
+            var position = Sanitize(v);
+            min = new Vector3d(Math.Min(min.X, position.X), Math.Min(min.Y, position.Y), Math.Min(min.Z, position.Z));
+            max = new Vector3d(Math.Max(max.X, position.X), Math.Max(max.Y, position.Y), Math.Max(max.Z, position.Z));
+        }
+        var offset = vertices.Count > 0
+            ? new Vector3d(min.X * 0.5 + max.X * 0.5, min.Y * 0.5 + max.Y * 0.5, min.Z * 0.5 + max.Z * 0.5)
+            : default;
+
+        var positionBytes = new byte[vertices.Count * 3 * sizeof(float)];
+        for (var i = 0; i < vertices.Count; i++)
+        {
+            var position = Sanitize(vertices[i]);
+            meshBounds = meshBounds.Union(position);
+            var span = positionBytes.AsSpan(i * 3 * sizeof(float), 3 * sizeof(float));
+            BinaryPrimitives.WriteSingleLittleEndian(span, (float)(position.X - offset.X));
+            BinaryPrimitives.WriteSingleLittleEndian(span[sizeof(float)..], (float)(position.Y - offset.Y));
+            BinaryPrimitives.WriteSingleLittleEndian(span[(2 * sizeof(float))..], (float)(position.Z - offset.Z));
+        }
+
+        // SplitMesh keeps chunks at 65535 vertices or fewer, so 16-bit indices are
+        // the normal case; use 32-bit if a future chunking change ever exceeds it.
+        var indexBits = vertices.Count <= ushort.MaxValue ? 16 : 32;
+        var bytesPerIndex = indexBits / 8;
+        var indexBytes = new byte[chunk.Indices.Count * bytesPerIndex];
+        for (var i = 0; i < chunk.Indices.Count; i++)
+        {
+            var span = indexBytes.AsSpan(i * bytesPerIndex, bytesPerIndex);
+            var index = chunk.Indices[i];
+            if (indexBits == 16)
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(span, checked((ushort)index));
+            }
+            else
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(span, checked((uint)index));
+            }
+        }
+
+        writer.WriteStartObject();
+        writer.WriteNumber("count", vertices.Count);
+        writer.WriteStartArray("offset");
+        writer.WriteNumberValue(offset.X);
+        writer.WriteNumberValue(offset.Y);
+        writer.WriteNumberValue(offset.Z);
+        writer.WriteEndArray();
+        writer.WriteString("positions", Convert.ToBase64String(positionBytes));
+        writer.WriteString("indices", Convert.ToBase64String(indexBytes));
+        writer.WriteNumber("indexBits", indexBits);
+        writer.WriteEndObject();
+    }
+
+    private static Vector3d Sanitize(Vector3d v) => new(
+        double.IsFinite(v.X) ? v.X : 0,
+        double.IsFinite(v.Y) ? v.Y : 0,
+        double.IsFinite(v.Z) ? v.Z : 0);
+
+    private static (string Json, NwcHtmlViewerExportResult Result) BuildJsonPayload(
         IReadOnlyList<NwcMesh> meshes,
         IReadOnlyList<NwcSavedViewpoint> viewpoints,
         IReadOnlyList<NwcClashTest> clashTests,
@@ -1529,12 +1756,29 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteEndObject();
         }
 
-        // Meshes
+        // Meshes. A mesh that does not fit the remaining budget is skipped, but
+        // later smaller meshes are still considered so the total stays bounded.
         writer.WriteStartArray("meshes");
-        int totalVerts = 0;
+        var budget = Math.Max(0, options.MaxMeshVertices);
+        var exportedMeshes = 0;
+        var skippedMeshes = 0;
+        long totalVertices = 0;
+        long exportedVertices = 0;
+        long skippedVertices = 0;
         foreach (var mesh in meshes)
         {
-            if (totalVerts >= options.MaxMeshVertices) break;
+            // The budget counts the vertices actually written, which chunk splitting can
+            // raise above the source count.
+            var chunks = SplitMesh(mesh).ToList();
+            var meshVertexCount = chunks.Sum(c => c.Vertices.Count);
+            totalVertices += meshVertexCount;
+
+            if (exportedVertices + meshVertexCount > budget)
+            {
+                skippedMeshes++;
+                skippedVertices += meshVertexCount;
+                continue;
+            }
 
             writer.WriteStartObject();
             writer.WriteNumber("id", mesh.Id);
@@ -1576,34 +1820,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
             var meshBounds = BoundingBox3d.Empty;
             writer.WriteStartArray("chunks");
-            foreach (var chunk in SplitMesh(mesh))
+            foreach (var chunk in chunks)
             {
-                writer.WriteStartObject();
-                // Vertices
-                writer.WriteStartArray("vertices");
-                foreach (var v in chunk.Vertices)
-                {
-                    // JSON has no non-finite numbers; writing 0 keeps the vertex count the indices refer to
-                    var position = new Vector3d(
-                        double.IsFinite(v.X) ? v.X : 0,
-                        double.IsFinite(v.Y) ? v.Y : 0,
-                        double.IsFinite(v.Z) ? v.Z : 0);
-                    meshBounds = meshBounds.Union(position);
-                    writer.WriteNumberValue(position.X);
-                    writer.WriteNumberValue(position.Y);
-                    writer.WriteNumberValue(position.Z);
-                }
-                writer.WriteEndArray();
-
-                // Indices
-                writer.WriteStartArray("indices");
-                foreach (var idx in chunk.Indices)
-                {
-                    writer.WriteNumberValue(idx);
-                }
-                writer.WriteEndArray();
-
-                writer.WriteEndObject();
+                WriteChunk(writer, chunk, ref meshBounds);
             }
             writer.WriteEndArray();
 
@@ -1625,9 +1844,25 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             }
 
             writer.WriteEndObject();
-            totalVerts += mesh.Vertices.Count;
+            exportedMeshes++;
+            exportedVertices += meshVertexCount;
         }
         writer.WriteEndArray(); // meshes
+
+        var result = new NwcHtmlViewerExportResult(
+            meshes.Count,
+            exportedMeshes,
+            skippedMeshes,
+            totalVertices,
+            exportedVertices,
+            skippedVertices);
+        writer.WriteBoolean("truncated", result.Truncated);
+        writer.WriteNumber("totalMeshes", result.TotalMeshes);
+        writer.WriteNumber("exportedMeshes", result.ExportedMeshes);
+        writer.WriteNumber("skippedMeshes", result.SkippedMeshes);
+        writer.WriteNumber("totalVertices", result.TotalVertices);
+        writer.WriteNumber("exportedVertices", result.ExportedVertices);
+        writer.WriteNumber("skippedVertices", result.SkippedVertices);
 
         // Viewpoints
         if (options.IncludeViewpoints && viewpoints.Count > 0)
@@ -1768,6 +2003,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 writer.WriteStartObject("timeliner");
                 writer.WriteString("start", start.Value.ToString("o", CultureInfo.InvariantCulture));
                 writer.WriteString("end", end.Value.ToString("o", CultureInfo.InvariantCulture));
+                writer.WriteNumber("offsetMinutes", start.Value.Offset.TotalMinutes);
                 writer.WriteStartArray("tasks");
                 foreach (var task in options.TimeLiner.FlattenTasks())
                 {
@@ -1793,7 +2029,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         writer.WriteEndObject();
         writer.Flush();
 
-        return Encoding.UTF8.GetString(stream.ToArray());
+        return (Encoding.UTF8.GetString(stream.ToArray()), result);
     }
 
     private static void WriteSetItem(Utf8JsonWriter writer, Sets.NwcSetItem item)

@@ -6,6 +6,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner construction simulation schedules
 /// to and from Primavera P6 XER format (.xer).
+/// XER has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerPrimaveraXerSerializer
 {
@@ -45,11 +46,11 @@ public static class NwcTimeLinerPrimaveraXerSerializer
 
         // 2. PROJECT Table
         var overallStart = schedule.OverallStart ?? DateTimeOffset.UtcNow;
-        var overallEnd = schedule.OverallEnd ?? overallStart.AddDays(30);
+        var overallEnd = schedule.OverallEnd ?? NwcTimeLinerDates.AddDays(overallStart, 30);
 
         writer.WriteLine("%T\tPROJECT");
         writer.WriteLine("%F\tproj_id\tproj_short_name\tplan_start_date\tplan_end_date\tstatus_code");
-        writer.WriteLine($"%R\t1\t{CleanField(schedule.Name)}\t{overallStart.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{overallEnd.ToString(DateFormat, CultureInfo.InvariantCulture)}\tActive");
+        writer.WriteLine($"%R\t1\t{CleanField(schedule.Name)}\t{overallStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{overallEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\tActive");
 
         // 3. PROJWBS Table
         writer.WriteLine("%T\tPROJWBS");
@@ -65,15 +66,15 @@ public static class NwcTimeLinerPrimaveraXerSerializer
         {
             taskId++;
             string status = task.Progress >= 1.0 ? "TK_Complete" : (task.Progress > 0.0 ? "TK_Active" : "TK_NotStart");
-            string actStart = task.ActualStart?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
-            string actEnd = task.ActualEnd?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
+            string actStart = task.ActualStart?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
+            string actEnd = task.ActualEnd?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
             string durationHours = Math.Max(0.0, task.PlannedDuration.TotalHours).ToString("F1", CultureInfo.InvariantCulture);
             string pct = (Math.Clamp(task.Progress, 0.0, 1.0) * 100.0).ToString("F1", CultureInfo.InvariantCulture);
             string cost = task.PlannedCost?.ToString("F2", CultureInfo.InvariantCulture) ?? "";
             string actCost = task.ActualCost?.ToString("F2", CultureInfo.InvariantCulture) ?? "";
             string code = string.IsNullOrEmpty(task.Id) ? $"T{taskId}" : task.Id;
 
-            writer.WriteLine($"%R\t{taskId}\t1\t100\t{CleanField(code)}\t{CleanField(task.Name)}\tTT_Task\t{status}\t{task.PlannedStart.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{task.PlannedEnd.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{actStart}\t{actEnd}\t{durationHours}\t{pct}\t{cost}\t{actCost}");
+            writer.WriteLine($"%R\t{taskId}\t1\t100\t{CleanField(code)}\t{CleanField(task.Name)}\tTT_Task\t{status}\t{task.PlannedStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{task.PlannedEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{actStart}\t{actEnd}\t{durationHours}\t{pct}\t{cost}\t{actCost}");
         }
 
         writer.Flush();
@@ -153,21 +154,20 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                     }
                     string name = rowMap.GetValueOrDefault("task_name") ?? "Task";
 
-                    DateTimeOffset start;
-                    if (!rowMap.TryGetValue("target_start_date", out var startStr) ||
-                        string.IsNullOrWhiteSpace(startStr) ||
-                        !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out start))
+                    rowMap.TryGetValue("target_start_date", out var startStr);
+                    rowMap.TryGetValue("target_end_date", out var endStr);
+                    bool hasStart = DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var start);
+                    bool hasEnd = DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var end);
+                    if (!hasStart)
                     {
-                        start = DateTimeOffset.UnixEpoch;
+                        // A valid end pins the task; only with no dates at all does the epoch placeholder remain.
+                        start = hasEnd ? NwcTimeLinerDates.AddDays(end, -1) : DateTimeOffset.UnixEpoch;
                         warnings.Add($"Task '{id}': target start '{startStr}' is missing or invalid; using {start:o}.");
                     }
 
-                    DateTimeOffset end;
-                    if (!rowMap.TryGetValue("target_end_date", out var endStr) ||
-                        string.IsNullOrWhiteSpace(endStr) ||
-                        !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out end))
+                    if (!hasEnd)
                     {
-                        end = start.AddDays(1);
+                        end = NwcTimeLinerDates.AddDays(start, 1);
                         warnings.Add($"Task '{id}': target end '{endStr}' is missing or invalid; using {end:o}.");
                     }
 

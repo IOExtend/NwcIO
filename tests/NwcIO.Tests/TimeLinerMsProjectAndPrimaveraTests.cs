@@ -369,6 +369,90 @@ public class TimeLinerMsProjectAndPrimaveraTests
     }
 
     [Fact]
+    public void Csv_NonZeroOffset_WritesAndReadsUtcInstants()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 8, 0, 0, TimeSpan.FromHours(3));
+        var schedule = new NwcTimeLinerSchedule();
+        schedule.Tasks.Add(new NwcTimeLinerTask("T1", "A", start, start.AddHours(9))
+        {
+            ActualStart = start.AddHours(1),
+            ActualEnd = start.AddHours(4),
+        });
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerCsvSerializer.Write(schedule, ms);
+        ms.Position = 0;
+        string csv = new StreamReader(ms, leaveOpen: true).ReadToEnd();
+        Assert.Contains("2026-06-01 05:00:00", csv);
+
+        ms.Position = 0;
+        var imported = NwcTimeLinerCsvSerializer.Read(ms);
+        var task = Assert.Single(imported.Tasks);
+        Assert.Equal(start, task.PlannedStart);
+        Assert.Equal(start.AddHours(9), task.PlannedEnd);
+        Assert.Equal(start.AddHours(1), task.ActualStart);
+        Assert.Equal(start.AddHours(4), task.ActualEnd);
+    }
+
+    [Fact]
+    public void PrimaveraXer_NonZeroOffset_WritesAndReadsUtcInstants()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 8, 0, 0, TimeSpan.FromHours(3));
+        var schedule = new NwcTimeLinerSchedule("Offset project");
+        schedule.Tasks.Add(new NwcTimeLinerTask("T1", "A", start, start.AddHours(9))
+        {
+            ActualStart = start.AddHours(1),
+            ActualEnd = start.AddHours(4),
+        });
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms);
+        ms.Position = 0;
+        string xer = new StreamReader(ms, leaveOpen: true).ReadToEnd();
+        Assert.Contains("	2026-06-01 05:00	2026-06-01 14:00	Active", xer); // PROJECT plan dates
+        Assert.Contains("	2026-06-01 05:00	2026-06-01 14:00	2026-06-01 06:00	2026-06-01 09:00	", xer); // TASK dates
+
+        ms.Position = 0;
+        var imported = NwcTimeLinerPrimaveraXerSerializer.Read(ms);
+        var task = Assert.Single(imported.Tasks);
+        Assert.Equal(start, task.PlannedStart);
+        Assert.Equal(start.AddHours(9), task.PlannedEnd);
+        Assert.Equal(start.AddHours(1), task.ActualStart);
+        Assert.Equal(start.AddHours(4), task.ActualEnd);
+    }
+
+    [Fact]
+    public void MsProjectXml_NonZeroOffset_WritesAndReadsUtcInstants()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 8, 0, 0, TimeSpan.FromHours(3));
+        var schedule = new NwcTimeLinerSchedule("Offset project");
+        schedule.Tasks.Add(new NwcTimeLinerTask("T1", "A", start, start.AddHours(9))
+        {
+            ActualStart = start.AddHours(1),
+            ActualEnd = start.AddHours(4),
+        });
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerMsProjectXmlSerializer.Write(schedule, ms);
+        ms.Position = 0;
+        string xml = new StreamReader(ms, leaveOpen: true).ReadToEnd();
+        Assert.Contains("<StartDate>2026-06-01T05:00:00</StartDate>", xml);
+        Assert.Contains("<FinishDate>2026-06-01T14:00:00</FinishDate>", xml);
+        Assert.Contains("<Start>2026-06-01T05:00:00</Start>", xml);
+        Assert.Contains("<Finish>2026-06-01T14:00:00</Finish>", xml);
+        Assert.Contains("<ActualStart>2026-06-01T06:00:00</ActualStart>", xml);
+        Assert.Contains("<ActualFinish>2026-06-01T09:00:00</ActualFinish>", xml);
+
+        ms.Position = 0;
+        var imported = NwcTimeLinerMsProjectXmlSerializer.Read(ms);
+        var task = Assert.Single(imported.Tasks);
+        Assert.Equal(start, task.PlannedStart);
+        Assert.Equal(start.AddHours(9), task.PlannedEnd);
+        Assert.Equal(start.AddHours(1), task.ActualStart);
+        Assert.Equal(start.AddHours(4), task.ActualEnd);
+    }
+
+    [Fact]
     public void Cli_UsageHelp_DisplaysNewTimeLinerFlags()
     {
         using var sw = new StringWriter();
@@ -492,5 +576,12 @@ public class TimeLinerMsProjectAndPrimaveraTests
 
         Assert.Equal(expectedSet, task.AttachedSelectionSetName);
         Assert.Equal(expectedType, task.TaskType);
+    }
+
+    [Fact]
+    public void DateFallbackArithmetic_AtExtremes_Clamps()
+    {
+        Assert.Equal(DateTimeOffset.MaxValue, NwcTimeLinerDates.AddDays(DateTimeOffset.MaxValue, 1));
+        Assert.Equal(DateTimeOffset.MinValue, NwcTimeLinerDates.AddDays(DateTimeOffset.MinValue, -1));
     }
 }

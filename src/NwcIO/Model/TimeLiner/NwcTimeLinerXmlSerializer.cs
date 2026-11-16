@@ -193,21 +193,21 @@ public static class NwcTimeLinerXmlSerializer
 
         var plannedElem = elem.Element("planned");
         string? startStr = plannedElem?.Attribute("start")?.Value;
-        DateTimeOffset plannedStart;
-        if (string.IsNullOrEmpty(startStr) ||
-            !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out plannedStart))
+        string? endStr = plannedElem?.Attribute("end")?.Value;
+        bool hasStart = DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var plannedStart);
+        bool hasEnd = DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var plannedEnd);
+        if (!hasStart)
         {
-            plannedStart = DateTimeOffset.UnixEpoch;
+            // A valid end pins the task; only with no dates at all does the epoch placeholder remain.
+            plannedStart = hasEnd ? NwcTimeLinerDates.AddDays(plannedEnd, -7) : DateTimeOffset.UnixEpoch;
             schedule.Warnings.Add(
                 $"Task '{id}': planned start '{startStr}' is missing or invalid; using {plannedStart:o}.");
         }
 
-        string? endStr = plannedElem?.Attribute("end")?.Value;
-        DateTimeOffset plannedEnd;
-        if (string.IsNullOrEmpty(endStr) ||
-            !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out plannedEnd))
+        if (!hasEnd)
         {
-            plannedEnd = plannedStart.AddDays(7);
+            // A parsed start may sit at DateTimeOffset.MaxValue; AddDays would throw.
+            plannedEnd = NwcTimeLinerDates.AddDays(plannedStart, 7);
             schedule.Warnings.Add(
                 $"Task '{id}': planned end '{endStr}' is missing or invalid; using {plannedEnd:o}.");
         }

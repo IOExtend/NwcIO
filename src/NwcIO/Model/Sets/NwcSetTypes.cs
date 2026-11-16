@@ -105,6 +105,18 @@ public sealed class NwcSearchCondition
     public NwcSearchOperator Operator { get; set; } = NwcSearchOperator.Equals;
     public string Value { get; set; } = string.Empty;
 
+    /// <summary>Raw condition <c>flags</c> attribute, preserved for round-trips.</summary>
+    public string? Flags { get; set; }
+
+    /// <summary>Internal category name stored next to the display name, if present.</summary>
+    public string? InternalCategory { get; set; }
+
+    /// <summary>Internal property name stored next to the display name, if present.</summary>
+    public string? InternalProperty { get; set; }
+
+    /// <summary>Value data type, for example <c>wstring</c> or <c>double</c>; written as the XML <c>type</c> attribute.</summary>
+    public string ValueType { get; set; } = "wstring";
+
     public NwcSearchCondition() { }
 
     public NwcSearchCondition(string category, string property, NwcSearchOperator op, string value)

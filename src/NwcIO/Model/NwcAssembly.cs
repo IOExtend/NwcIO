@@ -15,6 +15,14 @@ public sealed class NwcAssembly
 
     public string Name { get; }
     public IReadOnlyList<NwcDocument> Models { get; }
+
+    /// <summary>True when the contributing models report different length units; the assembly does not rescale them.</summary>
+    public bool HasMixedLengthUnits =>
+        Models.Select(model => model.LengthUnit)
+            .Where(unit => unit != NwcLengthUnit.Unknown)
+            .Distinct()
+            .Skip(1)
+            .Any();
     public NwcNode RootNode { get; }
     public IReadOnlyList<NwcMesh> AllMeshes { get; }
     public IReadOnlyList<NwcMaterial> AllMaterials { get; }
@@ -256,7 +264,9 @@ public sealed class NwcAssembly
     }
 
     /// <summary>
-    /// Detects spatial geometric clashes (bounding box overlaps) between meshes belonging to different models.
+    /// Detects spatial clashes between meshes belonging to different models. Meshes whose world bounding boxes
+    /// come within <paramref name="tolerance"/> of each other are reported; the overlap box is empty when they
+    /// only come close.
     /// </summary>
     public IReadOnlyList<NwcClash> FindClashes(double tolerance = 0.0)
     {
@@ -266,6 +276,7 @@ public sealed class NwcAssembly
         }
 
         var clashes = new List<NwcClash>();
+        var modelKeys = NwcElementGuid.ModelKeys(Models);
 
         // Build per-model spatial indexes
         var modelIndexes = new (NwcDocument Doc, NwcSpatialIndex Index)[Models.Count];
@@ -300,7 +311,7 @@ public sealed class NwcAssembly
                     {
                         var meshB = candidatesB[n];
                         var boxB = meshB.GetWorldBoundingBox();
-                        if (boxA.Intersects(boxB))
+                        if (expanded.Intersects(boxB))
                         {
                             var overlap = new BoundingBox3d(
                                 new Vector3d(
@@ -311,8 +322,21 @@ public sealed class NwcAssembly
                                     Math.Min(boxA.Max.X, boxB.Max.X),
                                     Math.Min(boxA.Max.Y, boxB.Max.Y),
                                     Math.Min(boxA.Max.Z, boxB.Max.Z)));
+                            if (overlap.IsEmpty)
+                            {
+                                // Near miss: point at the middle of the gap (or of the overlap on axes that overlap).
+                                var point = new Vector3d(
+                                    (Math.Max(boxA.Min.X, boxB.Min.X) + Math.Min(boxA.Max.X, boxB.Max.X)) * 0.5,
+                                    (Math.Max(boxA.Min.Y, boxB.Min.Y) + Math.Min(boxA.Max.Y, boxB.Max.Y)) * 0.5,
+                                    (Math.Max(boxA.Min.Z, boxB.Min.Z) + Math.Min(boxA.Max.Z, boxB.Max.Z)) * 0.5);
+                                overlap = new BoundingBox3d(point, point);
+                            }
 
-                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap));
+                            clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap)
+                            {
+                                ModelKeyA = modelKeys[i],
+                                ModelKeyB = modelKeys[j],
+                            });
                         }
                     }
                 }

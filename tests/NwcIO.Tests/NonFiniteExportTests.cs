@@ -87,7 +87,18 @@ public sealed class NonFiniteExportTests
         string html = sw.ToString();
 
         Assert.DoesNotContain("\"boundingBox\"", html, StringComparison.Ordinal);
-        Assert.Contains("\"vertices\":[0,0,0,1,0,0,0,1,0]", html, StringComparison.Ordinal);
+        int dataStart = html.IndexOf('>', html.IndexOf("id=\"nwc-data\"", StringComparison.Ordinal)) + 1;
+        int dataEnd = html.IndexOf("</script>", dataStart, StringComparison.Ordinal);
+        using var payload = JsonDocument.Parse(html[dataStart..dataEnd]);
+        var chunk = payload.RootElement.GetProperty("meshes")[0].GetProperty("chunks")[0];
+        var offset = chunk.GetProperty("offset").EnumerateArray().Select(v => v.GetDouble()).ToArray();
+        var raw = Convert.FromBase64String(chunk.GetProperty("positions").GetString()!);
+        var positions = new double[raw.Length / sizeof(float)];
+        for (var i = 0; i < positions.Length; i++)
+        {
+            positions[i] = BinaryPrimitives.ReadSingleLittleEndian(raw.AsSpan(i * sizeof(float))) + offset[i % 3];
+        }
+        Assert.Equal<double>([0, 0, 0, 1, 0, 0, 0, 1, 0], positions);
         Assert.Contains("{\"name\":\"broken\"}", html, StringComparison.Ordinal);
         Assert.Contains("{\"name\":\"fine\",\"camera\":{\"position\":[1,2,3]", html, StringComparison.Ordinal);
     }
