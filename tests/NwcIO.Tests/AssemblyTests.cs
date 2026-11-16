@@ -286,6 +286,11 @@ public class AssemblyTests
             Assert.EndsWith("Mech/D.nwc", unresolved.EffectivePath);
             var skipped = Assert.Single(assembly.SkippedXRefs);
             Assert.EndsWith("tex.png", skipped.EffectivePath);
+
+            var skippedDiagnostic = Assert.Single(assembly.Diagnostics, d => d.Code == "NwfSkippedXref");
+            Assert.Equal(NwcDiagnosticSeverity.Warning, skippedDiagnostic.Severity);
+            Assert.Contains("tex.png", skippedDiagnostic.Message, StringComparison.Ordinal);
+            Assert.Single(assembly.Diagnostics, d => d.Code == "NwfUnresolvedXref");
         }
         finally
         {

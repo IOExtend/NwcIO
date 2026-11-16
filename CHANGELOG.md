@@ -5,6 +5,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ## [Unreleased]
 
 ### Added
+- `NwcDiagnostic` and `NwcDiagnosticSeverity`, with `NwcDocument.Diagnostics` and `NwcAssembly.Diagnostics`: reader warnings for data that was skipped or substituted. `ContainerTrailingGap` reports bytes after the last container stream (including a zlib stream dropped for a bad or missing Adler-32 trailer, #159), and `NwfUnresolvedXref` and `NwfSkippedXref` report the external references of a `.nwf` file that `NwcAssembly.OpenNwf` could not load. An assembly carries the diagnostics of its documents.
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 
 ### Changed

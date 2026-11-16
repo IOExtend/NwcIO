@@ -20,6 +20,18 @@ public sealed class NwcDiagnosticTests
     }
 
     [Fact]
+    public void Open_TruncatedLastStream_AddsContainerTrailingGapDiagnostic()
+    {
+        byte[] file = NwcIO.NwcDocument.Create().ToByteArray();
+        byte[] truncated = file[..^2]; // cut inside the Adler-32 trailer of the last zlib stream
+
+        var document = NwcIO.NwcDocument.Open(new MemoryStream(truncated));
+
+        var diagnostic = Assert.Single(document.Diagnostics, item => item.Code == "ContainerTrailingGap");
+        Assert.True(diagnostic.ByteOffset > 0 && diagnostic.ByteOffset < truncated.Length);
+    }
+
+    [Fact]
     public void Assembly_CarriesTheDiagnosticsOfItsDocuments()
     {
         byte[] file = NwcIO.NwcDocument.Create().ToByteArray();
