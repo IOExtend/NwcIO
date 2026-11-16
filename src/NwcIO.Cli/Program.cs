@@ -222,7 +222,7 @@ internal static class Program
                     break;
                 case "--scene-length-unit":
                     if (!TryConsumeValue(args, ref i, "--scene-length-unit", out string sceneUnitStr, @err)) return 1;
-                    if (!Enum.TryParse<NwcLengthUnit>(sceneUnitStr, ignoreCase: true, out var parsedSceneUnit))
+                    if (!TryParseSceneLengthUnit(sceneUnitStr, out var parsedSceneUnit))
                     {
                         @err.WriteLine($"Error: Invalid scene length unit '{sceneUnitStr}'. Use ft, m, cm or mm.");
                         return 1;
@@ -541,16 +541,24 @@ internal static class Program
 
         if (!string.IsNullOrEmpty(explicitScenePath))
         {
-            EnsureParentDirectory(explicitScenePath);
-            var sceneResult = NwcIO.Scene.NwcSceneReader.Read(doc, new NwcIO.Scene.NwcSceneOptions
+            try
             {
-                ModelKey = Path.GetFileName(inputPath),
-                LengthUnit = sceneLengthUnit,
-            });
-            File.WriteAllText(explicitScenePath, IOScene.SceneJson.Write(sceneResult.Document));
-            foreach (var diagnostic in sceneResult.Diagnostics)
+                EnsureParentDirectory(explicitScenePath);
+                var sceneResult = NwcIO.Scene.NwcSceneReader.Read(doc, new NwcIO.Scene.NwcSceneOptions
+                {
+                    ModelKey = Path.GetFileName(inputPath),
+                    LengthUnit = sceneLengthUnit,
+                });
+                File.WriteAllText(explicitScenePath, IOScene.SceneJson.Write(sceneResult.Document));
+                foreach (var diagnostic in sceneResult.Diagnostics)
+                {
+                    @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
+                }
+            }
+            catch (Exception ex)
             {
-                @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
+                @err.WriteLine($"Error writing scene '{explicitScenePath}': {ex.Message}");
+                return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
             }
         }
 
@@ -1747,6 +1755,41 @@ internal static class Program
         }
 
         return count;
+    }
+
+    private static bool TryParseSceneLengthUnit(string value, out NwcLengthUnit unit)
+    {
+        switch (value.ToLowerInvariant())
+        {
+            case "ft":
+            case "feet":
+                unit = NwcLengthUnit.Feet;
+                return true;
+            case "m":
+            case "meter":
+            case "meters":
+            case "metre":
+            case "metres":
+                unit = NwcLengthUnit.Meters;
+                return true;
+            case "cm":
+            case "centimeter":
+            case "centimeters":
+            case "centimetre":
+            case "centimetres":
+                unit = NwcLengthUnit.Centimeters;
+                return true;
+            case "mm":
+            case "millimeter":
+            case "millimeters":
+            case "millimetre":
+            case "millimetres":
+                unit = NwcLengthUnit.Millimeters;
+                return true;
+            default:
+                unit = NwcLengthUnit.Unknown;
+                return false;
+        }
     }
 
     private static bool TryConsumeValue(string[] args, ref int i, string optionName, out string value, TextWriter? err = null)

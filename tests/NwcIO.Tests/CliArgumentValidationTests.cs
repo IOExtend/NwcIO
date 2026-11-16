@@ -255,6 +255,49 @@ public class CliArgumentValidationTests
         }
     }
 
+    [Theory]
+    [InlineData("ft")]
+    [InlineData("m")]
+    [InlineData("cm")]
+    [InlineData("mm")]
+    public void Scene_LengthUnitSymbols_WriteTheScene(string unit)
+    {
+        string model = TempModel();
+        string scene = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var (exit, _, err) = Run([model, "--scene", scene, "--scene-length-unit", unit]);
+
+            Assert.Equal(0, exit);
+            Assert.True(File.Exists(scene));
+            Assert.DoesNotContain("Invalid scene length unit", err);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(scene)) File.Delete(scene);
+        }
+    }
+
+    [Fact]
+    public void Scene_InvalidLengthUnit_Exits1()
+    {
+        string model = TempModel();
+        string scene = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var (exit, _, err) = Run([model, "--scene", scene, "--scene-length-unit", "99"]);
+
+            Assert.Equal(1, exit);
+            Assert.Contains("Invalid scene length unit '99'", err);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(scene)) File.Delete(scene);
+        }
+    }
+
     [Fact]
     public void IfcSchema_InvalidVersion_Exits1()
     {
