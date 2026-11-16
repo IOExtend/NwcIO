@@ -36,12 +36,16 @@ internal sealed class PropertyRecordScanner
 
     public string? FailureReason { get; private set; }
 
+    /// <summary>Byte offset of the first malformed probe; null when no probe failed.</summary>
+    public int? FailureOffset { get; private set; }
+
     public List<NwcPropertyRecord> Scan()
     {
         var records = new List<NwcPropertyRecord>();
         _pos = 0;
         StoppedAt = 0;
         FailureReason = null;
+        FailureOffset = null;
 
         while (_pos + 8 <= _data.Length)
         {
@@ -207,12 +211,24 @@ internal sealed class PropertyRecordScanner
         value = null;
         if (pos + 4 > _data.Length)
         {
+            FailureReason ??= $"A length-prefixed string at byte {pos} runs past the end of the stream.";
+            FailureOffset ??= pos;
             return false;
         }
 
         int len = ReadInt32At(pos);
-        if (len is < 0 or > 65536 || pos + 4 + len > _data.Length)
+        if (len == -1)
         {
+            // The format uses -1 for a null string; it is valid in both strict and lenient readers.
+            value = null;
+            pos += 4;
+            return true;
+        }
+
+        if (len < 0 || len > 65536 || pos + 4 + len > _data.Length)
+        {
+            FailureReason ??= $"A length-prefixed string at byte {pos} has invalid length {len}.";
+            FailureOffset ??= pos;
             return false;
         }
 

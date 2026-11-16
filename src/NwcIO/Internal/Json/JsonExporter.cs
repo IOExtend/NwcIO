@@ -291,6 +291,28 @@ internal static class JsonExporter
             writer.WriteEndArray();
         }
 
+        if (document.Diagnostics.Count > 0)
+        {
+            writer.WriteStartArray("diagnostics");
+            foreach (var diagnostic in document.Diagnostics)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("severity", diagnostic.Severity.ToString());
+                writer.WriteString("code", diagnostic.Code);
+                writer.WriteString("message", diagnostic.Message);
+                if (diagnostic.StreamIndex is int streamIndex)
+                {
+                    writer.WriteNumber("streamIndex", streamIndex);
+                }
+                if (diagnostic.ByteOffset is long byteOffset)
+                {
+                    writer.WriteNumber("byteOffset", byteOffset);
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
+
         if (options.IncludeStreamCatalog)
         {
             WriteStreamCatalog(writer, document);

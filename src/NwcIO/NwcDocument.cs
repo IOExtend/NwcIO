@@ -184,6 +184,7 @@ public sealed class NwcDocument
 
         string rootName = Path.GetFileNameWithoutExtension(fileInfo.SourcePath ?? fallbackName ?? "Model");
 
+        var diagnostics = new List<NwcDiagnostic>();
         var records = new List<NwcPropertyRecord>();
         cancellationToken.ThrowIfCancellationRequested();
         if (options.ReadPropertyRecords)
@@ -192,6 +193,16 @@ public sealed class NwcDocument
             {
                 var scanner = new PropertyRecordScanner(s.Data);
                 records.AddRange(scanner.Scan());
+                if (segments is null && scanner.FailureReason is not null)
+                {
+                    // The lenient scanner searches forward; a rejected probe is not a lost record.
+                    diagnostics.Add(new NwcDiagnostic(
+                        NwcDiagnosticSeverity.Warning,
+                        "property-scan-failed",
+                        scanner.FailureReason,
+                        s.Index,
+                        scanner.FailureOffset));
+                }
             }
         }
 
@@ -311,9 +322,6 @@ public sealed class NwcDocument
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("open", 1, 1));
-        var document = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
-        var diagnostics = new List<NwcDiagnostic>();
         if (skippedMeshRecords > 0)
         {
             diagnostics.Add(new NwcDiagnostic(
@@ -332,6 +340,17 @@ public sealed class NwcDocument
                 ByteOffset: container.FileLength - container.TrailingGap));
         }
 
+        if (options.Strict)
+        {
+            var errors = diagnostics.Where(d => d.Severity == NwcDiagnosticSeverity.Error).ToList();
+            if (errors.Count > 0)
+            {
+                throw new InvalidDataException(string.Join(" ", errors.Select(d => d.Message)));
+            }
+        }
+
+        progress?.Report(new NwcProgress("open", 1, 1));
+        var document = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
         document.Diagnostics = diagnostics;
 
         return document;

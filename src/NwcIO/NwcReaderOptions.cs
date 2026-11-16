@@ -63,4 +63,10 @@ public sealed class NwcReaderOptions
     /// Model files read through their DbCache directory use the strict geometry parser and its own bounds.
     /// </summary>
     public int MaxMeshVertices { get; set; } = Internal.Parsing.MeshParser.MaxPlausibleVertices;
+
+    /// <summary>
+    /// Throw <see cref="InvalidDataException"/> when the reader records an error-level diagnostic
+    /// (default: false, diagnostics are only recorded).
+    /// </summary>
+    public bool Strict { get; set; }
 }
