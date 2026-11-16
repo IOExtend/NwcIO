@@ -185,17 +185,21 @@ internal static class IfcExporter
             int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                 $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-            string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+            var owner = mesh.Node?.Element ?? mesh.Node;
+            string elemName = !string.IsNullOrEmpty(owner?.Name)
+                ? owner.Name
+                : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
             string elemGuid = IfcGuid.FromElementId(mesh.Id, "NwcMesh");
-            string ifcType = ClassifyElement(elemName, mesh.Node);
+            string ifcType = ClassifyElement(elemName, owner);
 
             int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
             elementIds.Add(elemId);
+            // Type name uses the same owner as classification below.
 
             // Type assignment
             if (options.ExportTypeObjects)
             {
-                string typeName = CleanTypeName(elemName, mesh.Node, ifcType);
+                string typeName = CleanTypeName(elemName, owner, ifcType);
                 string typeKey = $"{ifcType}::{typeName}";
                 if (!typeMap.TryGetValue(typeKey, out var entry))
                 {
@@ -413,9 +417,12 @@ internal static class IfcExporter
                 int elemPlacementId = w.Add("IFCLOCALPLACEMENT",
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
-                string elemName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+                var owner = mesh.Node?.Element ?? mesh.Node;
+                string elemName = !string.IsNullOrEmpty(owner?.Name)
+                    ? owner.Name
+                    : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
                 string elemGuid = IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
-                string ifcType = ClassifyElement(elemName, mesh.Node);
+                string ifcType = ClassifyElement(elemName, owner);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
                 modelElementIds.Add(elemId);
@@ -423,7 +430,7 @@ internal static class IfcExporter
                 // Type assignment
                 if (options.ExportTypeObjects)
                 {
-                    string typeName = CleanTypeName(elemName, mesh.Node, ifcType);
+                    string typeName = CleanTypeName(elemName, owner, ifcType);
                     string typeKey = $"{ifcType}::{typeName}";
                     if (!typeMap.TryGetValue(typeKey, out var entry))
                     {
@@ -697,6 +704,21 @@ internal static class IfcExporter
 
     private static string? ClassifyText(string text)
     {
+        if (text.StartsWith("Ifc", StringComparison.OrdinalIgnoreCase) && text.Length > 3)
+        {
+            return ClassifyText(text[3..]);
+        }
+
+        if (HasTokenPrefix(text, "балкон"))
+        {
+            return HasTokenPrefix(text, "огражд", "перил", "rail") ? "IFCRAILING" : null;
+        }
+
+        if (HasTokenPrefix(text, "крышк", "плитк"))
+        {
+            return null;
+        }
+
         if (HasTokenPrefix(text, "труб", "pipe"))
             return "IFCPIPESEGMENT";
         if (HasTokenPrefix(text, "воздуховод", "duct"))

@@ -68,6 +68,65 @@ public class IfcExportTests
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
     }
 
+    [Fact]
+    public void SaveIfc_CompositeElement_ClassifiesByTheOwnerCategory()
+    {
+        var element = new NwcNode { Id = 1, Name = "Wall A", Class = "LcRevitComposite" };
+        element.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 1, Tag = 52, Name = "Category", Class = "Element", ValueType = 4, Value = "Walls",
+        });
+        var leaf = new NwcNode { Id = 2, Name = "Solid", Class = "LcRevitSolid", Element = element };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = leaf,
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions());
+
+        Assert.Contains("IFCWALL(", ifc);
+        Assert.Contains("'Wall A'", ifc);
+    }
+
+    [Fact]
+    public void SaveIfc_ExplicitIfcEntityProperty_DrivesTheClass()
+    {
+        var element = new NwcNode { Id = 1, Name = "Element 17", Class = "LcRevitSolid" };
+        element.Properties.Add(new NwcPropertyRecord
+        {
+            FirstInt = 1, Tag = 52, Name = "IfcEntity", Class = "Element", ValueType = 4, Value = "IfcDoor",
+        });
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = element,
+        };
+
+        Assert.Contains("IFCDOOR(", NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions()));
+    }
+
+    [Theory]
+    [InlineData("Балконное ограждение", "IFCRAILING")]
+    [InlineData("Крышка люка", "IFCBUILDINGELEMENTPROXY")]
+    [InlineData("Плитка", "IFCBUILDINGELEMENTPROXY")]
+    public void SaveIfc_RussianStems_DoNotCreateFalsePositives(string name, string expected)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = name,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        Assert.Contains(expected + "(", NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions()));
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]
