@@ -464,6 +464,41 @@ public sealed class NwcAssembly
         ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name);
     }
 
+    /// <summary>
+    /// Builds a single document that carries the assembly scene tree, meshes,
+    /// materials, viewpoints, selection sets, GUIDs and TimeLiner schedule.
+    /// The file info is neutral and does not claim a Revit origin.
+    /// </summary>
+    public NwcDocument ToDocument()
+    {
+        var guids = Models.SelectMany(m => m.Guids).ToList();
+        var selectionSets = SelectionSets.Count > 0
+            ? SelectionSets
+            : Models.SelectMany(m => m.SelectionSets).ToList();
+        var timeLiner = TimeLiner ?? Models.Select(m => m.TimeLiner).FirstOrDefault(t => t is not null);
+
+        return NwcDocument.Create(
+            fileInfo: new NwcFileInfo
+            {
+                SourcePath = $"{Name}.nwc",
+                LoaderPlugin = "LcOpNwcIOAssembly",
+            },
+            meshes: AllMeshes,
+            savedViewpoints: SavedViewpoints,
+            guids: guids,
+            materials: AllMaterials,
+            rootNode: RootNode,
+            selectionSets: selectionSets,
+            timeLiner: timeLiner);
+    }
+
+    /// <summary>Exports the federated assembly as a single .nwc document.</summary>
+    public void SaveNwc(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ToDocument().Save(path);
+    }
+
     /// <summary>Exports the entire federated assembly with geometry, materials, and spatial hierarchy to an IFC2x3 STEP file (.ifc).</summary>
     public void SaveIfc(string path, NwcIfcExportOptions? options = null)
     {

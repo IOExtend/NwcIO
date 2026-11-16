@@ -203,6 +203,47 @@ public class AssemblyTests
         }
     }
 
+    [Fact]
+    public void SaveNwc_PreservesAssemblyContentAndUsesNeutralOrigin()
+    {
+        static NwcDocument Model(string sourcePath, int meshId, double x) =>
+            new NwcDocumentBuilder()
+                .SetFileInfo(sourcePath, "LcIfcLoader")
+                .AddMesh(new NwcMesh
+                {
+                    Id = meshId,
+                    Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+                    Indices = [0, 1, 2],
+                    BoundingBox = new BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+                })
+                .AddGuid(Guid.NewGuid())
+                .AddSelectionSet(new Model.Sets.NwcSelectionSet($"Set {sourcePath}", [1]))
+                .AddSavedViewpoint(NwcSavedViewpoint.CreateDefault(
+                    new BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+                    $"View {sourcePath}"))
+                .Build();
+
+        var assembly = NwcAssembly.Create("Fed", Model("A.ifc", 0, 0), Model("B.ifc", 0, 20));
+        string path = Path.Combine(Path.GetTempPath(), "nwcio-asm-" + Guid.NewGuid().ToString("N") + ".nwc");
+        try
+        {
+            assembly.SaveNwc(path);
+
+            var reopened = NwcDocument.Open(path);
+            Assert.Equal(2, reopened.Meshes.Count);
+            Assert.Equal("Fed", reopened.RootNode?.Name);
+            Assert.DoesNotContain(".rvt", reopened.FileInfo.SourcePath, StringComparison.OrdinalIgnoreCase);
+            Assert.NotEqual("LcOpRevitExport", reopened.FileInfo.LoaderPlugin);
+            Assert.Equal(2, reopened.Guids.Count);
+            Assert.Equal(2, reopened.SelectionSets.Count);
+            Assert.Equal(2, reopened.SavedViewpoints.Count);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     private static NwcDocument CreateComponentModel(string sourcePath, int meshId, double offsetX)
     {
         return new NwcDocumentBuilder().SetFileInfo(sourcePath)
