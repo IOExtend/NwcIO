@@ -77,10 +77,12 @@ public static class SceneTreeBuilder
         NwcNode? currentFamily = null;
         NwcNode? currentType = null;
         NwcNode currentActive = root;
+        var nodeMap = new Dictionary<int, NwcNode>();
         bool elementSinceCollection = false;
         var markerLevels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         string? pendingNodeName = null;
+        int? pendingParentId = null;
 
         for (int i = 0; i < records.Count; i++)
         {
@@ -89,6 +91,7 @@ public static class SceneTreeBuilder
             if (record.Tag == 53)
             {
                 pendingNodeName = record.Name;
+                pendingParentId = record.ParentId;
                 continue;
             }
 
@@ -99,6 +102,44 @@ public static class SceneTreeBuilder
 
             string name = !string.IsNullOrEmpty(pendingNodeName) ? pendingNodeName : record.Name;
             pendingNodeName = null;
+            int? parentId = pendingParentId;
+            pendingParentId = null;
+
+            if (parentId == 0 && record.FirstInt == 0)
+            {
+                root.Name = name;
+                if (!string.IsNullOrEmpty(record.Class))
+                {
+                    root.Class = record.Class;
+                }
+
+                nodeMap[0] = root;
+                currentActive = root;
+                continue;
+            }
+
+            if (parentId is { } explicitParentId)
+            {
+                NwcNode? explicitParent = nodeMap.TryGetValue(explicitParentId, out var mappedParent)
+                    ? mappedParent
+                    : explicitParentId == 0 ? root : null;
+                if (explicitParent is not null)
+                {
+                    var treeNode = new NwcNode
+                    {
+                        Id = record.FirstInt,
+                        Name = name,
+                        Class = record.Class,
+                        Tag = record.Tag,
+                        Value = record.Value,
+                        Parent = explicitParent,
+                    };
+                    explicitParent.Children.Add(treeNode);
+                    nodeMap[treeNode.Id] = treeNode;
+                    currentActive = treeNode;
+                    continue;
+                }
+            }
 
             if (IsLayerClass(record.Class))
             {
@@ -111,6 +152,7 @@ public static class SceneTreeBuilder
                     Parent = root,
                 };
                 root.Children.Add(layer);
+                nodeMap[layer.Id] = layer;
                 currentLayer = layer;
                 currentCategory = null;
                 currentFamily = null;
@@ -157,6 +199,7 @@ public static class SceneTreeBuilder
                 }
 
                 currentActive = collection;
+                nodeMap[collection.Id] = collection;
                 elementSinceCollection = false;
             }
             else if (IsElementClass(record.Class) && !IsMaterialRecord(record))
@@ -172,6 +215,7 @@ public static class SceneTreeBuilder
                     Parent = parent,
                 };
                 parent.Children.Add(elemNode);
+                nodeMap[elemNode.Id] = elemNode;
                 currentActive = elemNode;
                 elementSinceCollection = true;
             }
@@ -181,6 +225,9 @@ public static class SceneTreeBuilder
                 currentActive.Properties.Add(record);
             }
         }
+
+        // Bound the tree before any recursive consumer (transforms, GUIDs, materials) walks it.
+        EnsureBoundedDepth(root);
 
         // Attach transforms by ID if available, or to root/elements
         if (transforms is { Count: > 0 })
@@ -316,5 +363,29 @@ public static class SceneTreeBuilder
         }
 
         return nextIndex;
+    }
+
+    /// <summary>
+    /// An explicit parent marker can chain nodes as deep as the stream wants. Every recursive consumer of
+    /// the tree (materials, transforms, GUIDs, exporters) needs the same bound as the strict hierarchy reader.
+    /// </summary>
+    private static void EnsureBoundedDepth(NwcNode root)
+    {
+        var stack = new Stack<(NwcNode Node, int Depth)>();
+        stack.Push((root, 0));
+        while (stack.Count > 0)
+        {
+            var (node, depth) = stack.Pop();
+            if (depth > LcObjectReader.MaxNestingDepth)
+            {
+                throw new InvalidDataException(
+                    $"Scene tree depth exceeds {LcObjectReader.MaxNestingDepth} at node '{node.Name}'.");
+            }
+
+            foreach (var child in node.Children)
+            {
+                stack.Push((child, depth + 1));
+            }
+        }
     }
 }
