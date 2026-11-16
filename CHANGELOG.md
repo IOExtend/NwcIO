@@ -19,6 +19,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
 
 ### Fixed
+- The CLI `--report` for a `.nwf` input prints `Total Materials:`, and the one-line `.nwf` summary counts the materials, as the folder report already did.
 - `NwcDocument.Save` throws `ArgumentException` naming the property when a property record has a value type outside 0..13 (it used to write a 4-byte zero that corrupted the stream) or an `IntValue` outside the 32-bit range for types 0, 2 and 3.
 - Assembly OBJ export prefixes every object name with its source model (`M2_Arch/Mesh_0`), and the CLI `--raycast` hit on a folder or `.nwf` assembly prints the same label as `Model=M2_Arch`, so meshes with equal ids from different models can be told apart.
 - The CLI passes `--no-meshes`, `--no-materials`, `--no-transforms`, `--no-tree` and `--catalog` to folder and `.nwf` inputs (they were ignored there), adds the BVH line to the `.nwf` report with `--bvh-stats`, and rejects options it would silently ignore with exit code 1: `--nwf-xml` and `--clashes` for a single file, and `--sets-xml`, `--timeliner-csv`, `--grids` and `--export-grids` for a folder or `.nwf`.
