@@ -53,15 +53,17 @@ public sealed class SyntheticAssemblyJsonTests : IDisposable
     [Fact]
     public void LoadFromDirectory_SortsModelsAndNamesTheAssemblyAfterTheFolder()
     {
-        SaveModel("b.nwc");
-        SaveModel("A.nwc");
+        // Creation order differs from the expected case-insensitive order (a, B, c), and Ordinal would give B, a, c.
+        SaveModel("c.nwc");
+        SaveModel("B.nwc");
+        SaveModel("a.nwc");
 
         var assembly = NwcAssembly.LoadFromDirectory(_root);
 
         Assert.Equal(Path.GetFileName(_root), assembly.Name);
-        Assert.Equal(2, assembly.Models.Count);
-        Assert.EndsWith("A.nwc", assembly.Models[0].FileInfo.SourcePath, StringComparison.OrdinalIgnoreCase);
-        Assert.EndsWith("b.nwc", assembly.Models[1].FileInfo.SourcePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            ["a.nwc", "B.nwc", "c.nwc"],
+            assembly.Models.Select(m => Path.GetFileName(m.FileInfo.SourcePath)).ToArray());
     }
 
     [Fact]
@@ -74,8 +76,22 @@ public sealed class SyntheticAssemblyJsonTests : IDisposable
     [Fact]
     public void LoadFromDirectory_NoMatchingFiles_ThrowsFileNotFound()
     {
+        SaveModel("a.nwc");
+
         Assert.Throws<FileNotFoundException>(
             () => NwcAssembly.LoadFromDirectory(_root, "*.nwd"));
+    }
+
+    [Fact]
+    public void LoadFromDirectory_SearchPattern_SelectsOnlyMatchingFiles()
+    {
+        SaveModel("a.nwc");
+        string nwd = SaveModel("b.nwd");
+
+        var assembly = NwcAssembly.LoadFromDirectory(_root, "*.nwd");
+
+        var model = Assert.Single(assembly.Models);
+        Assert.Equal(nwd, model.FileInfo.SourcePath, StringComparer.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -103,61 +119,75 @@ public sealed class SyntheticAssemblyJsonTests : IDisposable
     [Fact]
     public void SaveNwf_WritesARelativeManifestThatReopens()
     {
-        SaveModel("first.nwc");
-        SaveModel("second.nwc");
+        string first = SaveModel("first.nwc");
+        string second = SaveModel("second.nwc");
         var assembly = NwcAssembly.LoadFromDirectory(_root);
-        string nwf = Path.Combine(_root, "federation.nwf");
+        // Manifest in a sibling folder: paths must be relative to the manifest folder, not bare file names.
+        string outDir = Path.Combine(_root, "out");
+        Directory.CreateDirectory(outDir);
+        string nwf = Path.Combine(outDir, "federation.nwf");
 
         assembly.SaveNwf(nwf);
         var manifest = NwcNwfManifest.Open(nwf);
 
         Assert.Equal(2, manifest.ModelPaths.Count);
         Assert.All(manifest.ModelPaths, path => Assert.False(Path.IsPathRooted(path)));
-        Assert.Contains("first.nwc", manifest.ModelPaths, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("second.nwc", manifest.ModelPaths, StringComparer.OrdinalIgnoreCase);
+        Assert.All(manifest.ModelPaths, p => Assert.StartsWith("..", p, StringComparison.Ordinal));
+        var resolved = manifest.ModelPaths
+            .Select(p => Path.GetFullPath(Path.Combine(outDir, p)))
+            .ToArray();
+        Assert.Contains(Path.GetFullPath(first), resolved, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(Path.GetFullPath(second), resolved, StringComparer.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public void SaveJson_Document_WritesEverySectionAndHonoursSwitches()
+    private static readonly string[] SectionKeys = ["transforms", "sceneTree", "meshes", "materials", "container"];
+
+    private static NwcJsonExportOptions AllSectionsOn() => new()
     {
-        var doc = CreateDocument("model.rvt");
+        Indented = false,
+        IncludeTransforms = true,
+        IncludeSceneTree = true,
+        IncludeMeshes = true,
+        IncludeMaterials = true,
+        IncludeStreamCatalog = true,
+    };
 
-        string full = doc.ToJson(new NwcJsonExportOptions
+    private static JsonDocument Export(NwcJsonExportOptions options) =>
+        JsonDocument.Parse(CreateDocument("model.rvt").ToJson(options));
+
+    [Fact]
+    public void ToJson_AllSwitchesOn_WritesEverySectionWithContent()
+    {
+        using var json = Export(AllSectionsOn());
+        var root = json.RootElement;
+
+        foreach (string key in SectionKeys)
         {
-            Indented = false,
-            IncludeTransforms = true,
-            IncludeSceneTree = true,
-            IncludeMeshes = true,
-            IncludeMaterials = true,
-            IncludeStreamCatalog = true,
-        });
-        using (var json = JsonDocument.Parse(full))
-        {
-            var root = json.RootElement;
-            Assert.True(root.TryGetProperty("transforms", out _));
-            Assert.True(root.TryGetProperty("sceneTree", out _));
-            Assert.True(root.TryGetProperty("meshes", out _));
-            Assert.True(root.TryGetProperty("materials", out _));
-            Assert.True(root.TryGetProperty("container", out _));
+            Assert.True(root.TryGetProperty(key, out _), key);
         }
+        Assert.Equal(1, root.GetProperty("meshes").GetArrayLength());
+        Assert.Equal(1, root.GetProperty("materials").GetArrayLength());
+        Assert.Equal(1, root.GetProperty("transforms").GetArrayLength());
+    }
 
-        string minimal = doc.ToJson(new NwcJsonExportOptions
+    [Theory]
+    [InlineData(nameof(NwcJsonExportOptions.IncludeTransforms), "transforms")]
+    [InlineData(nameof(NwcJsonExportOptions.IncludeSceneTree), "sceneTree")]
+    [InlineData(nameof(NwcJsonExportOptions.IncludeMeshes), "meshes")]
+    [InlineData(nameof(NwcJsonExportOptions.IncludeMaterials), "materials")]
+    [InlineData(nameof(NwcJsonExportOptions.IncludeStreamCatalog), "container")]
+    public void ToJson_SwitchingOffOneOption_RemovesOnlyItsSection(string option, string key)
+    {
+        var options = AllSectionsOn();
+        typeof(NwcJsonExportOptions).GetProperty(option)!.SetValue(options, false);
+
+        using var json = Export(options);
+        var root = json.RootElement;
+
+        Assert.False(root.TryGetProperty(key, out _), key);
+        foreach (string other in SectionKeys.Where(k => k != key))
         {
-            Indented = false,
-            IncludeTransforms = false,
-            IncludeSceneTree = false,
-            IncludeMeshes = false,
-            IncludeMaterials = false,
-            IncludeStreamCatalog = false,
-        });
-        using (var json = JsonDocument.Parse(minimal))
-        {
-            var root = json.RootElement;
-            Assert.False(root.TryGetProperty("transforms", out _));
-            Assert.False(root.TryGetProperty("sceneTree", out _));
-            Assert.False(root.TryGetProperty("meshes", out _));
-            Assert.False(root.TryGetProperty("materials", out _));
-            Assert.False(root.TryGetProperty("container", out _));
+            Assert.True(root.TryGetProperty(other, out _), other);
         }
     }
 
