@@ -918,6 +918,11 @@ public class IfcExportTests
         Assert.Contains("IFCDOOR", seen);
         Assert.Contains("IFCWINDOW", seen);
         Assert.Contains(schema == NwcIfcSchemaVersion.Ifc4 && useTessellation ? "IFCTRIANGULATEDFACESET" : "IFCFACETEDBREP", seen);
+        if (!(schema == NwcIfcSchemaVersion.Ifc4 && useTessellation))
+        {
+            Assert.Contains("IFCOPENSHELL", seen);
+            Assert.Contains("IFCSHELLBASEDSURFACEMODEL", seen);
+        }
     }
 
     private static readonly Dictionary<string, int> Ifc2x3AttributeCounts = new(StringComparer.Ordinal)
@@ -932,7 +937,7 @@ public class IfcExportTests
         ["IFCCOLOURRGB"] = 4, ["IFCSURFACESTYLESHADING"] = 1, ["IFCSURFACESTYLE"] = 3,
         ["IFCPRESENTATIONSTYLEASSIGNMENT"] = 1, ["IFCSTYLEDITEM"] = 3,
         ["IFCCLOSEDSHELL"] = 1, ["IFCFACE"] = 1, ["IFCFACEOUTERBOUND"] = 2, ["IFCPOLYLOOP"] = 1,
-        ["IFCFACETEDBREP"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
+        ["IFCFACETEDBREP"] = 1, ["IFCOPENSHELL"] = 1, ["IFCSHELLBASEDSURFACEMODEL"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
         ["IFCPROPERTYSINGLEVALUE"] = 4, ["IFCPROPERTYSET"] = 5, ["IFCRELDEFINESBYPROPERTIES"] = 6,
         ["IFCRELDEFINESBYTYPE"] = 6, ["IFCRELCONTAINEDINSPATIALSTRUCTURE"] = 6,
         ["IFCDOCUMENTREFERENCE"] = 3, ["IFCRELASSOCIATESDOCUMENT"] = 6,
@@ -958,7 +963,7 @@ public class IfcExportTests
         ["IFCCOLOURRGB"] = 4, ["IFCSURFACESTYLESHADING"] = 2, ["IFCSURFACESTYLE"] = 3,
         ["IFCPRESENTATIONSTYLEASSIGNMENT"] = 1, ["IFCSTYLEDITEM"] = 3,
         ["IFCCLOSEDSHELL"] = 1, ["IFCFACE"] = 1, ["IFCFACEOUTERBOUND"] = 2, ["IFCPOLYLOOP"] = 1,
-        ["IFCFACETEDBREP"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
+        ["IFCFACETEDBREP"] = 1, ["IFCOPENSHELL"] = 1, ["IFCSHELLBASEDSURFACEMODEL"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
         ["IFCCARTESIANPOINTLIST3D"] = 1, ["IFCTRIANGULATEDFACESET"] = 5,
         ["IFCPROPERTYSINGLEVALUE"] = 4, ["IFCPROPERTYSET"] = 5, ["IFCRELDEFINESBYPROPERTIES"] = 6,
         ["IFCRELDEFINESBYTYPE"] = 6, ["IFCRELCONTAINEDINSPATIALSTRUCTURE"] = 6,
@@ -1057,7 +1062,7 @@ public class IfcExportTests
                 Id = i + 1,
                 Name = names[i],
                 Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)],
-                Indices = [0, 1, 2, 0, 1, 3],
+                Indices = i == names.Length - 1 ? [0, 1, 2, 0, 1, 3] : [0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3],  // the last mesh is open
                 Material = material,
             };
             if (i == 0)
