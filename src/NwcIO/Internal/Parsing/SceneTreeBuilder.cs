@@ -76,6 +76,7 @@ public static class SceneTreeBuilder
         NwcNode? currentType = null;
         NwcNode currentActive = root;
         bool elementSinceCollection = false;
+        var markerLevels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         string? pendingNodeName = null;
 
@@ -112,6 +113,7 @@ public static class SceneTreeBuilder
                 currentCategory = null;
                 currentFamily = null;
                 currentType = null;
+                markerLevels.Clear();
                 currentActive = layer;
                 elementSinceCollection = false;
             }
@@ -130,7 +132,8 @@ public static class SceneTreeBuilder
                     currentCategory,
                     currentFamily,
                     currentType,
-                    elementSinceCollection);
+                    elementSinceCollection,
+                    markerLevels);
 
                 switch (level)
                 {
@@ -154,10 +157,8 @@ public static class SceneTreeBuilder
                 currentActive = collection;
                 elementSinceCollection = false;
             }
-            else if (IsElementClass(record.Class) || IsUnspecifiedNodeClass(record))
+            else if (IsElementClass(record.Class) && !IsMaterialRecord(record))
             {
-                // A class the maps do not name, carrying no property value, is a scene node rather than a
-                // property: this is what lets non-Revit loaders contribute nodes instead of root properties.
                 var parent = currentType ?? currentFamily ?? currentCategory ?? currentLayer ?? root;
                 var elemNode = new NwcNode
                 {
@@ -216,10 +217,26 @@ public static class SceneTreeBuilder
         NwcNode? currentCategory,
         NwcNode? currentFamily,
         NwcNode? currentType,
-        bool elementSinceCollection)
+        bool elementSinceCollection,
+        Dictionary<string, int> markerLevels)
     {
-        if (storedName is not null && CollectionLevels.TryGetValue(storedName.Trim(), out int level))
+        string marker = storedName?.Trim() ?? string.Empty;
+        if (marker.Length > 0 && CollectionLevels.TryGetValue(marker, out int level))
         {
+            return level;
+        }
+
+        // Real files repeat the stored marker for every collection of one level. Reuse the level of a
+        // marker seen before; the first three distinct markers in a layer are Category, Family and Type.
+        if (marker.Length > 0 && markerLevels.TryGetValue(marker, out level))
+        {
+            return level;
+        }
+
+        if (marker.Length > 0 && markerLevels.Count < TypeLevel + 1)
+        {
+            level = markerLevels.Count;
+            markerLevels[marker] = level;
             return level;
         }
 
@@ -241,14 +258,11 @@ public static class SceneTreeBuilder
         return elementSinceCollection ? CategoryLevel : TypeLevel;
     }
 
-    private static bool HasPropertyValue(NwcPropertyRecord record) =>
-        record.ValueType != 0 || record.Value is not null;
-
-    /// <summary>A class without a property marker and without a value is treated as an element node.</summary>
-    private static bool IsUnspecifiedNodeClass(NwcPropertyRecord record) =>
-        record.Class.Length > 0 &&
-        !record.Class.Contains("Property", StringComparison.OrdinalIgnoreCase) &&
-        !HasPropertyValue(record);
+    // Material definitions use LcRevitElement but are properties, not scene nodes; creating a node for
+    // them shifts every following element GUID by one.
+    private static bool IsMaterialRecord(NwcPropertyRecord record) =>
+        record.Class.Equals("LcRevitElement", StringComparison.OrdinalIgnoreCase) &&
+        record.Name.StartsWith("Material \"", StringComparison.Ordinal);
 
     private static bool IsLayerClass(string className) =>
         className.Equals("LcRevitLayer", StringComparison.OrdinalIgnoreCase) ||

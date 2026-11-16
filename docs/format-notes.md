@@ -84,12 +84,12 @@ The roots are the tabs a node uses once (element, parameter, type, material and 
 
 Containers without a DbCache directory (no `LcOpNwdLogicalHierarchy`, fragments or geometry segment) fall back to a tag 52/53 scan of the streams that look like scene trees, built by `SceneTreeBuilder`:
 
-- A tag-53 record supplies the display name of the next tag-52 node. The class stored on the tag-52 record decides the role: `*Layer` starts a layer, `*Collection`/`*Group` a collection, `*Element`/`*Composite`/`*Instance`/`*Node`/`*Object` an element, and the observed `LcRevit*` names are always recognized.
-- Collections nest as Category → Family → Type. The level is taken from the stored marker name (`Категория`, `Category`, `Kategorie`, … and the corresponding Family/Type spellings) and, for names outside that table, from record order: the first three collections after a layer take the three levels, and a collection that follows an element starts a new Category.
-- A tag-52 record whose class has no property marker (`Property`) and no value becomes an element node. Records with a value or a property class are attached as properties to the current node.
+- A tag-53 record supplies the display name of the next tag-52 node. The class stored on the tag-52 record decides the role: `*Layer` starts a layer, `*Collection`/`*Group` a collection, `*Element`/`*Composite`/`*Instance`/`*Node`/`*Object` an element, and the observed `LcRevit*` names are always recognized. `LcRevitElement` records whose name starts with `Material "` are material definitions and stay properties.
+- Collections nest as Category -> Family -> Type. The level is taken from the stored marker name (the localized Category/Family/Type spellings); a marker seen earlier in the same layer keeps its level. For names outside the table, the first three distinct markers of a layer take the three levels, and a new marker after an element starts a new Category.
+- Tag-52 records with a property class or a value are attached as properties to the current node.
 - GUIDs are assigned in scan order to element nodes; this mapping is only valid when the stream stores exactly one GUID per element.
 
-The nesting is therefore independent of the exporter UI language for the marker names in the table, but an unrecognized language falls back to record order, and parent links lost by the tag scan cannot be recovered.
+The nesting is therefore independent of the exporter UI language for the marker names in the table, and repeated markers outside it keep their level; otherwise the first distinct markers and record order decide, and parent links lost by the tag scan cannot be recovered.
 
 ### 2.3 GUID Table (`Guids`)
 - **Location**: the DbCache entry `LcOpGuidStore`, one zlib stream `[i32 a = 1][i32 n][n x 16-byte GUID]` in Windows layout. The GUID of element `X` is the Revit export GUID of the element (its UniqueId's session GUID with the last 32 bits XORed with the element id).

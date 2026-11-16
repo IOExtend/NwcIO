@@ -141,6 +141,58 @@ public class SceneTreeBuilderTests
     }
 
     [Fact]
+    public void Build_MaterialRecordBetweenElements_StaysPropertyAndKeepsGuids()
+    {
+        var guids = new List<Guid> { Guid.NewGuid(), Guid.NewGuid() };
+        var records = new List<NwcPropertyRecord>
+        {
+            new() { FirstInt = 1, Tag = 52, Name = "Wall 1", Class = "LcRevitData_Element" },
+            new() { FirstInt = 2, Tag = 52, Name = "Material \"Concrete\", #12", Class = "LcRevitElement", ValueType = 1, Value = "155" },
+            new() { FirstInt = 3, Tag = 52, Name = "Wall 2", Class = "LcRevitData_Element" },
+        };
+
+        var root = SceneTreeBuilder.Build("TestModel", records, guids: guids);
+
+        Assert.Equal(2, root.Children.Count);
+        Assert.Equal("Wall 1", root.Children[0].Name);
+        Assert.Equal("Wall 2", root.Children[1].Name);
+        Assert.Equal(guids[0], root.Children[0].ElementGuid);
+        Assert.Equal(guids[1], root.Children[1].ElementGuid);
+        Assert.Single(root.Children[0].Properties);
+    }
+
+    [Fact]
+    public void Build_RepeatedFamilyMarker_StaysUnderTheSameCategory()
+    {
+        var records = new List<NwcPropertyRecord>
+        {
+            new() { FirstInt = 1, Tag = 52, Name = "Level 1", Class = "LcRevitLayer" },
+            new() { FirstInt = 2, Tag = 53, Name = "Walls", Class = "Node" },
+            new() { FirstInt = 3, Tag = 52, Name = "Kategorie", Class = "LcRevitCollection" },
+            new() { FirstInt = 4, Tag = 53, Name = "Basic Wall", Class = "Node" },
+            new() { FirstInt = 5, Tag = 52, Name = "Familie", Class = "LcRevitCollection" },
+            new() { FirstInt = 6, Tag = 53, Name = "Generic 200", Class = "Node" },
+            new() { FirstInt = 7, Tag = 52, Name = "Typ", Class = "LcRevitCollection" },
+            new() { FirstInt = 8, Tag = 52, Name = "Wall 1", Class = "LcRevitData_Element" },
+            new() { FirstInt = 9, Tag = 53, Name = "Basic Wall 2", Class = "Node" },
+            new() { FirstInt = 10, Tag = 52, Name = "Familie", Class = "LcRevitCollection" },
+            new() { FirstInt = 11, Tag = 53, Name = "Generic 300", Class = "Node" },
+            new() { FirstInt = 12, Tag = 52, Name = "Typ", Class = "LcRevitCollection" },
+            new() { FirstInt = 13, Tag = 52, Name = "Wall 2", Class = "LcRevitData_Element" },
+        };
+
+        var root = SceneTreeBuilder.Build("TestModel", records);
+
+        var category = Assert.Single(Assert.Single(root.Children).Children);
+        Assert.Equal(2, category.Children.Count);
+        var secondFamily = category.Children[1];
+        Assert.Equal("Basic Wall 2", secondFamily.Name);
+        var secondType = Assert.Single(secondFamily.Children);
+        Assert.Equal("Generic 300", secondType.Name);
+        Assert.Equal("Wall 2", Assert.Single(secondType.Children).Name);
+    }
+
+    [Fact]
     public void Build_PropertyClassWithoutValue_StaysPropertyOnCurrentNode()
     {
         var records = new List<NwcPropertyRecord>
