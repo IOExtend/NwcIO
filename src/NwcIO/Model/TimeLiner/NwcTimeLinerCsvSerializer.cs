@@ -72,15 +72,22 @@ public static class NwcTimeLinerCsvSerializer
         string? header = reader.ReadLine();
         if (header is null) return schedule;
 
+        int rowNumber = 1;
         string? line;
         while ((line = reader.ReadLine()) != null)
         {
+            rowNumber++;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             var parts = ParseCsvLine(line);
             if (parts.Count < 5) continue;
 
             string id = parts[0];
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                id = $"row-{rowNumber}";
+                schedule.Warnings.Add($"Row {rowNumber}: task id is missing; using '{id}'.");
+            }
             string name = parts[1];
             string typeStr = parts[2];
             string plannedStartStr = parts[3];
@@ -91,24 +98,45 @@ public static class NwcTimeLinerCsvSerializer
                 taskType = NwcTimeLinerTaskType.Construct;
             }
 
-            if (!DateTimeOffset.TryParse(plannedStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pStart))
+            bool hasStart = DateTimeOffset.TryParse(plannedStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pStart);
+            bool hasEnd = DateTimeOffset.TryParse(plannedEndStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd);
+            if (!hasStart)
             {
-                pStart = DateTimeOffset.UtcNow;
+                // A valid end pins the task; only with no dates at all does the epoch placeholder remain.
+                pStart = hasEnd ? NwcTimeLinerDates.AddDays(pEnd, -7) : DateTimeOffset.UnixEpoch;
+                schedule.Warnings.Add(
+                    $"Row {rowNumber} ('{id}'): planned start '{plannedStartStr}' is missing or invalid; using {pStart:o}.");
             }
-            if (!DateTimeOffset.TryParse(plannedEndStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd))
+            if (!hasEnd)
             {
-                pEnd = pStart.AddDays(7);
+                pEnd = NwcTimeLinerDates.AddDays(pStart, 7);
+                schedule.Warnings.Add(
+                    $"Row {rowNumber} ('{id}'): planned end '{plannedEndStr}' is missing or invalid; using {pEnd:o}.");
             }
 
             var task = new NwcTimeLinerTask(id, name, pStart, pEnd, taskType);
 
-            if (parts.Count > 5 && DateTimeOffset.TryParse(parts[5], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var aStart))
+            if (parts.Count > 5 && !string.IsNullOrWhiteSpace(parts[5]))
             {
-                task.ActualStart = aStart;
+                if (DateTimeOffset.TryParse(parts[5], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var aStart))
+                {
+                    task.ActualStart = aStart;
+                }
+                else
+                {
+                    schedule.Warnings.Add($"Row {rowNumber} ('{id}'): actual start '{parts[5]}' is invalid; ignored.");
+                }
             }
-            if (parts.Count > 6 && DateTimeOffset.TryParse(parts[6], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var aEnd))
+            if (parts.Count > 6 && !string.IsNullOrWhiteSpace(parts[6]))
             {
-                task.ActualEnd = aEnd;
+                if (DateTimeOffset.TryParse(parts[6], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var aEnd))
+                {
+                    task.ActualEnd = aEnd;
+                }
+                else
+                {
+                    schedule.Warnings.Add($"Row {rowNumber} ('{id}'): actual end '{parts[6]}' is invalid; ignored.");
+                }
             }
             if (parts.Count > 7 && decimal.TryParse(parts[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var pCost))
             {
