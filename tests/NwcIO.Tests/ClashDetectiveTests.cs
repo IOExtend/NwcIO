@@ -826,6 +826,127 @@ public sealed class ClashDetectiveTests
         }
     }
 
+    [Fact]
+    public void IgnoreSameLayer_DoesNotDropMeshesWithoutNodes()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("layers", NwcClashTestType.Hard, 0.0);
+        test.Rules.Add(NwcClashRule.SameLayer());
+        doc.RunClashDetection(test);
+
+        Assert.Single(test.Results);
+    }
+
+    [Fact]
+    public void MinPenetrationRule_FiltersShallowClash()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.99, 0.2, 0.2), new Vector3d(2, 0.8, 0.8));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("penetration", NwcClashTestType.Hard, 0.0);
+        test.Rules.Add(NwcClashRule.MinPenetration(0.5));
+        doc.RunClashDetection(test);
+
+        Assert.Empty(test.Results);
+    }
+
+    [Fact]
+    public void CustomRule_IsEvaluated()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("custom", NwcClashTestType.Hard, 0.0);
+        test.Rules.Add(new NwcClashRule("custom", NwcClashRuleType.Custom) { CustomPredicate = _ => true });
+        doc.RunClashDetection(test);
+
+        Assert.Empty(test.Results);
+    }
+
+    [Fact]
+    public void SameGroupRule_UsesTheSharedParent()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+        var group = new NwcNode { Id = 10, Name = "Group", Class = "LcRevitCollection", Parent = root };
+        var nodeA = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element", Parent = group, Mesh = a };
+        var nodeB = new NwcNode { Id = 2, Name = "B", Class = "LcRevitData_Element", Parent = group, Mesh = b };
+        a.Node = nodeA;
+        b.Node = nodeB;
+        group.Children.Add(nodeA);
+        group.Children.Add(nodeB);
+        root.Children.Add(group);
+        var doc = NwcDocument.Create(meshes: [a, b], rootNode: root);
+
+        var filtered = new NwcClashTest("group", NwcClashTestType.Hard, 0.0);
+        filtered.Rules.Add(NwcClashRule.SameGroup());
+        doc.RunClashDetection(filtered);
+        Assert.Empty(filtered.Results);
+
+        var unfiltered = new NwcClashTest("all", NwcClashTestType.Hard, 0.0);
+        doc.RunClashDetection(unfiltered);
+        Assert.Single(unfiltered.Results);
+    }
+
+    [Fact]
+    public void ShouldIgnore_HandlesSameFilePropertyAndMissingLayer()
+    {
+        var nodeA = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element" };
+        var nodeB = new NwcNode { Id = 2, Name = "B", Class = "LcRevitData_Element" };
+        nodeA.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "System", Class = "Item", Value = "Exhaust" });
+        nodeB.Properties.Add(new NwcPropertyRecord { FirstInt = 2, Tag = 52, Name = "System", Class = "Item", Value = "Exhaust" });
+        var first = new NwcClashObject("A", 1) { ModelName = "model", Node = nodeA };
+        var second = new NwcClashObject("B", 2) { ModelName = "model", Node = nodeB };
+        var result = new NwcClashResult("clash", first, second, Vector3d.Zero, 0);
+
+        Assert.True(NwcClashRule.SameFile().ShouldIgnore(result));
+        Assert.True(new NwcClashRule("property", NwcClashRuleType.IgnoreSpecifiedProperty)
+        {
+            PropertyName = "System",
+            PropertyValue = "Exhaust",
+        }.ShouldIgnore(result));
+
+        // No layer on either item must not count as the same layer.
+        Assert.False(NwcClashRule.SameLayer().ShouldIgnore(result));
+    }
+
+    [Fact]
+    public void ClashMatrix_DisciplineSetName_FiltersMeshes()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+        var node = new NwcNode { Id = 1, Name = "A", Class = "LcRevitData_Element", Mesh = a };
+        a.Node = node;
+        var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+        root.Children.Add(node);
+        var first = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "first.nwc" },
+            meshes: [a],
+            rootNode: root,
+            selectionSets: [new NwcIO.Model.Sets.NwcSelectionSet("OnlyA", [1])]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [b]);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "first").SetName = "OnlyA";
+        matrix.AddDiscipline("B", "second");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.0);
+        matrix.Cells[0].TestType = NwcClashTestType.Conservative;
+
+        matrix.Run(NwcAssembly.Create("Federation", first, second));
+
+        Assert.Equal(1, matrix.Cells[0].ClashCount);
+
+        matrix.Disciplines[0].SetName = "Missing";
+        matrix.Run(NwcAssembly.Create("Federation", first, second));
+        Assert.Equal(0, matrix.Cells[0].ClashCount);
+    }
+
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)
     {
         var vertices = new Vector3d[]

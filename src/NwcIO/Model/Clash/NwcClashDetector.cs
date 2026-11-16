@@ -81,9 +81,6 @@ public static class NwcClashDetector
             meshesInB = new HashSet<NwcMesh>(meshesB, ReferenceEqualityComparer.Instance);
         }
 
-        bool ignoreSameLayer = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameLayer);
-        bool ignoreSameGroup = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameGroup);
-
         for (int i = 0; i < meshesA.Count; i++)
         {
             var meshA = meshesA[i];
@@ -103,16 +100,6 @@ public static class NwcClashDetector
 
                 var boxB = meshB.GetWorldBoundingBox();
                 if (boxB.IsEmpty) continue;
-
-                // Rule filtering
-                if (ignoreSameLayer && string.Equals(meshA.Node?.Parent?.Name, meshB.Node?.Parent?.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                if (ignoreSameGroup && meshA.Node?.Parent is not null && ReferenceEquals(meshA.Node.Parent, meshB.Node?.Parent))
-                {
-                    continue;
-                }
 
                 // Broad phase AABB
                 double tol = Math.Max(0.0, test.Tolerance);
@@ -134,7 +121,7 @@ public static class NwcClashDetector
                     var obj1 = new NwcClashObject(item1Name, meshA.Id, meshA.Node?.Name ?? item1Name)
                     {
                         ModelName = modelName,
-                        Layer = meshA.Node?.Parent?.Name ?? "Default",
+                        Layer = meshA.Node?.Parent?.Name,
                         Node = meshA.Node,
                         Mesh = meshA,
                         IfcGuid = IfcGuid.FromElementId(meshA.Id, "NwcMesh"),
@@ -143,7 +130,7 @@ public static class NwcClashDetector
                     var obj2 = new NwcClashObject(item2Name, meshB.Id, meshB.Node?.Name ?? item2Name)
                     {
                         ModelName = modelName,
-                        Layer = meshB.Node?.Parent?.Name ?? "Default",
+                        Layer = meshB.Node?.Parent?.Name,
                         Node = meshB.Node,
                         Mesh = meshB,
                         IfcGuid = IfcGuid.FromElementId(meshB.Id, "NwcMesh"),
@@ -157,6 +144,11 @@ public static class NwcClashDetector
                         Description = $"Hard clash between {item1Name} and {item2Name}",
                         Viewpoint = vp,
                     };
+
+                    if (test.Rules.Any(rule => rule.ShouldIgnore(result)))
+                    {
+                        continue;
+                    }
 
                     test.AddResult(result);
                 }
@@ -182,9 +174,6 @@ public static class NwcClashDetector
             }
             meshesInB = new HashSet<NwcMesh>(itemsB.Select(item => item.Mesh), ReferenceEqualityComparer.Instance);
         }
-        bool ignoreSameFile = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameFile);
-        bool ignoreSameLayer = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameLayer);
-
         for (int i = 0; i < itemsA.Count; i++)
         {
             var itemA = itemsA[i];
@@ -198,16 +187,6 @@ public static class NwcClashDetector
                 if (ReferenceEquals(itemA.Mesh, itemB.Mesh) || IsSameElement(itemA.Mesh, itemB.Mesh)) continue;
                 // Mesh IDs can repeat across models; only references identify pairs.
                 if (canVisitReverse && firstIndexA!.TryGetValue(itemB.Mesh, out int firstIndex) && firstIndex < i)
-                {
-                    continue;
-                }
-
-                if (ignoreSameFile && string.Equals(itemA.ModelName, itemB.ModelName, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (ignoreSameLayer && !string.IsNullOrEmpty(itemA.Layer) && string.Equals(itemA.Layer, itemB.Layer, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -256,6 +235,11 @@ public static class NwcClashDetector
                         Description = $"Clash between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
                         Viewpoint = vp,
                     };
+
+                    if (test.Rules.Any(rule => rule.ShouldIgnore(result)))
+                    {
+                        continue;
+                    }
 
                     test.AddResult(result);
                 }

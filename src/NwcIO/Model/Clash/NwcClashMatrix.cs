@@ -39,6 +39,29 @@ public sealed class NwcClashDiscipline
             }
         }
 
+        if (!string.IsNullOrEmpty(SetName))
+        {
+            if (mesh.Node is null)
+            {
+                return false;
+            }
+
+            var set = doc.SelectionSets.FirstOrDefault(s => string.Equals(s.Name, SetName, StringComparison.OrdinalIgnoreCase));
+            bool member = set switch
+            {
+                Model.Sets.NwcSelectionSet selection =>
+                    selection.NodeIds.Contains(mesh.Node.Id) ||
+                    selection.NodePaths.Count > 0 && selection.ResolveNodes(doc).Any(n => n.Id == mesh.Node.Id),
+                Model.Sets.NwcSearchSet search => search.Matches(mesh.Node),
+                _ => false,
+            };
+
+            if (!member)
+            {
+                return false;
+            }
+        }
+
         if (FilterCondition is not null)
         {
             return mesh.Node is not null && FilterCondition.Evaluate(mesh.Node);
@@ -222,18 +245,7 @@ public sealed class NwcClashMatrix
 
                         var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, interBox.Center, -penetration);
 
-                        // Evaluate ignore rules
-                        bool ignore = false;
-                        foreach (var rule in test.Rules)
-                        {
-                            if (!rule.Enabled) continue;
-                            if (rule.RuleType == NwcClashRuleType.IgnoreSameFile && string.Equals(c1.ModelName, c2.ModelName, StringComparison.OrdinalIgnoreCase))
-                            {
-                                ignore = true; break;
-                            }
-                        }
-
-                        if (!ignore)
+                        if (!test.Rules.Any(rule => rule.ShouldIgnore(clash)))
                         {
                             test.Results.Add(clash);
                         }
