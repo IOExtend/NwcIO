@@ -98,6 +98,63 @@ public class IfcExportTests
     [Theory]
     [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
     [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_AssemblyWithOpenMesh_IsNotDeclaredClosed(NwcIfcSchemaVersion schema)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Sheet",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        using var sw = new StringWriter();
+
+        NwcAssembly.Create("Open assembly", NwcDocument.Create(meshes: [mesh])).SaveIfc(sw, new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        string ifc = sw.ToString();
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCOPENSHELL(", ifc);
+            Assert.Contains("'SurfaceModel'", ifc);
+            Assert.DoesNotContain("IFCCLOSEDSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
+            Assert.DoesNotContain(",$,.T.,", ifc);
+        }
+    }
+
+    [Fact]
+    public void SaveIfc_CubeWithDegenerateTriangle_IsNotDeclaredClosed()
+    {
+        // A zero-area triangle after welding adds an edge that is not shared by two faces: unproven, so not closed.
+        var source = CreateSplitVertexCube();
+        var cube = new NwcMesh
+        {
+            Id = source.Id,
+            Name = source.Name,
+            Vertices = source.Vertices,
+            Indices = [.. source.Indices, 0, 0, 1],
+        };
+
+        string ifc = NwcDocument.Create(meshes: [cube]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = NwcIfcSchemaVersion.Ifc4,
+            UseTessellationInIfc4 = true,
+        });
+
+        Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
+        Assert.DoesNotContain(",$,.T.,", ifc);
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
     public void SaveIfc_ClosedCube_StaysAClosedSolid(NwcIfcSchemaVersion schema)
     {
         var doc = CreateSyntheticDocument("Cube", null);
