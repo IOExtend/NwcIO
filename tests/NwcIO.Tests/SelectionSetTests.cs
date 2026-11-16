@@ -213,6 +213,58 @@ public class SelectionSetTests
     }
 
     [Fact]
+    public void SearchSetXml_PreservesFlagsInternalNamesAndValueType()
+    {
+        const string xml = """
+<exchange><selectionsets><selectionset name="Complex" guid="11111111-1111-1111-1111-111111111111">
+<findspec mode="all" disjoint="0"><conditions>
+<condition test="contains" flags="5">
+<category><name internal="CatInternal">Cat</name></category>
+<property><name internal="PropInternal">Prop</name></property>
+<value><data type="wstring">abc</data></value></condition>
+<condition test="equals"><category><name>Item</name></category><property><name>Name</name></property>
+<value><data type="double">1.5</data></value></condition>
+</conditions></findspec></selectionset></selectionsets></exchange>
+""";
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        var search = Assert.IsType<NwcSearchSet>(Assert.Single(NwcXmlSetSerializer.Read(input)));
+
+        Assert.Equal(2, search.Conditions.Count);
+        var first = search.Conditions[0];
+        Assert.Equal(NwcSearchOperator.Contains, first.Operator);
+        Assert.Equal("5", first.Flags);
+        Assert.Equal("CatInternal", first.InternalCategory);
+        Assert.Equal("PropInternal", first.InternalProperty);
+        var second = search.Conditions[1];
+        Assert.Equal("double", second.ValueType);
+        Assert.Equal("1.5", second.Value);
+
+        using var output = new MemoryStream();
+        NwcXmlSetSerializer.Write([search], output);
+        output.Position = 0;
+        var reloaded = Assert.IsType<NwcSearchSet>(Assert.Single(NwcXmlSetSerializer.Read(output)));
+        var reloadedFirst = reloaded.Conditions[0];
+        Assert.Equal("5", reloadedFirst.Flags);
+        Assert.Equal(NwcSearchOperator.Contains, reloadedFirst.Operator);
+        Assert.Equal("CatInternal", reloadedFirst.InternalCategory);
+        Assert.Equal("PropInternal", reloadedFirst.InternalProperty);
+        Assert.Equal("double", reloaded.Conditions[1].ValueType);
+    }
+
+    [Fact]
+    public void SearchSetXml_UnknownTest_Throws()
+    {
+        const string xml = """
+<exchange><selectionsets><selectionset name="Bad"><findspec mode="all"><conditions>
+<condition test="bogus"><category><name>Item</name></category><property><name>Name</name></property></condition>
+</conditions></findspec></selectionset></selectionsets></exchange>
+""";
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+
+        Assert.Throws<FormatException>(() => NwcXmlSetSerializer.Read(input));
+    }
+
+    [Fact]
     public void SelectionSets_RoundtripThroughNavisworksXml()
     {
         var folder = new NwcSelectionSetFolder("Structural");
