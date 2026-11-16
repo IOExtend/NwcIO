@@ -7,6 +7,91 @@ namespace NwcIO.Tests;
 public class IfcExportTests
 {
     [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_OpenSingleTriangle_IsNotDeclaredClosed(NwcIfcSchemaVersion schema)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Sheet",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCOPENSHELL(", ifc);
+            Assert.Contains("IFCSHELLBASEDSURFACEMODEL(", ifc);
+            Assert.Contains("'SurfaceModel'", ifc);
+            Assert.DoesNotContain("IFCCLOSEDSHELL(", ifc);
+            Assert.DoesNotContain("IFCFACETEDBREP(", ifc);
+        }
+        else
+        {
+            Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
+            Assert.Contains(",$,.F.,", ifc);
+            Assert.DoesNotContain(",$,.T.,", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_ClosedCube_StaysAClosedSolid(NwcIfcSchemaVersion schema)
+    {
+        var doc = CreateSyntheticDocument("Cube", null);
+        string ifc = doc.ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            Assert.Contains("IFCCLOSEDSHELL(", ifc);
+            Assert.Contains("IFCFACETEDBREP(", ifc);
+            Assert.DoesNotContain("IFCOPENSHELL(", ifc);
+        }
+        else
+        {
+            Assert.Contains(",$,.T.,", ifc);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4)]
+    public void SaveIfc_MeshWithoutValidTriangles_GetsNoBodyRepresentation(NwcIfcSchemaVersion schema)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Broken",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 9],
+        };
+
+        string ifc = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = true,
+        });
+
+        Assert.DoesNotContain("IFCFACETEDBREP(", ifc);
+        Assert.DoesNotContain("IFCCLOSEDSHELL(", ifc);
+        Assert.DoesNotContain("IFCOPENSHELL(", ifc);
+        Assert.DoesNotContain("IFCTRIANGULATEDFACESET(", ifc);
+        Assert.DoesNotContain("IFCBUILDINGELEMENTPROXY", ifc);
+    }
+
+    [Theory]
     [InlineData(true, "((1,3,2),(3,4,2))")]
     [InlineData(false, "((1,2,3),(3,2,4))")]
     public void SaveIfc_MirroredTransform_ReversesOnlyWorldFaces(bool world, string coordIndex)

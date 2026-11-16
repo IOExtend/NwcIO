@@ -70,7 +70,7 @@ public class IfcBridgeTests
         doc.SaveIfc(sw, options);
         string ifc = sw.ToString();
 
-        Assert.Contains("IFCFACETEDBREP(", ifc);
+        Assert.Contains("IFCSHELLBASEDSURFACEMODEL(", ifc);
 
         var polyloopMatches = Regex.Matches(ifc, @"IFCPOLYLOOP\(\(([^)]+)\)\)");
         Assert.NotEmpty(polyloopMatches);
@@ -119,7 +119,7 @@ public class IfcBridgeTests
         doc.SaveIfc(sw, options);
         string ifc = sw.ToString();
 
-        Assert.Contains("IFCFACETEDBREP(", ifc);
+        Assert.Contains("IFCSHELLBASEDSURFACEMODEL(", ifc);
 
         var polyloopMatches = Regex.Matches(ifc, @"IFCPOLYLOOP\(\(([^)]+)\)\)");
         Assert.NotEmpty(polyloopMatches);
