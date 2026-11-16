@@ -21,9 +21,13 @@ public enum NwcClashStatus
 /// </summary>
 public enum NwcClashTestType
 {
+    /// <summary>Triangle-level intersection; positive AABB penetration below the tolerance is ignored.</summary>
     Hard,
+    /// <summary>Shortest mesh-to-mesh distance at or below the tolerance; Distance is positive for a gap.</summary>
     Clearance,
+    /// <summary>Same world geometry and topology within the tolerance, regardless of id, name or material.</summary>
     Duplicates,
+    /// <summary>World bounding boxes overlap; no triangle test is performed.</summary>
     Conservative,
 }
 

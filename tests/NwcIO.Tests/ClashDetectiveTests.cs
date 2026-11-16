@@ -856,6 +856,88 @@ public sealed class ClashDetectiveTests
         Assert.Equal(expected, test.Results.Count);
     }
 
+    [Fact]
+    public void Duplicates_ReportsIdenticalGeometryButNotOverlappingBoxes()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var c = CreateBoxMesh(3, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
+
+        var identical = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+        var duplicateTest = new NwcClashTest("duplicates", NwcClashTestType.Duplicates, 0.001);
+        identical.RunClashDetection(duplicateTest);
+        Assert.Single(duplicateTest.Results);
+
+        var overlapping = new NwcDocumentBuilder().AddMesh(a).AddMesh(c).Build();
+        var overlapTest = new NwcClashTest("duplicates", NwcClashTestType.Duplicates, 0.001);
+        overlapping.RunClashDetection(overlapTest);
+        Assert.Empty(overlapTest.Results);
+    }
+
+    [Fact]
+    public void Conservative_ReportsBoundingBoxOverlapWithoutTriangleIntersection()
+    {
+        var horizontal = new NwcMesh
+        {
+            Id = 1,
+            Name = "Horizontal",
+            Vertices = [new(-10, 0, 0), new(10, 0, 0)],
+            Indices = [],
+            LineIndices = [0, 1],
+        };
+        var vertical = new NwcMesh
+        {
+            Id = 2,
+            Name = "Vertical",
+            Vertices = [new(5, 0, 5), new(5, 0, -5)],
+            Indices = [],
+            LineIndices = [0, 1],
+        };
+        var doc = new NwcDocumentBuilder().AddMesh(horizontal).AddMesh(vertical).Build();
+
+        var hard = new NwcClashTest("hard", NwcClashTestType.Hard, 0.0);
+        doc.RunClashDetection(hard);
+        Assert.Empty(hard.Results);
+
+        var conservative = new NwcClashTest("conservative", NwcClashTestType.Conservative, 0.0);
+        doc.RunClashDetection(conservative);
+        Assert.Single(conservative.Results);
+    }
+
+    [Fact]
+    public void Clearance_DistanceIsPositiveForSeparation()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(1.2, 0, 0), new Vector3d(2.2, 1, 1));
+        var doc = new NwcDocumentBuilder().AddMesh(a).AddMesh(b).Build();
+
+        var test = new NwcClashTest("clearance", NwcClashTestType.Clearance, 0.5);
+        doc.RunClashDetection(test);
+
+        var result = Assert.Single(test.Results);
+        Assert.Equal(0.2, result.Distance, 3);
+    }
+
+    [Fact]
+    public void ClashMatrix_CellTestType_IsHonoured()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.nwc" }, meshes: [a]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [b]);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "first");
+        matrix.AddDiscipline("B", "second");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.001);
+        matrix.Cells[0].TestType = NwcClashTestType.Duplicates;
+
+        matrix.Run(assembly);
+
+        Assert.Equal(1, matrix.Cells[0].ClashCount);
+    }
+
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)
     {
         var vertices = new Vector3d[]

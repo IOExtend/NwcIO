@@ -218,6 +218,26 @@ public sealed class NwcClashMatrix
                         penetration = -gap;
                         clashPoint = interBox.IsEmpty ? (boxA.Center + boxB.Center) * 0.5 : interBox.Center;
                     }
+                    else if (cell.TestType == NwcClashTestType.Duplicates)
+                    {
+                        if (!NwcClashDetector.IsDuplicate(mA, mB, cell.Tolerance))
+                        {
+                            continue;
+                        }
+
+                        penetration = 0;
+                        clashPoint = (boxA.Center + boxB.Center) * 0.5;
+                    }
+                    else if (cell.TestType == NwcClashTestType.Conservative)
+                    {
+                        if (interBox.IsEmpty)
+                        {
+                            continue;
+                        }
+
+                        penetration = Math.Min(interBox.Size.X, Math.Min(interBox.Size.Y, interBox.Size.Z));
+                        clashPoint = interBox.Center;
+                    }
                     else
                     {
                         if (interBox.IsEmpty)
