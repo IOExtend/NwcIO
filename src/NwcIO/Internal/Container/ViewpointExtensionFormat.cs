@@ -11,4 +11,13 @@ internal static class ViewpointExtensionFormat
 
     /// <summary>Version stored as the first payload int.</summary>
     public const int Version = 1;
+
+    /// <summary>Most comments per viewpoint the reader accepts.</summary>
+    public const int MaxComments = 1024;
+
+    /// <summary>Longest comment, in UTF-8 bytes, the reader accepts.</summary>
+    public const int MaxCommentBytes = 65536;
+
+    /// <summary>Most section planes per viewpoint the reader accepts.</summary>
+    public const int MaxSectionPlanes = 64;
 }

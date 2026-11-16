@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using System.Text.Unicode;
 using NwcIO.Internal.Container;
 using NwcIO.Model;
 using NwcIO.Model.Sectioning;
@@ -72,7 +73,6 @@ internal static class ViewpointParser
 
                     double aspect = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 68));
                     double focal = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 76));
-                    double fieldOfView = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 84));
                     double nearDist = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(pos + 92));
 
                     string name = ExtractViewName(data, pos, results.Count + 1);
@@ -84,16 +84,18 @@ internal static class ViewpointParser
                         nextPos = extensionEnd;
                     }
 
-                    // De-duplicate if exact match
+                    // De-duplicate exact repeats of heuristic records. A writer trailer makes each record
+                    // distinct (id, section planes), so those are never dropped.
                     string dedupeKey = FormattableString.Invariant($"{name}:{x:F2}:{y:F2}:{z:F2}:{qx:F3}:{qy:F3}:{qz:F3}:{qw:F3}");
-                    if (seenKeys.Add(dedupeKey))
+                    if (extension is not null || seenKeys.Add(dedupeKey))
                     {
                         var camera = new NwcCamera
                         {
                             Position = new Vector3d(x, y, z),
                             Rotation = new Quaterniond(qx, qy, qz, qw),
                             FocalDistance = focal > 0 ? focal : 1.0,
-                            FieldOfView = fieldOfView > 0 ? fieldOfView : 60.0,
+                            // Offset +84 holds radians or a view height in real files, so only the trailer carries degrees.
+                            FieldOfView = extension?.FieldOfView is > 0 ? extension.FieldOfView : 60.0,
                             AspectRatio = aspect > 0 ? aspect : 1.0,
                             NearDistance = nearDist > 0 ? nearDist : 0.1,
                             FarDistance = extension?.FarDistance is > 0 ? extension.FarDistance : focal > 0 ? focal * 10.0 : 10000.0,
@@ -186,6 +188,7 @@ internal static class ViewpointParser
 
     /// <summary>Optional writer trailer after the fixed tag-517 record.</summary>
     private sealed record ViewpointExtension(
+        double FieldOfView,
         double FarDistance,
         NwcCameraProjection Projection,
         Guid? Id,
@@ -218,7 +221,8 @@ internal static class ViewpointParser
         }
 
         p += 8;
-        if (!TryReadDouble(data, ref p, payloadEnd, out double farDistance) ||
+        if (!TryReadDouble(data, ref p, payloadEnd, out double fieldOfView) ||
+            !TryReadDouble(data, ref p, payloadEnd, out double farDistance) ||
             !TryReadInt32(data, ref p, payloadEnd, out int projectionValue) ||
             !TryReadInt32(data, ref p, payloadEnd, out int hasId))
         {
@@ -237,7 +241,7 @@ internal static class ViewpointParser
             p += 16;
         }
 
-        if (!TryReadInt32(data, ref p, payloadEnd, out int commentCount) || commentCount is < 0 or > 1024)
+        if (!TryReadInt32(data, ref p, payloadEnd, out int commentCount) || commentCount is < 0 or > ViewpointExtensionFormat.MaxComments)
         {
             return null;
         }
@@ -253,7 +257,7 @@ internal static class ViewpointParser
             comments.Add(comment);
         }
 
-        if (!TryReadInt32(data, ref p, payloadEnd, out int planeCount) || planeCount is < 0 or > 64)
+        if (!TryReadInt32(data, ref p, payloadEnd, out int planeCount) || planeCount is < 0 or > ViewpointExtensionFormat.MaxSectionPlanes)
         {
             return null;
         }
@@ -310,6 +314,7 @@ internal static class ViewpointParser
 
         end = (int)payloadEnd;
         return new ViewpointExtension(
+            fieldOfView,
             farDistance,
             Enum.IsDefined(typeof(NwcCameraProjection), projectionValue)
                 ? (NwcCameraProjection)projectionValue
@@ -355,7 +360,7 @@ internal static class ViewpointParser
         }
 
         int length = ReadInt32(data, position);
-        if (length < 0 || length > 65536 || position + 4L + length > end)
+        if (length < 0 || length > ViewpointExtensionFormat.MaxCommentBytes || position + 4L + length > end)
         {
             return false;
         }
@@ -388,30 +393,167 @@ internal static class ViewpointParser
         }
 
         string result;
-        // 1. Try UTF-8
-        try
+        // 1. UTF-8 first, validated without using an exception as control flow on untrusted bytes.
+        if (Utf8.IsValid(data.AsSpan(offset, length)))
         {
             string utf8 = Encoding.UTF8.GetString(data, offset, length);
-            if (!utf8.Contains('\uFFFD') && utf8.All(c => !char.IsControl(c) || c == '\t'))
+            if (utf8.All(c => !char.IsControl(c) || c is '\t' or '\n' or '\r'))
             {
-                result = utf8;
-                return Sanitize(result);
+                return Sanitize(utf8);
             }
         }
-        catch { }
 
-        // 2. Try CP866 (common in Navisworks localized releases)
+        // 2. Legacy 8-bit code page: Navisworks releases stored names as CP866 or CP1251 and the
+        // section header does not say which. Decode both and keep the more plausible Cyrillic text;
+        // CP866 was the previous unconditional choice, so it wins ties and wins whenever CP1251
+        // has no Cyrillic letters at all (which is what an uppercase CP866 word looks like there).
         string cp866 = Encoding866.GetString(data, offset, length);
-        if (cp866.All(c => !char.IsControl(c) || c == '\t'))
-        {
-            result = cp866;
-            return Sanitize(result);
-        }
-
-        // 3. Fallback to CP1251
-        result = Encoding1251.GetString(data, offset, length);
+        string cp1251 = Encoding1251.GetString(data, offset, length);
+        int cyrillic866 = CyrillicCount(cp866);
+        int cyrillic1251 = CyrillicCount(cp1251);
+        bool prefer1251 = cyrillic1251 > 0 && (cyrillic866 == 0 ||
+            LegacyTextScore(cp1251) > LegacyTextScore(cp866) + 6);
+        result = prefer1251 ? cp1251 : cp866;
         return Sanitize(result);
     }
+
+    private static int CyrillicCount(string text)
+    {
+        int count = 0;
+        foreach (char c in text)
+        {
+            if (c is >= '\u0400' and <= '\u04FF')
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Scores decoded legacy text: Russian letter frequencies plus penalties for box-drawing,
+    /// symbol-noise and non-Russian Cyrillic letters that a wrong code page produces.
+    /// </summary>
+    private static double LegacyTextScore(string text)
+    {
+        double score = 0;
+        bool atWordStart = true;
+        bool wordHasLower = false;
+        int innerUppercase = 0;
+
+        void EndWord()
+        {
+            // A whole word in capitals is normal (УЗЕЛ, ХВС); only mixed case is evidence of a wrong
+            // code page, so the penalty applies only when the word also has lowercase letters.
+            if (wordHasLower)
+            {
+                score -= 6 * innerUppercase;
+            }
+
+            atWordStart = true;
+            wordHasLower = false;
+            innerUppercase = 0;
+        }
+
+        char previous = ' ';
+        foreach (char raw in text)
+        {
+            char c = char.ToLowerInvariant(raw);
+            char before = previous;
+            previous = raw;
+            if (c is >= 'а' and <= 'я')
+            {
+                score += RussianLetterFrequency(c);
+                if (char.IsUpper(raw) && !atWordStart)
+                {
+                    innerUppercase++;
+                }
+
+                if (char.IsLower(raw))
+                {
+                    wordHasLower = true;
+                }
+
+                atWordStart = false;
+            }
+            else if (c == 'ё')
+            {
+                score += 0.2;
+                atWordStart = false;
+            }
+            else if (c is 'і' or 'ї' or 'є' or 'ґ')
+            {
+                score += 0.1;
+                atWordStart = false;
+            }
+            else if (c is >= '\u0400' and <= '\u04FF')
+            {
+                score -= 4;
+                atWordStart = false;
+            }
+            else if (c is >= '\u2500' and <= '\u259F')
+            {
+                score -= 12;
+                EndWord();
+            }
+            else if (c == '\u00B0' && !char.IsDigit(before))
+            {
+                // A degree sign is legitimate after a number ("45\u00B0"); elsewhere it is what CP1251
+                // lowercase '\u0448' looks like when read as CP866.
+                score -= 6;
+                EndWord();
+            }
+            else if (c is '\u2219' or '\u00A4' or '\u00A9' or '\u00AE' or '\u00B7')
+            {
+                score -= 6;
+                EndWord();
+            }
+            else if (c is '\u00A0' or '\u00AD' or '\uFFFD')
+            {
+                // CP866 lowercase letters land on NBSP and soft hyphen when read as CP1251.
+                score -= 10;
+                EndWord();
+            }
+            else if (c is (>= '\u0080' and <= '\u009F') or
+                (>= '\u2018' and <= '\u201E') or (>= '\u2020' and <= '\u2026') or
+                '\u2030' or '\u2039' or '\u203A' or '\u2122' or '\u20AC')
+            {
+                // Bytes 0x80-0x9F become punctuation or C1 controls in CP1251; a CP866 word
+                // decoded this way must not look more plausible than the original.
+                score -= 6;
+                EndWord();
+            }
+            else if (char.IsLetter(c))
+            {
+                // Latin letters are equally plausible in either code page and carry no signal.
+                score += 1;
+                if (char.IsLower(raw))
+                {
+                    wordHasLower = true;
+                }
+
+                atWordStart = false;
+            }
+            else if (char.IsWhiteSpace(c) || char.IsPunctuation(c) || char.IsSymbol(c) || char.IsDigit(c))
+            {
+                EndWord();
+            }
+        }
+
+        EndWord();
+        return score;
+    }
+
+    private static double RussianLetterFrequency(char c) => c switch
+    {
+        'о' => 11.0, 'е' => 8.5, 'а' => 8.0, 'и' => 7.4, 'н' => 6.7, 'т' => 6.3, 'с' => 5.5,
+        'р' => 4.7, 'в' => 4.5, 'л' => 4.4, 'к' => 3.5, 'м' => 3.2, 'д' => 3.0, 'п' => 2.8,
+        'у' => 2.6, 'я' => 2.0, 'ы' => 1.9, 'ь' => 1.7, 'г' => 1.7, 'з' => 1.7, 'б' => 1.6,
+        'ч' => 1.4, 'й' => 1.2, 'х' => 1.0, 'ж' => 0.9, 'ш' => 0.7, 'ю' => 0.6, 'ц' => 0.5,
+        'щ' => 0.4, 'э' => 0.3, 'ф' => 0.3, 'ъ' => 0.05,
+        _ => 0.0,
+    };
 
     private static string Sanitize(string text)
     {

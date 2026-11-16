@@ -106,9 +106,18 @@ internal static class NwcStreamSerializer
                 throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} holds line segments, which the .nwc writer cannot store.", nameof(doc));
             }
 
-            if (mesh.Indices.Count > 0 && !MeshParser.IsStrip(mesh.Indices, mesh.Vertices.Count))
+            if (mesh.Indices.Count % 3 != 0)
             {
-                throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} has triangles the .nwc writer cannot store: it writes positions only and the reader rebuilds one strip over them.", nameof(doc));
+                throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} has {mesh.Indices.Count.ToString(CultureInfo.InvariantCulture)} indices; expected a multiple of 3.", nameof(doc));
+            }
+
+            for (var i = 0; i < mesh.Indices.Count; i++)
+            {
+                var index = mesh.Indices[i];
+                if (index < 0 || index >= mesh.Vertices.Count)
+                {
+                    throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)}, index {i.ToString(CultureInfo.InvariantCulture)} is {index.ToString(CultureInfo.InvariantCulture)}; expected 0..{(mesh.Vertices.Count - 1).ToString(CultureInfo.InvariantCulture)}.", nameof(doc));
+                }
             }
 
             if (mesh.Vertices.Count < MeshParser.MinMeshVertices ||
@@ -148,6 +157,14 @@ internal static class NwcStreamSerializer
             if (!string.IsNullOrWhiteSpace(name) && !ViewpointParser.IsWritableName(name))
             {
                 throw new ArgumentException($"Viewpoint at index {i} has a name the reader would rename.", nameof(doc));
+            }
+
+            var viewpoint = doc.SavedViewpoints[i];
+            if (viewpoint.Comments.Count > ViewpointExtensionFormat.MaxComments ||
+                viewpoint.Comments.Any(c => Encoding.UTF8.GetByteCount(c) > ViewpointExtensionFormat.MaxCommentBytes) ||
+                viewpoint.SectionPlanes.Count > ViewpointExtensionFormat.MaxSectionPlanes)
+            {
+                throw new ArgumentException($"Viewpoint at index {i} has more comments, longer comments or more section planes than the reader accepts.", nameof(doc));
             }
         }
     }
@@ -472,6 +489,10 @@ internal static class NwcStreamSerializer
         return ms.ToArray();
     }
 
+    // Marks the writer's own mesh trailer: mesh Id, triangle indices and Name follow the positions.
+    // "NWCI" in little-endian byte order; real geometries keep their documented grammar and never carry it.
+    internal const int MeshTrailerMagic = 0x4943574E;
+
     public static void BuildGeometryAndTocStreams(
         IReadOnlyList<NwcMesh> meshes,
         out byte[] geomData,
@@ -486,10 +507,14 @@ internal static class NwcStreamSerializer
             var mesh = meshes[r];
             var verts = mesh.Vertices;
             int vCount = verts.Count;
-            int rLen = 24 + vCount * 12;
+            var nameBytes = Encoding.UTF8.GetBytes(mesh.Name ?? string.Empty);
+            int namePad = (4 - (nameBytes.Length & 3)) & 3;
+            int rLen = 24 + vCount * 12 + 16 + mesh.Indices.Count * 4 + nameBytes.Length + namePad;
             recordLengths[r] = rLen;
 
-            geomWriter.Write(mesh.Id != 0 ? mesh.Id : r); // recId
+            // The record id stays a unique parse index; the mesh id is stored in the trailer, so Id 0
+            // is preserved instead of being replaced by the record position.
+            geomWriter.Write(r); // recId
             geomWriter.Write(94);                         // recTag (94)
             geomWriter.Write(0);                          // flags
             geomWriter.Write(60);                         // subTag (60)
@@ -501,6 +526,22 @@ internal static class NwcStreamSerializer
                 geomWriter.Write((float)verts[v].X);
                 geomWriter.Write((float)verts[v].Y);
                 geomWriter.Write((float)verts[v].Z);
+            }
+
+            // Writer extension: exact triangle indices and the mesh name, which the record header has no room for.
+            geomWriter.Write(MeshTrailerMagic);
+            geomWriter.Write(mesh.Indices.Count);
+            for (int i = 0; i < mesh.Indices.Count; i++)
+            {
+                geomWriter.Write(mesh.Indices[i]);
+            }
+
+            geomWriter.Write(mesh.Id);
+            geomWriter.Write(nameBytes.Length);
+            geomWriter.Write(nameBytes);
+            for (int p = 0; p < namePad; p++)
+            {
+                geomWriter.Write((byte)0);
             }
         }
 
@@ -594,6 +635,7 @@ internal static class NwcStreamSerializer
         {
             ext.Write(ViewpointExtensionFormat.Magic);
             ext.Write(ViewpointExtensionFormat.Version);
+            ext.Write(camera.FieldOfView > 0 ? camera.FieldOfView : 60.0);
             ext.Write(camera.FarDistance);
             ext.Write((int)camera.Projection);
 

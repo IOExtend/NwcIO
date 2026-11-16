@@ -231,6 +231,76 @@ public class WriterTests
         Assert.Empty(reopened.SavedViewpoints[1].SectionPlanes);
     }
 
+    [Fact]
+    public void Writer_SavedViewpoints_WithSameNameAndCameraButDifferentSections_AreAllKept()
+    {
+        var camera = new NwcCamera { Position = new Vector3d(1, 2, 3), Rotation = Quaterniond.Identity, FocalDistance = 10 };
+        var viewpoints = Enumerable.Range(1, 3).Select(n => n * 3.0).Select(z => new NwcSavedViewpoint
+        {
+            Name = "Plan",
+            Camera = camera,
+            SectionPlanes = [NwcSectionPlane.CreateTop(z)],
+        }).ToArray();
+
+        var doc = NwcDocument.Create(savedViewpoints: viewpoints);
+        using var input = new MemoryStream(doc.ToByteArray());
+        var reopened = NwcDocument.Open(input);
+
+        Assert.Equal(3, reopened.SavedViewpoints.Count);
+        Assert.Equal([-3.0, -6.0, -9.0], reopened.SavedViewpoints.Select(v => v.SectionPlanes.Single().Distance));
+    }
+
+    [Fact]
+    public void Parser_ViewpointTrailerWithTruncatedPayload_FallsBackToDefaults()
+    {
+        var viewpoint = new NwcSavedViewpoint
+        {
+            Name = "View A",
+            Camera = new NwcCamera { Position = new Vector3d(1, 2, 3), Rotation = Quaterniond.Identity, FocalDistance = 10, FieldOfView = 45 },
+            Comments = ["note"],
+        };
+        byte[] stream = NwcStreamSerializer.BuildSavedViewsStream([viewpoint]);
+        int trailer = -1;
+        for (int i = 0; i + 8 <= stream.Length; i += 4)
+        {
+            if (BinaryPrimitives.ReadInt32LittleEndian(stream.AsSpan(i)) == ViewpointExtensionFormat.Magic)
+            {
+                trailer = i;
+                break;
+            }
+        }
+
+        Assert.True(trailer >= 0);
+        // Declare a payload longer than the stream so the trailer must be rejected, not read out of bounds.
+        BinaryPrimitives.WriteInt32LittleEndian(stream.AsSpan(trailer + 4), stream.Length);
+
+        var parsed = Assert.Single(ViewpointParser.Parse(stream));
+        Assert.Equal(60.0, parsed.Camera.FieldOfView);
+        Assert.Equal(NwcCameraProjection.Perspective, parsed.Camera.Projection);
+        Assert.Empty(parsed.SectionPlanes);
+    }
+
+    [Fact]
+    public void Writer_SavedViewpointBeyondReaderLimits_IsRejected()
+    {
+        var camera = new NwcCamera { Rotation = Quaterniond.Identity };
+        var tooManyPlanes = new NwcSavedViewpoint
+        {
+            Name = "View A",
+            Camera = camera,
+            SectionPlanes = Enumerable.Range(0, 65).Select(_ => NwcSectionPlane.CreateTop(1)).ToArray(),
+        };
+        var tooManyComments = new NwcSavedViewpoint
+        {
+            Name = "View B",
+            Camera = camera,
+            Comments = Enumerable.Repeat("c", 1025).ToArray(),
+        };
+
+        Assert.Throws<ArgumentException>(() => NwcDocument.Create(savedViewpoints: [tooManyPlanes]).ToByteArray());
+        Assert.Throws<ArgumentException>(() => NwcDocument.Create(savedViewpoints: [tooManyComments]).ToByteArray());
+    }
+
     [Theory]
     [InlineData(-1.0)]
     [InlineData(100.0)]
@@ -287,15 +357,42 @@ public class WriterTests
         AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 5");
     }
 
-    // The writer stores positions only and the reader rebuilds one strip over them.
+    [Fact]
+    public void Writer_RoundtripsNonStripTopologyAndMeshIdentity()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 7,
+            Name = "Door",
+            Vertices =
+            [
+                new(0, 0, 0), new(1, 0, 0), new(1, 1, 0), new(0, 1, 0),
+                new(0, 0, 1), new(1, 0, 1), new(1, 1, 1), new(0, 1, 1),
+            ],
+            Indices =
+            [
+                0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4,
+                1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7,
+            ],
+        };
+
+        var reopened = NwcDocument.Open(new MemoryStream(NwcDocument.Create(meshes: [mesh]).ToByteArray()));
+
+        var result = Assert.Single(reopened.Meshes);
+        Assert.Equal(7, result.Id);
+        Assert.Equal("Door", result.Name);
+        Assert.Equal(mesh.Vertices, result.Vertices);
+        Assert.Equal(mesh.Indices, result.Indices);
+    }
+
     [Theory]
-    [InlineData(new[] { 0, 1, 2, 0, 2, 3 }, 4)]
-    [InlineData(new[] { 0, 1, 2, 2, 1, 3, 4, 5, 6 }, 7)]
-    [InlineData(new[] { 0, 2, 1 }, 3)]
-    public void Writer_RejectsTopologyTheStripCannotRepresent_WithoutChangingDestination(int[] indices, int vertexCount)
+    [InlineData(new[] { 0, 1, 3 }, 3)]
+    [InlineData(new[] { -1, 0, 1 }, 3)]
+    [InlineData(new[] { 0, 1 }, 3)]
+    public void Writer_RejectsInvalidIndices_WithoutChangingDestination(int[] indices, int vertexCount)
     {
         var mesh = new NwcMesh { Id = 9, Vertices = StripVertices(vertexCount), Indices = indices };
-        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 9 has triangles the .nwc writer cannot store");
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 9");
     }
 
     [Theory]
@@ -307,7 +404,10 @@ public class WriterTests
     {
         var mesh = new NwcMesh { Id = 9, Vertices = StripVertices(vertexCount), Indices = indices };
         var reopened = NwcDocument.Open(new MemoryStream(NwcDocument.Create(meshes: [mesh]).ToByteArray()));
-        Assert.Equal(mesh.Vertices, Assert.Single(reopened.Meshes).Vertices);
+        var result = Assert.Single(reopened.Meshes);
+        Assert.Equal(mesh.Vertices, result.Vertices);
+        Assert.Equal(mesh.Indices, result.Indices);
+        Assert.Equal(9, result.Id);
     }
 
     private static Vector3d[] StripVertices(int count) => Enumerable.Range(0, count).Select(i => new Vector3d(i / 2, i % 2, 0)).ToArray();
@@ -724,7 +824,8 @@ public class WriterTests
 
         var reopened = NwcDocument.Open(ms);
         Assert.NotNull(reopened.RootNode);
-        var prop = Assert.Single(reopened.RootNode.Properties, p => p.Name == "Phase Status");
+        var element = Assert.Single(reopened.RootNode.Children, n => n.Name == "Element 1");
+        var prop = Assert.Single(element.Properties, p => p.Name == "Phase Status");
         Assert.Equal("Phase Status", prop.Name);
         Assert.Equal((int)NwcVariantDataType.NamedConstant, prop.ValueType);
         Assert.Equal("Existing", prop.Value);
