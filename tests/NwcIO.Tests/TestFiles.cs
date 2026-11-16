@@ -48,22 +48,14 @@ internal static class TestFiles
             return env;
         }
 
-        foreach (var root in SearchRoots())
-        {
-            var candidate = Directory.EnumerateFiles(root, "*.nwc", SearchOption.AllDirectories).FirstOrDefault();
-            if (candidate is not null)
-            {
-                return candidate;
-            }
-        }
-
-        return null;
+        var files = EnumerateAll();
+        return files.Count > 0 ? files[0] : null;
     }
 
     /// <summary>
     /// Every local fixture file in a stable order: only the file named by <see cref="EnvironmentVariable"/>
-    /// when it exists, otherwise all *.nwc and *.nwd files of the first search root that holds any,
-    /// ordered by (length, full path). Reports refer to files by position in this list.
+    /// when it exists, otherwise all *.nwc, *.nwd and *.nwf files of the first search root that holds any,
+    /// ordered by full path. Reports refer to files by position in this list.
     /// </summary>
     public static IReadOnlyList<string> EnumerateAll()
     {
@@ -77,9 +69,9 @@ internal static class TestFiles
         {
             var files = Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
                 .Where(f => f.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase)
-                    || f.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(f => new FileInfo(f).Length)
-                .ThenBy(f => f, StringComparer.Ordinal)
+                    || f.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase)
+                    || f.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => f, StringComparer.Ordinal)
                 .ToList();
             if (files.Count > 0)
             {
@@ -105,10 +97,10 @@ internal static class TestFiles
         var env = Environment.GetEnvironmentVariable(EnvironmentVariable);
         if (!string.IsNullOrEmpty(env))
         {
-            return $"No .nwc fixture found: {EnvironmentVariable} is set to '{env}', which is neither an existing .nwc file nor a directory containing one.";
+            return $"No .nwc/.nwd/.nwf fixture found: {EnvironmentVariable} is set to '{env}', which is neither an existing model file nor a directory containing one.";
         }
 
-        return $"No .nwc fixture found (set {EnvironmentVariable} or add a test_files directory).";
+        return $"No .nwc/.nwd/.nwf fixture found (set {EnvironmentVariable} or add a test_files directory).";
     }
 
     /// <summary>
