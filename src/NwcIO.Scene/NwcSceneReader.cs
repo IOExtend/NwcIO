@@ -145,6 +145,19 @@ public static partial class NwcSceneReader
             }
         }
 
+        // References OpenNwf could not load: the scene holds nothing of them (the .nwf shell's own xrefs-skipped is not reported).
+        if (assembly.UnresolvedXRefs.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "xrefs-unresolved",
+                $"{assembly.UnresolvedXRefs.Count} external references were not found on disk, so their models are missing from the scene: {XRefNames(assembly.UnresolvedXRefs)}."));
+        }
+
+        if (assembly.SkippedXRefs.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "xrefs-not-loaded",
+                $"{assembly.SkippedXRefs.Count} external references are files other than .nwc and .nwd and were not loaded, so the scene holds none of their content: {XRefNames(assembly.SkippedXRefs)}."));
+        }
+
         return new NwcSceneResult
         {
             Document = scene,
@@ -157,6 +170,10 @@ public static partial class NwcSceneReader
             MetresPerUnit = mixedUnits ? null : (commonUnit ?? NwcLengthUnit.Unknown).GetMetresPerUnit(),
         };
     }
+
+    // The first five effective paths, then the count of the rest.
+    private static string XRefNames(IReadOnlyList<NwcXRef> references) =>
+        string.Join(", ", references.Take(5).Select(r => r.EffectivePath)) + (references.Count > 5 ? $" and {references.Count - 5} more" : "");
 
     private static string? DocumentPath(NwcDocument document) =>
         document.LoadedPath ?? document.FileInfo.SourcePath;

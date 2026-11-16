@@ -694,6 +694,77 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_AssemblyOpenedFromNwf_SkipsTheShellAndReportsUnresolvedAndNotLoadedReferences()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nwcscene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            NwcDocument.Create(new NwcFileInfo { SourcePath = "Tower.rvt", LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root)
+                .Save(Path.Combine(directory, "Arch.nwc"));
+            File.WriteAllText(Path.Combine(directory, "tex.png"), "not a model");
+            string nwf = Path.Combine(directory, "fed.nwf");
+            File.WriteAllBytes(nwf, XRefFile("Arch.nwc", "gone/Missing.nwc", "tex.png"));
+
+            var assembly = NwcAssembly.OpenNwf(nwf);
+            var result = Valid(NwcSceneReader.Read(assembly));
+
+            Assert.Equal(["Arch.nwc"], result.Document.Models.Select(m => m.Key));   // the shell is not a model
+            Assert.DoesNotContain(result.Diagnostics, d => d.Code == "xrefs-skipped");
+            var unresolved = Assert.Single(result.Diagnostics, d => d.Code == "xrefs-unresolved");
+            Assert.Equal(SceneSeverity.Warning, unresolved.Severity);
+            Assert.StartsWith("1 external references were not found", unresolved.Message);
+            Assert.Contains("gone/Missing.nwc", unresolved.Message);
+            var notLoaded = Assert.Single(result.Diagnostics, d => d.Code == "xrefs-not-loaded");
+            Assert.Equal(SceneSeverity.Warning, notLoaded.Severity);
+            Assert.Contains("tex.png", notLoaded.Message);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void Read_AssemblyWithoutNwfReferences_GetsNoXRefDiagnostics()
+    {
+        var assembly = NwcAssembly.Create("Federation", ElementWithEmptyMesh("A.nwc", Guid.NewGuid()));
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code.StartsWith("xrefs-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Read_Assembly_KeepsTheSourceIdOfAModelDiagnostic()
+    {
+        var guid = Guid.NewGuid();
+        var assembly = NwcAssembly.Create("Federation", ElementWithEmptyMesh("A.nwc", guid));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        var diagnostic = Assert.Single(result.Diagnostics, d => d.Code == "empty-mesh");
+        Assert.StartsWith("A.nwc: ", diagnostic.Message);
+        Assert.Equal(guid.ToString("D"), diagnostic.SourceId);
+    }
+
+    private static NwcDocument ElementWithEmptyMesh(string sourcePath, Guid guid)
+    {
+        var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+        var child = new NwcNode { Id = 2, Name = "Child", Class = "Model", IsElement = true, ElementGuid = guid };
+        child.Element = child;
+        root.Children.Add(child);
+        var mesh = new NwcMesh { Id = 1, Vertices = [], Indices = [], Node = child };
+        child.Mesh = mesh;
+        return NwcDocument.Create(new NwcFileInfo { SourcePath = sourcePath }, meshes: [mesh], rootNode: root);
+    }
+
+    // A .nwf-like file whose XRef table lists the given paths.
+    private static byte[] XRefFile(params string[] paths) => SyntheticNwcFile.Build(null, null, [], [], extraStreams:
+        [("LcOpXRefTable", System.Text.Encoding.UTF8.GetBytes(
+            "{\"Type\":\"XRefTable\",\"Version\":1,\"SavedFilename\":\"fed.nwf\",\"Table\":["
+            + string.Join(",", paths.Select(p => $"{{\"OriginalPath\":\"{p}\",\"RemappedPath\":\"\"}}")) + "]}"))]);
+
+    [Fact]
     public void Read_FileWithSavedViews_SkipsThemWithAWarning()
     {
         var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));
