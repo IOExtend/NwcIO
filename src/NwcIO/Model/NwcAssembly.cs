@@ -162,6 +162,17 @@ public sealed class NwcAssembly
         string directoryPath,
         string searchPattern = "*.nwc",
         NwcReaderOptions? options = null)
+        => LoadFromDirectory(directoryPath, searchPattern, options, null, default);
+
+    /// <summary>
+    /// Loads a folder of models with cancellation and per-model progress.
+    /// </summary>
+    public static NwcAssembly LoadFromDirectory(
+        string directoryPath,
+        string searchPattern,
+        NwcReaderOptions? options,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         if (!Directory.Exists(directoryPath))
         {
@@ -174,10 +185,14 @@ public sealed class NwcAssembly
             throw new FileNotFoundException($"No files matching '{searchPattern}' found in {directoryPath}");
         }
 
-        var docs = new List<NwcDocument>(files.Length);
-        foreach (var file in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        cancellationToken.ThrowIfCancellationRequested();
+        var ordered = files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToArray();
+        var docs = new List<NwcDocument>(ordered.Length);
+        for (int i = 0; i < ordered.Length; i++)
         {
-            docs.Add(NwcDocument.Open(file, options));
+            cancellationToken.ThrowIfCancellationRequested();
+            docs.Add(NwcDocument.Open(ordered[i], options, null, cancellationToken));
+            progress?.Report(new NwcProgress("load-models", i + 1, ordered.Length));
         }
 
         string assemblyName = Path.GetFileName(directoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -190,13 +205,24 @@ public sealed class NwcAssembly
     /// <exception cref="InvalidDataException">A file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
     /// <exception cref="NotSupportedException">A referenced .nwd has a scene tree with partition (class-32) nodes; open with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcAssembly OpenNwf(string nwfPath, NwcReaderOptions? options = null)
+        => OpenNwf(nwfPath, options, null, default);
+
+    /// <summary>
+    /// Opens a .nwf assembly with cancellation and progress for each loaded model.
+    /// </summary>
+    public static NwcAssembly OpenNwf(
+        string nwfPath,
+        NwcReaderOptions? options,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         if (!File.Exists(nwfPath))
         {
             throw new FileNotFoundException($"NWF file not found: {nwfPath}", nwfPath);
         }
 
-        var primaryDoc = NwcDocument.Open(nwfPath, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        var primaryDoc = NwcDocument.Open(nwfPath, options, null, cancellationToken);
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(nwfPath)) ?? ".";
 
         var loadedDocs = new List<NwcDocument> { primaryDoc };
@@ -205,11 +231,14 @@ public sealed class NwcAssembly
             : StringComparer.Ordinal);
         var unresolved = new List<NwcXRef>();
         var skipped = new List<NwcXRef>();
+        int total = 1 + (primaryDoc.XRefs?.References.Count ?? 0);
+        progress?.Report(new NwcProgress("load-models", 1, total));
 
         if (primaryDoc.XRefs is not null && primaryDoc.XRefs.References.Count > 0)
         {
             foreach (var xref in primaryDoc.XRefs.References)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!xref.TryResolve(baseDir, out string resolved))
                 {
                     unresolved.Add(xref);
@@ -229,7 +258,8 @@ public sealed class NwcAssembly
                     continue;
                 }
 
-                loadedDocs.Add(NwcDocument.Open(resolved, options));
+                loadedDocs.Add(NwcDocument.Open(resolved, options, null, cancellationToken));
+                progress?.Report(new NwcProgress("load-models", loadedDocs.Count, total));
             }
         }
 
@@ -239,6 +269,23 @@ public sealed class NwcAssembly
         assembly.SkippedXRefs = skipped;
         return assembly;
     }
+
+    /// <summary>Loads a folder asynchronously. The current implementation wraps the synchronous loader.</summary>
+    public static Task<NwcAssembly> LoadFromDirectoryAsync(
+        string directoryPath,
+        string searchPattern = "*.nwc",
+        NwcReaderOptions? options = null,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() => LoadFromDirectory(directoryPath, searchPattern, options, progress, cancellationToken), cancellationToken);
+
+    /// <summary>Opens a .nwf asynchronously. The current implementation wraps the synchronous loader.</summary>
+    public static Task<NwcAssembly> OpenNwfAsync(
+        string nwfPath,
+        NwcReaderOptions? options = null,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() => OpenNwf(nwfPath, options, progress, cancellationToken), cancellationToken);
 
     /// <summary>
     /// Applies an appearance profiler across all contributing models in the federated assembly.

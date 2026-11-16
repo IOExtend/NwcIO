@@ -5,6 +5,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ## [Unreleased]
 
 ### Added
+- Cancellation and progress overloads for `NwcDocument.Open`, `NwcAssembly.LoadFromDirectory` and `NwcAssembly.OpenNwf`, plus `OpenAsync`, `LoadFromDirectoryAsync`, `OpenNwfAsync` and `Save*Async` wrappers. `NwcProgress` reports phases such as `read-container`, `read-geometry`, `open` and per-model `load-models` counts.
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 
 ### Changed
