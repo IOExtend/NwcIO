@@ -162,7 +162,7 @@ internal static class MeshParser
         }
 
         int curPos = 0;
-        var usedIds = new HashSet<int>();
+        var usedIds = new MeshIdAllocator();
         for (int r = 0; r < recordCount; r++)
         {
             int rLen = recordLengths[r];
@@ -281,6 +281,30 @@ internal static class MeshParser
         }
     }
 
+    /// <summary>Tracks claimed mesh ids. Fallback probing resumes from the last fallback, so many duplicates stay linear.</summary>
+    private sealed class MeshIdAllocator
+    {
+        private readonly HashSet<int> _used = [];
+        private int _nextFallback = int.MinValue;
+
+        public int Claim(int id, int fallbackStart)
+        {
+            if (_used.Add(id))
+            {
+                return id;
+            }
+
+            id = Math.Max(fallbackStart, _nextFallback);
+            while (!_used.Add(id))
+            {
+                id++;
+            }
+
+            _nextFallback = id + 1;
+            return id;
+        }
+    }
+
     private static NwcMesh? TryBuildMesh(
         byte[] buffer,
         int recordOffset,
@@ -290,7 +314,7 @@ internal static class MeshParser
         int recordLength,
         int meshId,
         bool lines,
-        HashSet<int>? usedIds = null)
+        MeshIdAllocator? usedIds = null)
     {
         if (vertexOffset < 0 || vertexCount > (buffer.Length - vertexOffset) / 12)
         {
@@ -342,13 +366,9 @@ internal static class MeshParser
 
         // A merged document can repeat ids. Keep the first occurrence exact and give later duplicates a
         // unique fallback, so clash detection and IFC export do not silently pair unrelated meshes.
-        if (usedIds is not null && !usedIds.Add(id))
+        if (usedIds is not null)
         {
-            id = meshId;
-            while (!usedIds.Add(id))
-            {
-                id++;
-            }
+            id = usedIds.Claim(id, meshId);
         }
 
         return new NwcMesh
