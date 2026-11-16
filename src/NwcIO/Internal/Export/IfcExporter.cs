@@ -118,7 +118,6 @@ internal static class IfcExporter
             $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:building-storey"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(buildingId)},({StepWriter.Ref(storeyId)})");
 
         // 4. Materials & Styles Cache
-        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
         var styleCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (options.ExportMaterials)
         {
@@ -346,7 +345,6 @@ internal static class IfcExporter
             $"{StepWriter.Str(IfcGuid.FromKey("ifc:rel:site-building"))},{StepWriter.Ref(ownerHistoryId)},$,$,{StepWriter.Ref(siteId)},({StepWriter.Ref(buildingId)})");
 
         // 4. Materials Cache
-        bool isIfc4 = options.SchemaVersion == NwcIfcSchemaVersion.Ifc4;
         var styleCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (options.ExportMaterials)
         {
