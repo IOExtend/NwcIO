@@ -189,6 +189,9 @@ public static class SceneTreeBuilder
             }
         }
 
+        // Bound the tree before any recursive consumer (transforms, GUIDs, materials) walks it.
+        EnsureBoundedDepth(root);
+
         // Attach transforms by ID if available, or to root/elements
         if (transforms is { Count: > 0 })
         {
@@ -207,7 +210,6 @@ public static class SceneTreeBuilder
             AttachGuidsRecursive(root, guids, 0);
         }
 
-        EnsureBoundedDepth(root);
         return root;
     }
 

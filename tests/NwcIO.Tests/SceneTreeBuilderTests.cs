@@ -88,6 +88,25 @@ public class SceneTreeBuilderTests
     }
 
     [Fact]
+    public void Build_DeepChainWithTransform_ThrowsBeforeRecursiveAttachment()
+    {
+        // The old order attached transforms recursively before checking depth, so a crafted chain
+        // overflowed the stack. The depth check must run first.
+        const int depth = 20_000;
+        var records = new List<NwcPropertyRecord>(depth * 2);
+        for (int id = 1; id <= depth; id++)
+        {
+            records.Add(new NwcPropertyRecord { FirstInt = id, Tag = 53, Name = $"N{id}", Class = "Node", ParentId = id - 1 });
+            records.Add(new NwcPropertyRecord { FirstInt = id, Tag = 52, Name = "n", Class = "LcTestGroup" });
+        }
+
+        var transform = new NwcTransform { Id = 1 };
+
+        Assert.Throws<InvalidDataException>(() =>
+            SceneTreeBuilder.Build("root", records, transforms: [transform]));
+    }
+
+    [Fact]
     public void Open_Save_Open_PreservesExplicitParentHierarchy()
     {
         var root = new NwcNode { Id = 1, Name = "Site", Class = "LcTestGroup" };
