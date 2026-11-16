@@ -256,29 +256,41 @@ public class CliArgumentValidationTests
         }
     }
 
-    [Fact]
-    public void Folder_SetsXml_WritesFile()
+    private static void SaveModel(string path)
+    {
+        new NwcDocumentBuilder().SetFileInfo("test.rvt")
+            .AddMesh(new NwcMesh
+            {
+                Id = 1,
+                Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+            })
+            .Build()
+            .Save(path);
+    }
+
+    [Theory]
+    [InlineData("--sets-xml")]
+    [InlineData("--timeliner-csv")]
+    [InlineData("--grids")]
+    [InlineData("--export-grids")]
+    public void Assembly_SingleFileOnlyOptions_AreRejected(string flag)
     {
         string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
         {
-            new NwcDocumentBuilder().SetFileInfo("test.rvt")
-                .AddMesh(new NwcMesh
-                {
-                    Id = 1,
-                    Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
-                    Indices = [0, 1, 2],
-                    BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
-                })
-                .Build()
-                .Save(Path.Combine(dir, "a.nwc"));
+            SaveModel(Path.Combine(dir, "a.nwc"));
+            string nwf = Path.Combine(dir, "fed.nwf");
+            File.WriteAllBytes(nwf, [0]);
 
-            string sets = Path.Combine(dir, "sets.xml");
-            var (exit, _, err) = Run([dir, Path.Combine(dir, "out.glb"), "--sets-xml", sets]);
-
-            Assert.Equal(0, exit);
-            Assert.True(File.Exists(sets), err);
+            foreach (string input in new[] { dir, nwf })
+            {
+                var (exit, _, err) = Run([input, Path.Combine(dir, "out.json"), flag, Path.Combine(dir, "x.dat")]);
+                Assert.Equal(1, exit);
+                Assert.Contains(flag + " is only supported for single-file input", err);
+            }
         }
         finally
         {
@@ -287,30 +299,22 @@ public class CliArgumentValidationTests
     }
 
     [Fact]
-    public void Folder_OptionsThatNeedAssemblyData_FailWithClearErrors()
+    public void Folder_ReaderOptions_AreApplied()
     {
         string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
         {
-            new NwcDocumentBuilder().SetFileInfo("test.rvt")
-                .AddMesh(new NwcMesh
-                {
-                    Id = 1,
-                    Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
-                    Indices = [0, 1, 2],
-                    BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
-                })
-                .Build()
-                .Save(Path.Combine(dir, "a.nwc"));
+            SaveModel(Path.Combine(dir, "a.nwc"));
 
-            var (exit1, _, err1) = Run([dir, Path.Combine(dir, "out.glb"), "--timeliner-csv", Path.Combine(dir, "tl.csv")]);
-            Assert.Equal(2, exit1);
-            Assert.Contains("does not contain a TimeLiner schedule", err1);
+            string withMeshes = Path.Combine(dir, "with.json");
+            Assert.Equal(0, Run([dir, withMeshes])[0 ] is int e1 ? e1 : -1);
+            Assert.Contains("\"totalMeshes\":1", File.ReadAllText(withMeshes).Replace(" ", ""));
 
-            var (exit2, _, err2) = Run([dir, Path.Combine(dir, "out.glb"), "--export-grids", Path.Combine(dir, "grids.xml")]);
-            Assert.Equal(2, exit2);
-            Assert.Contains("does not contain a grid system", err2);
+            string noMeshes = Path.Combine(dir, "without.json");
+            var (exit, _, err) = Run([dir, noMeshes, "--no-meshes"]);
+            Assert.True(exit == 0, err);
+            Assert.Contains("\"totalMeshes\":0", File.ReadAllText(noMeshes).Replace(" ", ""));
         }
         finally
         {
