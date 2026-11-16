@@ -27,11 +27,21 @@ public sealed record NwcClash(
     /// <summary>Gets the geometric center of the clash intersection box.</summary>
     public Vector3d Center => IntersectionBox.Center;
 
+    /// <summary>Assembly model key of <see cref="ModelA"/>; null outside an assembly.</summary>
+    public string? ModelKeyA { get; init; }
+
+    /// <summary>Assembly model key of <see cref="ModelB"/>; null outside an assembly.</summary>
+    public string? ModelKeyB { get; init; }
+
     /// <summary>Gets the 22-character buildingSMART IFC GlobalId of the first clashing element.</summary>
-    public string IfcGuidA => NwcElementGuid.ForMesh(MeshA, ModelA);
+    public string IfcGuidA => ModelKeyA is { } key
+        ? NwcElementGuid.ForMesh(MeshA, key)
+        : NwcElementGuid.ForMesh(MeshA, ModelA);
 
     /// <summary>Gets the 22-character buildingSMART IFC GlobalId of the second clashing element.</summary>
-    public string IfcGuidB => NwcElementGuid.ForMesh(MeshB, ModelB);
+    public string IfcGuidB => ModelKeyB is { } key
+        ? NwcElementGuid.ForMesh(MeshB, key)
+        : NwcElementGuid.ForMesh(MeshB, ModelB);
 
     /// <summary>Display name of ModelA.</summary>
     public string ModelAName => Path.GetFileNameWithoutExtension(ModelA.FileInfo.SourcePath ?? "ModelA");

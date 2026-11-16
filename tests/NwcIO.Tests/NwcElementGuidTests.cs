@@ -31,6 +31,23 @@ public class NwcElementGuidTests
     }
 
     [Fact]
+    public void FindClashes_SameSourcePathAndMeshId_UsesDistinctGlobalIds()
+    {
+        static NwcMesh Mesh(double x) => new()
+        {
+            Id = 1,
+            Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" }, meshes: [Mesh(0)]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" }, meshes: [Mesh(0.5)]);
+        var clash = Assert.Single(NwcAssembly.Create("fed", first, second).FindClashes());
+
+        Assert.NotEqual(clash.IfcGuidA, clash.IfcGuidB);
+    }
+
+    [Fact]
     public void ModelKeys_DistinguishEqualSourcePathsOnlyWhenNeeded()
     {
         var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.rvt" });

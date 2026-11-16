@@ -128,6 +128,32 @@ public class IfcExportTests
     }
 
     [Fact]
+    public void SaveIfc_AssemblyWithEqualSourcePaths_GetsDistinctProductGlobalIds()
+    {
+        static NwcDocument Model(double x) => NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" },
+            meshes:
+            [
+                new NwcMesh
+                {
+                    Id = 1,
+                    Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+                    Indices = [0, 1, 2],
+                },
+            ]);
+
+        using var writer = new StringWriter();
+        NwcAssembly.Create("fed", Model(0), Model(2)).SaveIfc(writer);
+        string ifc = writer.ToString();
+
+        var guids = System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCBUILDINGELEMENTPROXY\('([^']+)'")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(2, guids.Length);
+        Assert.Equal(2, guids.Distinct().Count());
+    }
+
+    [Fact]
     public void SaveIfc_PropertySetIdsFollowTheElementNotTheStepNumber()
     {
         var mesh = new NwcMesh
