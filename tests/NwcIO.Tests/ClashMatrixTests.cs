@@ -84,6 +84,32 @@ public class ClashMatrixTests
         Assert.Equal(1, matrix.TotalClashesCount);
     }
 
+    [Theory]
+    [InlineData(0.0, 0.001, NwcClashTestType.Hard, 0)] // touching boxes are not a Hard clash with a positive tolerance
+    [InlineData(0.0, 0.0, NwcClashTestType.Hard, 1)]
+    [InlineData(0.0005, 0.001, NwcClashTestType.Clearance, 1)]
+    [InlineData(0.002, 0.001, NwcClashTestType.Clearance, 0)]
+    public void Matrix_Tolerance_AppliesToTestType(double gap, double tolerance, NwcClashTestType type, int expected)
+    {
+        var docStr = CreateTestDoc("Structural_Model", 100, new Vector3d(0, 0, 0), "Structural Columns");
+        var docMep = CreateTestDoc("MEP_Model", 200, new Vector3d(2 + gap, 0, 0), "HVAC Ducts");
+        var assembly = NwcAssembly.Create("Assembly", docStr, docMep);
+
+        var matrix = new NwcClashMatrix("Tolerance");
+        matrix.AddDiscipline("Structure", "Structural");
+        matrix.AddDiscipline("MEP", "MEP");
+        matrix.Cells.Add(new NwcClashMatrixCell("Structure", "MEP", tolerance, type));
+
+        matrix.Execute(assembly);
+
+        var cell = matrix.Cells[0];
+        Assert.Equal(expected, cell.ClashCount);
+        if (type == NwcClashTestType.Clearance && expected == 1)
+        {
+            Assert.Equal(gap, cell.Clashes[0].Distance, 6); // positive for clearance
+        }
+    }
+
     [Fact]
     public void Matrix_JsonSerialization_ExportsValidFormat()
     {
