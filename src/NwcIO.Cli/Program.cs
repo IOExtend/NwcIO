@@ -541,24 +541,25 @@ internal static class Program
 
         if (!string.IsNullOrEmpty(explicitScenePath))
         {
+            NwcIO.Scene.NwcSceneResult sceneResult;
             try
             {
                 EnsureParentDirectory(explicitScenePath);
-                var sceneResult = NwcIO.Scene.NwcSceneReader.Read(doc, new NwcIO.Scene.NwcSceneOptions
+                sceneResult = NwcIO.Scene.NwcSceneReader.Read(doc, new NwcIO.Scene.NwcSceneOptions
                 {
                     ModelKey = Path.GetFileName(inputPath),
                     LengthUnit = sceneLengthUnit,
                 });
                 IOScene.SceneJson.Save(sceneResult.Document, explicitScenePath);
-                foreach (var diagnostic in sceneResult.Diagnostics)
-                {
-                    @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
-                }
             }
             catch (Exception ex)
             {
                 @err.WriteLine($"Error writing scene '{explicitScenePath}': {ex.Message}");
                 return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
+            }
+            foreach (var diagnostic in sceneResult.Diagnostics)
+            {
+                @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
             }
         }
 

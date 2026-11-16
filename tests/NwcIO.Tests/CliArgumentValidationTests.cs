@@ -256,11 +256,12 @@ public class CliArgumentValidationTests
     }
 
     [Theory]
-    [InlineData("ft")]
-    [InlineData("m")]
-    [InlineData("cm")]
-    [InlineData("mm")]
-    public void Scene_LengthUnitSymbols_WriteTheScene(string unit)
+    [InlineData("ft", "ft")]
+    [InlineData("m", "m")]
+    [InlineData("cm", "cm")]
+    [InlineData("mm", "mm")]
+    [InlineData("Meters", "m")]
+    public void Scene_LengthUnitSymbols_WriteTheScene(string unit, string expectedSymbol)
     {
         string model = TempModel();
         string scene = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".json");
@@ -271,11 +272,101 @@ public class CliArgumentValidationTests
             Assert.Equal(0, exit);
             Assert.True(File.Exists(scene));
             Assert.DoesNotContain("Invalid scene length unit", err);
+            Assert.DoesNotContain("unit-unknown", err);
+            Assert.Matches(@"(?i)""sourceLengthUnit""\s*:\s*""" + expectedSymbol + @"""", File.ReadAllText(scene));
         }
         finally
         {
             if (File.Exists(model)) File.Delete(model);
             if (File.Exists(scene)) File.Delete(scene);
+        }
+    }
+
+    [Fact]
+    public void Scene_WithoutLengthUnit_UnknownUnitIsReportedAndSceneIsStillWritten()
+    {
+        string model = TempModel();
+        string scene = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var (exit, _, err) = Run([model, "--scene", scene]);
+
+            Assert.Equal(0, exit);
+            Assert.True(File.Exists(scene));
+            Assert.Contains("Scene Warning: unit-unknown", err);
+            Assert.DoesNotContain("Error writing scene", err);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(scene)) File.Delete(scene);
+        }
+    }
+
+    [Fact]
+    public void Scene_DiagnosticOutputFailure_IsNotReportedAsSceneWriteError()
+    {
+        string model = TempModel();
+        string scene = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            using var swOut = new StringWriter();
+            var err = new ThrowingOnSceneDiagnosticWriter();
+
+            // The scene is already on disk when diagnostics are printed; a failing stderr must not turn into "Error writing scene" / exit 3.
+            Assert.Throws<IOException>(() => NwcIO.Cli.Program.Run([model, "--scene", scene], stdoutStream: null, outWriter: swOut, errorWriter: err));
+
+            Assert.True(File.Exists(scene));
+            Assert.DoesNotContain("Error writing scene", err.Written.ToString());
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            if (File.Exists(scene)) File.Delete(scene);
+        }
+    }
+
+    private sealed class ThrowingOnSceneDiagnosticWriter : StringWriter
+    {
+        public StringWriter Written { get; } = new();
+
+        public override void WriteLine(string? value)
+        {
+            if (value is not null && value.StartsWith("Scene ", StringComparison.Ordinal))
+                throw new IOException("stderr closed");
+            Written.WriteLine(value);
+        }
+    }
+
+    [Fact]
+    public void Scene_WithNwfInput_Exits1()
+    {
+        string nwf = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".nwf");
+        string scene = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N") + ".json");
+        var (exit, _, err) = Run([nwf, "--scene", scene]);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("only supported for a single", err);
+        Assert.False(File.Exists(scene));
+    }
+
+    [Fact]
+    public void Scene_WhenTheTargetCannotBeWritten_ReportsTheErrorAndExits3()
+    {
+        string model = TempModel();
+        string target = Path.Combine(Path.GetTempPath(), "cli-scene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(target);   // a directory where the scene file should go
+        try
+        {
+            var (exit, _, err) = Run([model, "--scene", target, "--scene-length-unit", "m"]);
+
+            Assert.Equal(3, exit);
+            Assert.Contains("Error writing scene", err);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+            Directory.Delete(target, true);
         }
     }
 
