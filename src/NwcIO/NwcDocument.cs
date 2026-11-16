@@ -113,7 +113,7 @@ public sealed class NwcDocument
 
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
-    /// <exception cref="InvalidDataException">The file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="InvalidDataException">The file is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
     /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
@@ -130,7 +130,7 @@ public sealed class NwcDocument
     }
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>
-    /// <exception cref="InvalidDataException">The stream is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
+    /// <exception cref="InvalidDataException">The stream is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
     /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes or places one Revit element under two parents (a linked model); open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
@@ -138,7 +138,7 @@ public sealed class NwcDocument
         ArgumentNullException.ThrowIfNull(stream);
         options ??= NwcReaderOptions.Default;
 
-        var container = NwcContainerReader.Read(stream);
+        var container = NwcContainerReader.Read(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes);
         StreamClassifier.ClassifyAll(container.Streams);
         var segments = ModelGraphReader.Locate(container);
 
@@ -205,7 +205,7 @@ public sealed class NwcDocument
 
             if (options.ReadMeshes)
             {
-                meshes.AddRange(MeshParser.Parse(container, transforms));
+                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices));
             }
 
             if (options.BuildSceneTree)

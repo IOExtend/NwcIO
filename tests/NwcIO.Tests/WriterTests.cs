@@ -229,15 +229,42 @@ public class WriterTests
         AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 5");
     }
 
-    // The writer stores positions only and the reader rebuilds one strip over them.
+    [Fact]
+    public void Writer_RoundtripsNonStripTopologyAndMeshIdentity()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 7,
+            Name = "Door",
+            Vertices =
+            [
+                new(0, 0, 0), new(1, 0, 0), new(1, 1, 0), new(0, 1, 0),
+                new(0, 0, 1), new(1, 0, 1), new(1, 1, 1), new(0, 1, 1),
+            ],
+            Indices =
+            [
+                0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4,
+                1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7,
+            ],
+        };
+
+        var reopened = NwcDocument.Open(new MemoryStream(NwcDocument.Create(meshes: [mesh]).ToByteArray()));
+
+        var result = Assert.Single(reopened.Meshes);
+        Assert.Equal(7, result.Id);
+        Assert.Equal("Door", result.Name);
+        Assert.Equal(mesh.Vertices, result.Vertices);
+        Assert.Equal(mesh.Indices, result.Indices);
+    }
+
     [Theory]
-    [InlineData(new[] { 0, 1, 2, 0, 2, 3 }, 4)]
-    [InlineData(new[] { 0, 1, 2, 2, 1, 3, 4, 5, 6 }, 7)]
-    [InlineData(new[] { 0, 2, 1 }, 3)]
-    public void Writer_RejectsTopologyTheStripCannotRepresent_WithoutChangingDestination(int[] indices, int vertexCount)
+    [InlineData(new[] { 0, 1, 3 }, 3)]
+    [InlineData(new[] { -1, 0, 1 }, 3)]
+    [InlineData(new[] { 0, 1 }, 3)]
+    public void Writer_RejectsInvalidIndices_WithoutChangingDestination(int[] indices, int vertexCount)
     {
         var mesh = new NwcMesh { Id = 9, Vertices = StripVertices(vertexCount), Indices = indices };
-        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 9 has triangles the .nwc writer cannot store");
+        AssertRejectedWithoutChangingDestination(NwcDocument.Create(meshes: [mesh]), "Mesh 9");
     }
 
     [Theory]
@@ -249,7 +276,10 @@ public class WriterTests
     {
         var mesh = new NwcMesh { Id = 9, Vertices = StripVertices(vertexCount), Indices = indices };
         var reopened = NwcDocument.Open(new MemoryStream(NwcDocument.Create(meshes: [mesh]).ToByteArray()));
-        Assert.Equal(mesh.Vertices, Assert.Single(reopened.Meshes).Vertices);
+        var result = Assert.Single(reopened.Meshes);
+        Assert.Equal(mesh.Vertices, result.Vertices);
+        Assert.Equal(mesh.Indices, result.Indices);
+        Assert.Equal(9, result.Id);
     }
 
     private static Vector3d[] StripVertices(int count) => Enumerable.Range(0, count).Select(i => new Vector3d(i / 2, i % 2, 0)).ToArray();
@@ -666,7 +696,8 @@ public class WriterTests
 
         var reopened = NwcDocument.Open(ms);
         Assert.NotNull(reopened.RootNode);
-        var prop = Assert.Single(reopened.RootNode.Properties, p => p.Name == "Phase Status");
+        var element = Assert.Single(reopened.RootNode.Children, n => n.Name == "Element 1");
+        var prop = Assert.Single(element.Properties, p => p.Name == "Phase Status");
         Assert.Equal("Phase Status", prop.Name);
         Assert.Equal((int)NwcVariantDataType.NamedConstant, prop.ValueType);
         Assert.Equal("Existing", prop.Value);
