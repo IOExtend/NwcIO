@@ -44,6 +44,13 @@ public sealed class NwcNode
     /// <summary>The element occurrence this node belongs to: itself when <see cref="IsElement"/>, else its parent's <see cref="Element"/>, or for the second node of a sibling pair that repeats one element the first node of the pair; null outside elements.</summary>
     public NwcNode? Element { get; set; }
 
+    /// <summary>
+    /// True when this node is a second placement of an element under another parent, which is how a linked
+    /// Revit model appears in the strict hierarchy. Its geometry is kept on this node; <see cref="Element"/>
+    /// points to the first placement.
+    /// </summary>
+    public bool IsLinkPlacement { get; set; }
+
     /// <summary>On a Revit element node: the GlobalId the Revit IFC export gives the element, its valid <c>IFC_GUID</c> parameter (tab <c>LcRevitData_Element</c>), else <see cref="ElementGuid"/> in the IFC base-64 form; null on other nodes.</summary>
     public string? IfcGlobalId { get; set; }
 

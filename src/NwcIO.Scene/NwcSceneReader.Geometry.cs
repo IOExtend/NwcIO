@@ -66,6 +66,7 @@ public static partial class NwcSceneReader
             }
 
             placed.Add(node.Element ?? node);
+            placed.Add(node);
         }
 
         if (unplaced > 0)
