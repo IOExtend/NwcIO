@@ -256,7 +256,9 @@ public sealed class NwcAssembly
     }
 
     /// <summary>
-    /// Detects spatial geometric clashes (bounding box overlaps) between meshes belonging to different models.
+    /// Detects spatial clashes between meshes belonging to different models. Meshes whose world bounding boxes
+    /// come within <paramref name="tolerance"/> of each other are reported; the overlap box is empty when they
+    /// only come close.
     /// </summary>
     public IReadOnlyList<NwcClash> FindClashes(double tolerance = 0.0)
     {
@@ -300,7 +302,7 @@ public sealed class NwcAssembly
                     {
                         var meshB = candidatesB[n];
                         var boxB = meshB.GetWorldBoundingBox();
-                        if (boxA.Intersects(boxB))
+                        if (expanded.Intersects(boxB))
                         {
                             var overlap = new BoundingBox3d(
                                 new Vector3d(
@@ -311,6 +313,11 @@ public sealed class NwcAssembly
                                     Math.Min(boxA.Max.X, boxB.Max.X),
                                     Math.Min(boxA.Max.Y, boxB.Max.Y),
                                     Math.Min(boxA.Max.Z, boxB.Max.Z)));
+                            if (overlap.IsEmpty)
+                            {
+                                var midpoint = (boxA.Center + boxB.Center) * 0.5;
+                                overlap = new BoundingBox3d(midpoint, midpoint);
+                            }
 
                             clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap));
                         }

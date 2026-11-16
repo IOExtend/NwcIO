@@ -122,8 +122,8 @@ public static class NwcClashDetector
 
                 if (!expandedA.Intersects(boxB)) continue;
 
-                // Narrow phase: mesh triangle intersection
-                if (CheckMeshIntersection(meshA, meshB, out var clashPoint, out double penetration))
+                // Narrow phase: triangle intersection (Hard) or mesh distance (Clearance)
+                if (TryGetClash(test, meshA, meshB, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -152,9 +152,11 @@ public static class NwcClashDetector
                     var unionBox = boxA.Union(boxB);
                     var vp = NwcSavedViewpoint.CreateDefault(unionBox, $"{clashName} View");
 
-                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, -penetration, NwcClashStatus.New)
+                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
-                        Description = $"Hard clash between {item1Name} and {item2Name}",
+                        Description = test.TestType == NwcClashTestType.Clearance
+                            ? $"Clearance between {item1Name} and {item2Name}"
+                            : $"Hard clash between {item1Name} and {item2Name}",
                         Viewpoint = vp,
                     };
 
@@ -222,7 +224,7 @@ public static class NwcClashDetector
 
                 if (!expandedA.Intersects(boxB)) continue;
 
-                if (CheckMeshIntersection(itemA.Mesh, itemB.Mesh, out var clashPoint, out double penetration))
+                if (TryGetClash(test, itemA.Mesh, itemB.Mesh, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -251,9 +253,11 @@ public static class NwcClashDetector
                     var unionBox = boxA.Union(boxB);
                     var vp = NwcSavedViewpoint.CreateDefault(unionBox, $"{clashName} View");
 
-                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, -penetration, NwcClashStatus.New)
+                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
-                        Description = $"Clash between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
+                        Description = test.TestType == NwcClashTestType.Clearance
+                            ? $"Clearance between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})"
+                            : $"Clash between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
                         Viewpoint = vp,
                     };
 
@@ -261,6 +265,44 @@ public static class NwcClashDetector
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Applies the test's tolerance after the narrow phase. Hard tests keep intersections with penetration at
+    /// or above the tolerance (touching faces are not a clash when the tolerance is positive); Clearance tests
+    /// report meshes whose shortest distance is at or below the tolerance.
+    /// </summary>
+    private static bool TryGetClash(
+        NwcClashTest test,
+        NwcMesh meshA,
+        NwcMesh meshB,
+        out Vector3d clashPoint,
+        out double distance)
+    {
+        if (test.TestType == NwcClashTestType.Clearance)
+        {
+            var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
+            clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
+            distance = -measurement.Distance;
+            return measurement.Distance <= Math.Max(0.0, test.Tolerance);
+        }
+
+        if (CheckMeshIntersection(meshA, meshB, out clashPoint, out double penetration))
+        {
+            // A zero-depth AABB overlap is a coplanar or touching surface; it is kept rather than
+            // classified as a below-tolerance penetration.
+            if (penetration > 0 && penetration < Math.Max(0.0, test.Tolerance))
+            {
+                distance = 0;
+                return false;
+            }
+
+            distance = -penetration;
+            return true;
+        }
+
+        distance = 0;
+        return false;
     }
 
     private static bool CheckMeshIntersection(

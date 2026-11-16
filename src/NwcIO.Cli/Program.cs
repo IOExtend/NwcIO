@@ -446,7 +446,7 @@ internal static class Program
         // Handle multi-model directory assembly and NWF assembly files with the same
         // exit-code mapping as the single-file path: a missing folder or a folder with
         // no models is a level-2 error, anything thrown while reading model data is a
-        // data format error (3) — never an unhandled exception with a stack trace.
+        // data format error (3) вЂ” never an unhandled exception with a stack trace.
         try
         {
             if (isDirectory)
@@ -1123,7 +1123,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1422,7 +1422,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1612,7 +1612,7 @@ internal static class Program
             var vp = viewpoints[i];
             var cam = vp.Camera;
             @out.WriteLine(FormattableString.Invariant(
-                $"[{i + 1}] \"{vp.Name}\" ({cam.Projection}) Pos: {cam.Position} Dir: {cam.Direction} Up: {cam.Up} Target: {cam.Target} FOV: {cam.FieldOfView:F1}° FocalDist: {cam.FocalDistance:F2}"));
+                $"[{i + 1}] \"{vp.Name}\" ({cam.Projection}) Pos: {cam.Position} Dir: {cam.Direction} Up: {cam.Up} Target: {cam.Target} FOV: {cam.FieldOfView:F1}В° FocalDist: {cam.FocalDistance:F2}"));
             if (vp.Comments.Count > 0)
             {
                 @out.WriteLine($"     Comments: {string.Join("; ", vp.Comments)}");
