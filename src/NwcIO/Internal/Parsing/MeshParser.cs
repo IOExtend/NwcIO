@@ -357,7 +357,7 @@ public static class MeshParser
             return $"Mesh_{id}";
         }
 
-        var characters = name.Where(c => !char.IsControl(c)).ToArray();
+        var characters = name.Where(c => !(char.IsControl(c) || c is '\u2028' or '\u2029')).ToArray();
         string trimmed = new string(characters).Trim();
         return trimmed.Length == 0 ? $"Mesh_{id}" : trimmed;
     }

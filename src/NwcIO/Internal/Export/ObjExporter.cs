@@ -59,7 +59,12 @@ public static class ObjExporter
                 continue;
             }
 
-            string objectName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : SanitizeObjLine(mesh.Name);
+            string objectName = string.IsNullOrEmpty(mesh.Name) ? string.Empty : SanitizeObjLine(mesh.Name);
+            if (objectName.Length == 0)
+            {
+                objectName = $"Mesh_{mesh.Id}";
+            }
+
             writer.WriteLine(FormattableString.Invariant($"o {objectName}"));
 
             // Vertex positions
@@ -101,7 +106,7 @@ public static class ObjExporter
     /// <summary>OBJ directives are line based; never let a name from the file inject its own line.</summary>
     private static string SanitizeObjLine(string value)
     {
-        var characters = value.Select(c => char.IsControl(c) ? '_' : c).ToArray();
+        var characters = value.Select(c => char.IsControl(c) || c is '\u2028' or '\u2029' ? '_' : c).ToArray();
         return new string(characters).Trim();
     }
 }

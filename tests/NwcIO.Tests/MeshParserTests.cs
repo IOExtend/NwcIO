@@ -372,6 +372,7 @@ public class MeshParserTests
     [Theory]
     [InlineData("magic")]
     [InlineData("indexCount")]
+    [InlineData("negativeIndexCount")]
     [InlineData("indexRange")]
     [InlineData("nameLength")]
     [InlineData("truncated")]
@@ -393,6 +394,17 @@ public class MeshParserTests
         var mesh = Assert.Single(ParseRecords(record));
 
         Assert.Equal("ABC", mesh.Name);
+    }
+
+    [Fact]
+    public void Parse_EmptyTrailerName_UsesTrailerIdForSynthesizedName()
+    {
+        var record = TrailerRecord(0, meshId: 7, [0, 1, 2], "");
+
+        var mesh = Assert.Single(ParseRecords(record));
+
+        Assert.Equal(7, mesh.Id);
+        Assert.Equal("Mesh_7", mesh.Name);
     }
 
     private static List<NwcMesh> ParseRecords(params byte[][] records)
@@ -428,7 +440,7 @@ public class MeshParserTests
 
         int magic = defect == "magic" ? 0x12345678 : NwcStreamSerializer.MeshTrailerMagic;
         writer.Write(magic);
-        writer.Write(defect == "indexCount" ? 4 : indices.Length);
+        writer.Write(defect == "indexCount" ? 4 : defect == "negativeIndexCount" ? -3 : indices.Length);
         foreach (int index in indices)
         {
             writer.Write(defect == "indexRange" ? 3 : index);
