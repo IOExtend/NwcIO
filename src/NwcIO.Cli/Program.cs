@@ -549,7 +549,7 @@ internal static class Program
                     ModelKey = Path.GetFileName(inputPath),
                     LengthUnit = sceneLengthUnit,
                 });
-                File.WriteAllText(explicitScenePath, IOScene.SceneJson.Write(sceneResult.Document));
+                IOScene.SceneJson.Save(sceneResult.Document, explicitScenePath);
                 foreach (var diagnostic in sceneResult.Diagnostics)
                 {
                     @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
