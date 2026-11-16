@@ -1,5 +1,6 @@
 using NwcIO.Internal.Export;
 using NwcIO.Model.Sets;
+using NwcIO.Model.Spatial;
 
 namespace NwcIO.Model.Clash;
 
@@ -83,6 +84,13 @@ public static class NwcClashDetector
 
         bool ignoreSameLayer = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameLayer);
         bool ignoreSameGroup = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameGroup);
+        double tol = Math.Max(0.0, test.Tolerance);
+        var spatialIndexB = new NwcSpatialIndex(meshesB);
+        var indexInB = new Dictionary<NwcMesh, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < meshesB.Count; i++)
+        {
+            indexInB[meshesB[i]] = i;
+        }
 
         for (int i = 0; i < meshesA.Count; i++)
         {
@@ -90,10 +98,14 @@ public static class NwcClashDetector
             var boxA = meshA.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
             bool canVisitReverse = !sameSelection && meshesInB!.Contains(meshA);
+            var expandedA = tol > 0
+                ? new BoundingBox3d(boxA.Min - new Vector3d(tol, tol, tol), boxA.Max + new Vector3d(tol, tol, tol))
+                : boxA;
 
-            for (var j = sameSelection ? i + 1 : 0; j < meshesB.Count; j++)
+            foreach (var meshB in spatialIndexB.QueryBox(expandedA))
             {
-                var meshB = meshesB[j];
+                int j = indexInB[meshB];
+                if (sameSelection && j <= i) continue;
                 if (ReferenceEquals(meshA, meshB) || meshA.Id == meshB.Id || IsSameElement(meshA, meshB)) continue;
                 // The reverse pair was already visited from the earlier mesh in A.
                 if (canVisitReverse && firstIndexA!.TryGetValue(meshB, out int firstIndex) && firstIndex < i)
@@ -113,12 +125,6 @@ public static class NwcClashDetector
                 {
                     continue;
                 }
-
-                // Broad phase AABB
-                double tol = Math.Max(0.0, test.Tolerance);
-                var expandedA = tol > 0
-                    ? new BoundingBox3d(boxA.Min - new Vector3d(tol, tol, tol), boxA.Max + new Vector3d(tol, tol, tol))
-                    : boxA;
 
                 if (!expandedA.Intersects(boxB)) continue;
 
@@ -184,6 +190,14 @@ public static class NwcClashDetector
         }
         bool ignoreSameFile = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameFile);
         bool ignoreSameLayer = test.Rules.Any(r => r.Enabled && r.RuleType == NwcClashRuleType.IgnoreSameLayer);
+        double tol = Math.Max(0.0, test.Tolerance);
+        var spatialIndexB = new NwcSpatialIndex(itemsB.Select(item => item.Mesh).ToList());
+        var indexInB = new Dictionary<NwcMesh, (int Index, NwcMesh Mesh, string ModelName, string? Layer)>(
+            ReferenceEqualityComparer.Instance);
+        for (int j = 0; j < itemsB.Count; j++)
+        {
+            indexInB.TryAdd(itemsB[j].Mesh, (j, itemsB[j].Mesh, itemsB[j].ModelName, itemsB[j].Layer));
+        }
 
         for (int i = 0; i < itemsA.Count; i++)
         {
@@ -191,10 +205,15 @@ public static class NwcClashDetector
             var boxA = itemA.Mesh.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
             bool canVisitReverse = !sameSelection && meshesInB!.Contains(itemA.Mesh);
+            var expandedA = tol > 0
+                ? new BoundingBox3d(boxA.Min - new Vector3d(tol, tol, tol), boxA.Max + new Vector3d(tol, tol, tol))
+                : boxA;
 
-            for (var j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
+            foreach (var candidate in spatialIndexB.QueryBox(expandedA))
             {
-                var itemB = itemsB[j];
+                var (j, _, modelNameB, layerB) = indexInB[candidate];
+                if (sameSelection && j <= i) continue;
+                var itemB = (Mesh: candidate, ModelName: modelNameB, Layer: layerB);
                 if (ReferenceEquals(itemA.Mesh, itemB.Mesh) || IsSameElement(itemA.Mesh, itemB.Mesh)) continue;
                 // Mesh IDs can repeat across models; only references identify pairs.
                 if (canVisitReverse && firstIndexA!.TryGetValue(itemB.Mesh, out int firstIndex) && firstIndex < i)
@@ -214,11 +233,6 @@ public static class NwcClashDetector
 
                 var boxB = itemB.Mesh.GetWorldBoundingBox();
                 if (boxB.IsEmpty) continue;
-
-                double tol = Math.Max(0.0, test.Tolerance);
-                var expandedA = tol > 0
-                    ? new BoundingBox3d(boxA.Min - new Vector3d(tol, tol, tol), boxA.Max + new Vector3d(tol, tol, tol))
-                    : boxA;
 
                 if (!expandedA.Intersects(boxB)) continue;
 

@@ -826,6 +826,25 @@ public sealed class ClashDetectiveTests
         }
     }
 
+    [Fact]
+    public void BroadPhase_ManyDisjointMeshes_FindsOnlyTheOverlappingPair()
+    {
+        var builder = new NwcDocumentBuilder();
+        for (int i = 0; i < 300; i++)
+        {
+            double x = i * 10.0;
+            builder.AddMesh(CreateBoxMesh(i + 1, new Vector3d(x, 0, 0), new Vector3d(x + 1, 1, 1)));
+        }
+
+        builder.AddMesh(CreateBoxMesh(1001, new Vector3d(2990.5, 0, 0), new Vector3d(2991.5, 1, 1)));
+        var doc = builder.Build();
+
+        var test = new NwcClashTest("broad", NwcClashTestType.Hard, 0.0);
+        doc.RunClashDetection(test);
+
+        Assert.Single(test.Results);
+    }
+
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)
     {
         var vertices = new Vector3d[]

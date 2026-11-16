@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using NwcIO.Internal.Export;
 using NwcIO.Model.Sets;
+using NwcIO.Model.Spatial;
 
 namespace NwcIO.Model.Clash;
 
@@ -191,15 +192,23 @@ public sealed class NwcClashMatrix
 
             // Execute pair detection with spatial pruning
             int clashId = 1;
+            var spatialIndexB = new NwcSpatialIndex(meshesB.Select(item => item.mesh).ToList());
+            var indexInB = new Dictionary<NwcMesh, (int Index, NwcDocument Document)>(ReferenceEqualityComparer.Instance);
+            for (int j = 0; j < meshesB.Count; j++)
+            {
+                indexInB.TryAdd(meshesB[j].mesh, (j, meshesB[j].doc));
+            }
+
             for (int i = 0; i < meshesA.Count; i++)
             {
                 var (mA, docA) = meshesA[i];
                 var boxA = mA.GetWorldBoundingBox();
 
                 int startJ = (cell.DisciplineA == cell.DisciplineB) ? i + 1 : 0;
-                for (int j = startJ; j < meshesB.Count; j++)
+                foreach (var mB in spatialIndexB.QueryBox(boxA))
                 {
-                    var (mB, docB) = meshesB[j];
+                    var (j, docB) = indexInB[mB];
+                    if (j < startJ) continue;
                     if ((mA.Id == mB.Id && docA == docB) || NwcClashDetector.IsSameElement(mA, mB)) continue;
 
                     var boxB = mB.GetWorldBoundingBox();
