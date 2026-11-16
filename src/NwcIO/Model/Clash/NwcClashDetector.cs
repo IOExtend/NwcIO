@@ -14,15 +14,26 @@ public static class NwcClashDetector
     /// </summary>
     /// <exception cref="ArgumentException">An active set selection names a set that the document doesn't contain.</exception>
     public static NwcClashTest Run(NwcDocument document, NwcClashTest test)
+        => Run(document, test, null, default);
+
+    /// <summary>
+    /// Executes clash detection across an individual document with cancellation and progress.
+    /// </summary>
+    public static NwcClashTest Run(
+        NwcDocument document,
+        NwcClashTest test,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(test);
+        cancellationToken.ThrowIfCancellationRequested();
         ThrowIfSetIsMissing([document], test);
 
         var meshesA = ResolveSelection(document, test.SelectionA);
         var meshesB = ResolveSelection(document, test.SelectionB);
 
-        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model");
+        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model", progress, cancellationToken);
         return test;
     }
 
@@ -31,9 +42,20 @@ public static class NwcClashDetector
     /// </summary>
     /// <exception cref="ArgumentException">An active set selection names a set that none of the models contains.</exception>
     public static NwcClashTest Run(NwcAssembly assembly, NwcClashTest test)
+        => Run(assembly, test, null, default);
+
+    /// <summary>
+    /// Executes clash detection across an assembly with cancellation and progress.
+    /// </summary>
+    public static NwcClashTest Run(
+        NwcAssembly assembly,
+        NwcClashTest test,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(assembly);
         ArgumentNullException.ThrowIfNull(test);
+        cancellationToken.ThrowIfCancellationRequested();
         ThrowIfSetIsMissing(assembly.Models, test);
 
         var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
@@ -41,6 +63,7 @@ public static class NwcClashDetector
 
         for (int m = 0; m < assembly.Models.Count; m++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var doc = assembly.Models[m];
             string docName = Path.GetFileNameWithoutExtension(doc.FileInfo.SourcePath ?? $"Model_{m + 1}");
 
@@ -55,9 +78,11 @@ public static class NwcClashDetector
             {
                 itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name));
             }
+
+            progress?.Report(new NwcProgress("load-models", m + 1, assembly.Models.Count));
         }
 
-        RunCoreMultiModel(itemsA, itemsB, test);
+        RunCoreMultiModel(itemsA, itemsB, test, progress, cancellationToken);
         return test;
     }
 
@@ -65,7 +90,9 @@ public static class NwcClashDetector
         IReadOnlyList<NwcMesh> meshesA,
         IReadOnlyList<NwcMesh> meshesB,
         NwcClashTest test,
-        string modelName)
+        string modelName,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         bool sameSelection = ReferenceEquals(meshesA, meshesB) ||
             meshesA.SequenceEqual(meshesB, ReferenceEqualityComparer.Instance);
@@ -86,6 +113,8 @@ public static class NwcClashDetector
 
         for (int i = 0; i < meshesA.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new NwcProgress("clash", i + 1, meshesA.Count));
             var meshA = meshesA[i];
             var boxA = meshA.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
@@ -93,6 +122,7 @@ public static class NwcClashDetector
 
             for (var j = sameSelection ? i + 1 : 0; j < meshesB.Count; j++)
             {
+                if ((j & 0xFF) == 0) cancellationToken.ThrowIfCancellationRequested();
                 var meshB = meshesB[j];
                 if (ReferenceEquals(meshA, meshB) || meshA.Id == meshB.Id || IsSameElement(meshA, meshB)) continue;
                 // The reverse pair was already visited from the earlier mesh in A.
@@ -167,7 +197,9 @@ public static class NwcClashDetector
     private static void RunCoreMultiModel(
         List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsA,
         List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsB,
-        NwcClashTest test)
+        NwcClashTest test,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         bool sameSelection = itemsA.Select(item => item.Mesh)
             .SequenceEqual(itemsB.Select(item => item.Mesh), ReferenceEqualityComparer.Instance);
@@ -187,6 +219,8 @@ public static class NwcClashDetector
 
         for (int i = 0; i < itemsA.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new NwcProgress("clash", i + 1, itemsA.Count));
             var itemA = itemsA[i];
             var boxA = itemA.Mesh.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
@@ -194,6 +228,7 @@ public static class NwcClashDetector
 
             for (var j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
             {
+                if ((j & 0xFF) == 0) cancellationToken.ThrowIfCancellationRequested();
                 var itemB = itemsB[j];
                 if (ReferenceEquals(itemA.Mesh, itemB.Mesh) || IsSameElement(itemA.Mesh, itemB.Mesh)) continue;
                 // Mesh IDs can repeat across models; only references identify pairs.

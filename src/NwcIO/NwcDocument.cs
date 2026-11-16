@@ -468,6 +468,18 @@ public sealed class NwcDocument
         return test;
     }
 
+    /// <summary>Runs clash detection with cancellation and progress reporting.</summary>
+    public Model.Clash.NwcClashTest RunClashDetection(
+        Model.Clash.NwcClashTest? test,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        test ??= new Model.Clash.NwcClashTest("Clash Test");
+        Model.Clash.NwcClashDetector.Run(this, test, progress, cancellationToken);
+        if (!ClashTests.Contains(test)) ClashTests.Add(test);
+        return test;
+    }
+
     /// <summary>Exports detected clash results to Autodesk Navisworks Clash Report XML format.</summary>
     public void ExportClashReportXml(string path, string? testName = null)
     {
