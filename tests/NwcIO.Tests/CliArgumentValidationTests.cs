@@ -308,7 +308,8 @@ public class CliArgumentValidationTests
             SaveModel(Path.Combine(dir, "a.nwc"));
 
             string withMeshes = Path.Combine(dir, "with.json");
-            Assert.Equal(0, Run([dir, withMeshes])[0 ] is int e1 ? e1 : -1);
+            var (exit0, _, err0) = Run([dir, withMeshes]);
+            Assert.True(exit0 == 0, err0);
             Assert.Contains("\"totalMeshes\":1", File.ReadAllText(withMeshes).Replace(" ", ""));
 
             string noMeshes = Path.Combine(dir, "without.json");
