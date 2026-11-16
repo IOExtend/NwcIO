@@ -16,17 +16,17 @@ namespace NwcIO.Scene;
 /// </remarks>
 public static partial class NwcSceneReader
 {
-    private const int ModelId = 1;
-
     private static readonly string Producer = "NwcIO.Scene "
         + typeof(NwcSceneReader).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
+
+    private const int MaxModels = 100_000;   // models in one scene, linked placements included
 
     /// <summary>Reads the model file at <paramref name="path"/> with <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> and converts it.</summary>
     /// <param name="path">The model file.</param>
     /// <param name="options">Conversion options; null uses the defaults.</param>
     /// <returns>The scene with a report of the conversion.</returns>
     /// <exception cref="ArgumentException"><paramref name="path"/> or <see cref="NwcSceneOptions.ModelKey"/> is empty.</exception>
-    /// <exception cref="NotSupportedException">The file's scene tree holds <c>.nwd</c> partition nodes or a Revit link.</exception>
+    /// <exception cref="NotSupportedException">The file's scene tree holds <c>.nwd</c> partition nodes.</exception>
     public static NwcSceneResult Read(string path, NwcSceneOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -43,7 +43,7 @@ public static partial class NwcSceneReader
         }
         catch (NotSupportedException ex)
         {
-            throw new NotSupportedException("NwcIO.Scene needs the scene tree: .nwd partition trees and Revit links are not supported yet. " + ex.Message, ex);
+            throw new NotSupportedException("NwcIO.Scene needs the scene tree: .nwd partition trees are not supported yet. " + ex.Message, ex);
         }
 
         return Convert(document, key, path, options);
@@ -64,6 +64,7 @@ public static partial class NwcSceneReader
     /// <exception cref="ArgumentException">
     /// <see cref="NwcSceneOptions.ModelKey"/> is null or empty, or the document has no scene tree (<see cref="NwcDocument.RootNode"/> is null).
     /// </exception>
+    /// <exception cref="InvalidDataException">The linked placements would make the scene hold more than 100,000 models.</exception>
     public static NwcSceneResult Read(NwcDocument document, NwcSceneOptions options)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -81,14 +82,170 @@ public static partial class NwcSceneReader
         return Convert(document, options.ModelKey, null, options);
     }
 
+    /// <summary>
+    /// Converts every model file of an assembly into one scene, with one <see cref="SceneModel"/> per document.
+    /// Keys come from the source file name and are de-duplicated with a numeric suffix. The .nwf document itself
+    /// is skipped when the assembly has component models.
+    /// </summary>
+    /// <param name="assembly">The federated assembly or opened .nwf file.</param>
+    /// <param name="options">Conversion options; <see cref="NwcSceneOptions.ModelKey"/> names the first converted model.</param>
+    /// <returns>The scene with a report of the conversion.</returns>
+    /// <exception cref="ArgumentException">The assembly has no models, or a model has no scene tree.</exception>
+    /// <exception cref="InvalidDataException">The documents and their linked placements together would make the scene hold more than 100,000 models.</exception>
+    public static NwcSceneResult Read(NwcAssembly assembly, NwcSceneOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        if (assembly.Models.Count == 0)
+        {
+            throw new ArgumentException("The assembly has no models.", nameof(assembly));
+        }
+
+        var documents = assembly.Models.Count > 1
+            ? assembly.Models
+                .Where(d => !string.Equals(Path.GetExtension(DocumentPath(d) ?? string.Empty), ".nwf", StringComparison.OrdinalIgnoreCase))
+                .ToList()
+            : assembly.Models.ToList();
+        if (documents.Count == 0)
+        {
+            documents = assembly.Models.ToList();
+        }
+
+        var scene = new SceneDocument { Title = assembly.Name };
+        var diagnostics = new List<SceneDiagnostic>();
+        int elementCount = 0;
+        int elementsWithGeometry = 0;
+        NwcLengthUnit? commonUnit = null;
+        bool mixedUnits = false;
+        var usedKeys = new HashSet<string>(StringComparer.Ordinal);
+        var nextSuffix = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        for (int i = 0; i < documents.Count; i++)
+        {
+            var document = documents[i];
+            string key = ModelKey(document, i, options, usedKeys, nextSuffix);
+            if (document.RootNode is null)
+            {
+                throw new ArgumentException(
+                    $"Model '{key}' has no scene tree: open it with NwcReaderOptions.BuildSceneTree on.",
+                    nameof(assembly));
+            }
+
+            var result = ConvertInto(scene, document, key, document.LoadedPath, options, modelId: scene.Models.Count + 1, usedKeys, nextSuffix);
+            diagnostics.AddRange(result.Diagnostics.Select(d => new SceneDiagnostic(
+                d.Severity,
+                d.Code,
+                $"{key}: {d.Message}",
+                d.SourceId)));
+            elementCount += result.ElementCount;
+            elementsWithGeometry += result.ElementsWithGeometry;
+
+            var unit = options?.LengthUnit ?? document.LengthUnit;
+            if (commonUnit is null)
+            {
+                commonUnit = unit;
+            }
+            else if (commonUnit != unit)
+            {
+                mixedUnits = true;
+            }
+        }
+
+        // References OpenNwf could not load: the scene holds nothing of them (the .nwf shell's own xrefs-skipped is not reported).
+        if (assembly.UnresolvedXRefs.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "xrefs-unresolved",
+                $"{assembly.UnresolvedXRefs.Count} external references were not found on disk, so their models are missing from the scene: {XRefNames(assembly.UnresolvedXRefs)}."));
+        }
+
+        if (assembly.SkippedXRefs.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "xrefs-not-loaded",
+                $"{assembly.SkippedXRefs.Count} external references are files other than .nwc and .nwd and were not loaded, so the scene holds none of their content: {XRefNames(assembly.SkippedXRefs)}."));
+        }
+
+        return new NwcSceneResult
+        {
+            Document = scene,
+            Diagnostics = diagnostics,
+            ElementCount = elementCount,
+            ElementsWithGeometry = elementsWithGeometry,
+            GeometryCount = scene.Geometries.Count,
+            InstanceCount = scene.Instances.Count,
+            LengthUnit = mixedUnits ? NwcLengthUnit.Unknown : commonUnit ?? NwcLengthUnit.Unknown,
+            MetresPerUnit = mixedUnits ? null : (commonUnit ?? NwcLengthUnit.Unknown).GetMetresPerUnit(),
+        };
+    }
+
+    // The first five effective paths, then the count of the rest.
+    private static string XRefNames(IReadOnlyList<NwcXRef> references) =>
+        string.Join(", ", references.Take(5).Select(r => r.EffectivePath)) + (references.Count > 5 ? $" and {references.Count - 5} more" : "");
+
+    private static string? DocumentPath(NwcDocument document) =>
+        document.LoadedPath ?? document.FileInfo.SourcePath;
+
+    private static string ModelKey(
+        NwcDocument document,
+        int index,
+        NwcSceneOptions? options,
+        HashSet<string> used,
+        Dictionary<string, int> nextSuffix)
+    {
+        string candidate = options?.ModelKey is { Length: > 0 } key && index == 0
+            ? key
+            : Path.GetFileName(DocumentPath(document) ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            candidate = $"Model_{index + 1}";
+        }
+
+        return UniqueModelKey(candidate, used, nextSuffix);
+    }
+
+    private static string UniqueModelKey(
+        string candidate,
+        HashSet<string> used,
+        Dictionary<string, int> nextSuffix)
+    {
+        if (used.Add(candidate))
+        {
+            return candidate;
+        }
+
+        int suffix = nextSuffix.TryGetValue(candidate, out int next) ? next : 2;
+        string unique;
+        do
+        {
+            unique = $"{candidate}#{suffix++}";
+        }
+        while (!used.Add(unique));
+
+        nextSuffix[candidate] = suffix;
+        return unique;
+    }
+
     private static NwcSceneResult Convert(NwcDocument document, string key, string? path, NwcSceneOptions? options)
+    {
+        var scene = new SceneDocument { Title = key };
+        return ConvertInto(scene, document, key, path, options, modelId: 1,
+            new HashSet<string>(StringComparer.Ordinal), new Dictionary<string, int>(StringComparer.Ordinal));
+    }
+
+    private static NwcSceneResult ConvertInto(
+        SceneDocument scene,
+        NwcDocument document,
+        string key,
+        string? path,
+        NwcSceneOptions? options,
+        int modelId,
+        HashSet<string> usedKeys,
+        Dictionary<string, int> nextSuffix)
     {
         var unit = options?.LengthUnit ?? document.LengthUnit;
         string? loader = document.FileInfo.LoaderPlugin;
-        var scene = new SceneDocument { Title = key };
+        usedKeys.Add(key);
         scene.Models.Add(new SceneModel
         {
-            Id = ModelId,
+            Id = modelId,
             Key = key,
             Name = key,
             Path = path,
@@ -104,11 +261,12 @@ public static partial class NwcSceneReader
         // Element ids are preorder indices in the order of the walk below; NwcNode.Id is one only on the strict path (a file read
         // without its DbCache directory keeps stored ints, which can repeat).
         var ids = new Dictionary<NwcNode, long>(ReferenceEqualityComparer.Instance);
+        long elementIdBase = scene.Elements.Count;
         var order = new Stack<NwcNode>();
         order.Push(root);
         while (order.TryPop(out var next))
         {
-            ids[next] = ids.Count;
+            ids[next] = elementIdBase + ids.Count;
             for (int i = next.Children.Count - 1; i >= 0; i--)
             {
                 order.Push(next.Children[i]);
@@ -131,6 +289,7 @@ public static partial class NwcSceneReader
 
         bool revit = document.IsRevitSource;
         var levelElementIds = revit ? LevelElementIds(root) : [];
+        var levelElevations = revit ? LevelElevations(root, metresPerUnit) : new Dictionary<string, double>(StringComparer.Ordinal);
         int elementCount = 0;
         int leavesOutsideElements = 0;
         int elementsWithGeometry = 0;
@@ -150,11 +309,11 @@ public static partial class NwcSceneReader
         }
 
         // Each item carries the names at depth 2 and 4 on its path and the depth of the node's element, for Category and TypeName.
-        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4)>();
-        pending.Push((root, null, 0, null, 0, "", ""));
+        var pending = new Stack<(NwcNode Node, NwcNode? Parent, int Depth, int? LevelId, int ElementDepth, string AtDepth2, string AtDepth4, int ModelId, int? LinkModelId)>();
+        pending.Push((root, null, 0, null, 0, "", "", modelId, null));
         while (pending.TryPop(out var item))
         {
-            var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4) = item;
+            var (node, parent, depth, levelId, elementDepth, atDepth2, atDepth4, nodeModelId, linkModelId) = item;
             atDepth2 = depth == 2 ? node.Name : atDepth2;
             atDepth4 = depth == 4 ? node.Name : atDepth4;
 
@@ -165,8 +324,46 @@ public static partial class NwcSceneReader
                 elementDepth = depth;
             }
 
+            bool isLinkRoot = false;
+            if ((node.IsLinkRoot || node.IsLinkPlacement) && parent is not null && linkModelId is null)
+            {
+                if (scene.Models.Count >= MaxModels)
+                {
+                    throw new InvalidDataException($"The scene would need more than {MaxModels} models.");
+                }
+
+                nodeModelId = scene.Models.Count + 1;
+                string linkKey = UniqueModelKey(
+                    string.IsNullOrWhiteSpace(node.Name) ? $"Link_{nodeModelId}" : node.Name,
+                    usedKeys,
+                    nextSuffix);
+                linkModelId = nodeModelId;
+                isLinkRoot = true;
+                scene.Models.Add(new SceneModel
+                {
+                    Id = nodeModelId,
+                    Key = linkKey,
+                    Name = linkKey,
+                    Path = null,
+                    SourceFormat = "nwc",
+                    Producer = Producer,
+                    SourceLengthUnit = unit.GetSymbol(),
+                    Application = loader?[(loader.LastIndexOf(':') + 1)..],
+                    CreatedAt = document.FileInfo.SourceTimestampUtc?.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+                });
+                levelId = null;
+            }
+            else if (linkModelId is int enclosingLink)
+            {
+                nodeModelId = enclosingLink;
+            }
+
             SceneNodeKind kind;
-            if (parent is null)
+            if (isLinkRoot)
+            {
+                kind = SceneNodeKind.Model;
+            }
+            else if (parent is null)
             {
                 kind = SceneNodeKind.Model;
             }
@@ -174,7 +371,16 @@ public static partial class NwcSceneReader
             {
                 kind = SceneNodeKind.Level;
                 levelId = scene.Levels.Count + 1;
-                scene.Levels.Add(new SceneLevel { Id = levelId.Value, ModelId = ModelId, Name = node.Name });
+                string? levelElementId = LevelElementId(node, levelElementIds);
+                scene.Levels.Add(new SceneLevel
+                {
+                    Id = levelId.Value,
+                    ModelId = nodeModelId,
+                    Name = node.Name,
+                    Elevation = levelElementId is not null && levelElevations.TryGetValue(levelElementId, out double elevation)
+                        ? elevation
+                        : null,
+                });
             }
             else if (node.IsElement || node.Element is not null)
             {
@@ -195,14 +401,19 @@ public static partial class NwcSceneReader
             {
                 if (metresPerUnit is double m && lineMeshes.TryGetValue(node, out var meshes) && IsGrid(node) && GridLine(node, meshes, m) is { } gridLine)
                 {
-                    if (scene.Grids.Count == 0)
+                    var gridSystem = scene.Grids.FirstOrDefault(g => g.ModelId == nodeModelId);
+                    if (gridSystem is null)
                     {
-                        scene.Grids.Add(new SceneGridSystem { ModelId = ModelId, Name = "Grids" });
+                        gridSystem = new SceneGridSystem { ModelId = nodeModelId, Name = "Grids" };
+                        scene.Grids.Add(gridSystem);
                     }
 
-                    scene.Grids[0].Lines.Add(gridLine);
+                    gridSystem.Lines.Add(gridLine);
                 }
+            }
 
+            if (node.IsElement || node.IsLinkPlacement)
+            {
                 elementCount++;
                 elementsWithGeometry += placed.Contains(node) ? 1 : 0;
             }
@@ -217,18 +428,19 @@ public static partial class NwcSceneReader
             var (category, typeName) = !revit || kind != SceneNodeKind.Element ? ("", "")
                 : (elementDepth == 2 ? (node.Element ?? node).Name : elementDepth > 2 ? atDepth2 : "", elementDepth == 5 ? atDepth4 : "");
 
-            // The second node of a sibling pair is a part of the first.
-            long? parentId = parent is null ? null
+            // The second node of a sibling pair is a part of the first. A linked placement is a model root.
+            long? parentId = node.IsLinkPlacement ? null
+                : parent is null ? null
                 : node.Element is { } owner && owner != node && owner != parent.Element ? ids.TryGetValue(owner, out long o) ? o : ids[parent] : ids[parent];
             scene.Elements.Add(new SceneElement
             {
                 Id = ids[node],
-                ModelId = ModelId,
+                ModelId = nodeModelId,
                 ParentId = parentId,
                 Kind = kind,
                 Name = node.Name,
-                SourceId = node.IsElement ? node.ElementGuid?.ToString("D") : null,
-                IfcGuid = node.IsElement ? node.IfcGlobalId : null,
+                SourceId = node.IsElement || node.IsLinkPlacement ? (node.Element ?? node).ElementGuid?.ToString("D") : null,
+                IfcGuid = node.IsElement || node.IsLinkPlacement ? (node.Element ?? node).IfcGlobalId : null,
                 Category = category,
                 TypeName = typeName,
                 LevelId = levelId,
@@ -237,7 +449,7 @@ public static partial class NwcSceneReader
 
             for (int i = node.Children.Count - 1; i >= 0; i--)
             {
-                pending.Push((node.Children[i], node, depth + 1, levelId, elementDepth, atDepth2, atDepth4));
+                pending.Push((node.Children[i], node, depth + 1, levelId, elementDepth, atDepth2, atDepth4, nodeModelId, linkModelId));
             }
         }
 
@@ -253,10 +465,58 @@ public static partial class NwcSceneReader
                 $"{nodesWithPropertiesOutsideTabs} nodes carry properties outside property tabs (the file was not read through its DbCache directory); they are not in the scene."));
         }
 
-        if (document.SavedViewpoints.Count > 0 || document.DbCache?.Find("LcOpSavedViewsElement") is not null)
+        int skippedViewpoints = 0;
+        int approximatedViewpoints = 0;
+        int viewpointContentSkipped = 0;
+        if (metresPerUnit is double viewpointMetres)
+        {
+            foreach (var saved in document.SavedViewpoints)
+            {
+                if (TryMapViewpoint(saved, viewpointMetres, out var viewpoint))
+                {
+                    scene.Viewpoints.Add(viewpoint);
+                    if (saved.IsCameraApproximated)
+                    {
+                        approximatedViewpoints++;
+                    }
+
+                    if (saved.SectionPlanes.Count > 0 || saved.SectionBox is not null ||
+                        saved.Redlines.Count > 0 || saved.Comments.Count > 0)
+                    {
+                        viewpointContentSkipped++;
+                    }
+                }
+                else
+                {
+                    skippedViewpoints++;
+                }
+            }
+        }
+        else
+        {
+            skippedViewpoints = document.SavedViewpoints.Count;
+        }
+
+        bool unreadSavedViews = document.SavedViewpoints.Count == 0
+            && document.DbCache?.Find("LcOpSavedViewsElement") is not null;
+        if (skippedViewpoints > 0 || unreadSavedViews)
         {
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "viewpoints-skipped",
-                "Saved viewpoints are not converted: Navisworks stores no stable viewpoint id."));
+                skippedViewpoints > 0
+                    ? FormattableString.Invariant($"{skippedViewpoints} saved viewpoints could not be converted.")
+                    : "Saved viewpoints could not be read from this file."));
+        }
+
+        if (approximatedViewpoints > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-camera-approximated",
+                FormattableString.Invariant($"{approximatedViewpoints} saved viewpoints have approximated camera parameters: the file does not store a decoded field of view, projection and far distance.")));
+        }
+
+        if (viewpointContentSkipped > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-content-skipped",
+                FormattableString.Invariant($"{viewpointContentSkipped} saved viewpoints carry section planes, a section box, redlines or comments; only their camera is converted.")));
         }
 
         if (document.XRefs is { References.Count: > 0 } xRefs)
@@ -303,6 +563,106 @@ public static partial class NwcSceneReader
     private static bool IsGrid(NwcNode node) =>
         node.PropertyTabs.Any(t => t.InternalName == "LcRevitData_Element"
             && t.Properties.Any(p => p.InternalName == "LcRevitPropertyElementCategoryId" && p.Value == "-2000220"));
+
+    private static bool TryMapViewpoint(
+        NwcSavedViewpoint saved,
+        double metresPerUnit,
+        out SceneViewpoint viewpoint)
+    {
+        var camera = saved.Camera;
+        if (!IsFinite(camera.Position) || !IsFinite(camera.Target) || !IsFinite(camera.Up) ||
+            !double.IsFinite(camera.FieldOfView) || camera.FieldOfView <= 0 || camera.FieldOfView >= 180 ||
+            !double.IsFinite(camera.AspectRatio) || camera.AspectRatio <= 0 ||
+            !double.IsFinite(camera.NearDistance) || !double.IsFinite(camera.FarDistance))
+        {
+            viewpoint = null!;
+            return false;
+        }
+
+        viewpoint = new SceneViewpoint
+        {
+            Id = saved.Id?.ToString(),
+            Name = saved.Name,
+            Camera = new SceneCamera
+            {
+                Position = ToScene(camera.Position, metresPerUnit),
+                Target = ToScene(camera.Target, metresPerUnit),
+                // Up is a direction, not a length: only position, target and clip distances scale.
+                Up = new IOScene.Vector3d(camera.Up.X, camera.Up.Y, camera.Up.Z),
+                FieldOfView = camera.FieldOfView * Math.PI / 180.0,
+                AspectRatio = camera.AspectRatio,
+                NearDistance = camera.NearDistance * metresPerUnit,
+                FarDistance = camera.FarDistance * metresPerUnit,
+                Projection = camera.Projection == NwcCameraProjection.Orthographic
+                    ? SceneProjection.Orthographic
+                    : SceneProjection.Perspective,
+            },
+        };
+        return true;
+    }
+
+    private static IOScene.Vector3d ToScene(NwcIO.Model.Vector3d value, double metresPerUnit) =>
+        new(value.X * metresPerUnit, value.Y * metresPerUnit, value.Z * metresPerUnit);
+
+    private static bool IsFinite(NwcIO.Model.Vector3d value) =>
+        double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
+
+    // The level's LcRevitId tab names its element id; the matching LcRevitData_Parameter tab holds the elevation.
+    private static string? LevelElementId(NwcNode node, HashSet<string> levelElementIds) =>
+        node.PropertyTabs
+            .Where(t => t.InternalName == "LcRevitId")
+            .SelectMany(t => t.Properties)
+            .Select(p => p.Value)
+            .FirstOrDefault(v => v is not null && levelElementIds.Contains(v));
+
+    private static Dictionary<string, double> LevelElevations(NwcNode root, double? metresPerUnit)
+    {
+        var result = new Dictionary<string, double>(StringComparer.Ordinal);
+        if (metresPerUnit is not double metres)
+        {
+            return result;
+        }
+
+        var pending = new Stack<NwcNode>();
+        pending.Push(root);
+        while (pending.TryPop(out var node))
+        {
+            foreach (var tab in node.PropertyTabs)
+            {
+                if (tab.InternalName != "LcRevitData_Parameter")
+                {
+                    continue;
+                }
+
+                string? id = null;
+                double? elevation = null;
+                foreach (var property in tab.Properties)
+                {
+                    if (property.InternalName == "LcRevitPropertyElementId" && property.Value is { } value)
+                    {
+                        id = value;
+                    }
+                    else if (property.InternalName == "lcldrevit_parameter_-1007102" &&
+                             property.ValueType == 6 &&
+                             double.TryParse(property.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
+                    {
+                        elevation = parsed;
+                    }
+                }
+
+                if (id is not null && elevation is double e && double.IsFinite(e * metres))
+                {
+                    result[id] = e * metres;
+                }
+            }
+
+            foreach (var child in node.Children)
+            {
+                pending.Push(child);
+            }
+        }
+        return result;
+    }
 
     // A grid is a line only when it has one line mesh of one segment that is horizontal within 1e-6 m; otherwise it stays an element.
     private static SceneGridLine? GridLine(NwcNode node, List<NwcMesh> meshes, double metresPerUnit)

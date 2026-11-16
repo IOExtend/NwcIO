@@ -9,7 +9,7 @@ namespace NwcIO.Internal.Parsing;
 /// <summary>
 /// Parses the internal binary database cache directory (<c>LcOpDBCache</c>).
 /// </summary>
-public static class DbCacheParser
+internal static class DbCacheParser
 {
     // name length + flags + offset + length + a + b, with no name bytes and no PAD8
     private const int MinEntrySize = 32;

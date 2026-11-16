@@ -90,8 +90,12 @@ public class NwcSceneGoldenTests
     public void Read_HostileStrings_SurviveSceneJson()
     {
         const string hostile = "q\"uote\\ \u0001\u001f \U0001F600 Стена </script>";
-        var tab = new NwcPropertyTab { Name = hostile, InternalName = "LcRevitData_Element",
-            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = hostile, Class = hostile, ValueType = 4, Value = hostile, InternalName = "LcRevitPropertyElementName" }] };
+        var tab = new NwcPropertyTab
+        {
+            Name = hostile,
+            InternalName = "LcRevitData_Element",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = hostile, Class = hostile, ValueType = 4, Value = hostile, InternalName = "LcRevitPropertyElementName" }]
+        };
         var root = new NwcNode { Id = 0, Name = hostile, Class = "Model" };
         var leaf = new NwcNode { Id = 1, Name = hostile, Class = "Leaf", Tag = 22, Parent = root };
         leaf.PropertyTabs.Add(tab); root.Children.Add(leaf);
