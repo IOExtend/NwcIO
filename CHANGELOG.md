@@ -30,6 +30,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Documentation
 - The README "Scope and frozen features" section states that JSON export is core and grows with the reader, and that the spatial index with raycast, section planes and boxes, and the redline types are frozen: bug fixes only. The README and the docs landing page lead with reading, writing `.nwc`, JSON export and `NwcIO.Scene`; the README, the landing page, the getting started page and the public API page mark the frozen features, and the last three link the scene adapter page.
+- IFC export picks the entity class and the type name from the owning element's `Category`/`Family`/`Type`, `IfcEntity`/`IFC Type` properties, then the node class and name and the mesh name, and no longer from the material name. Keywords match at word starts only (`Drywall` is not a wall, `Outdoor` is not a door), and `Балкон`, `Крышк`, `Плитк` words are not read as beam, roof or slab.
 
 ## [0.12.1] - 2026-11-15
 

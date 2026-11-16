@@ -388,6 +388,7 @@ public class IfcExportTests
     {
         NwcMesh Mesh(int id) => new()
         {
+            Name = $"Part {id}",
             Id = id,
             Vertices = [new(id, 0, 0), new(id + 1, 0, 0), new(id, 1, 0)],
             Indices = [0, 1, 2],
