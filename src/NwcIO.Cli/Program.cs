@@ -5,6 +5,7 @@ using NwcIO;
 using NwcIO.Internal.Json;
 using NwcIO.Model;
 using NwcIO.Model.Spatial;
+using NwcIO.Model.Viewer;
 
 namespace NwcIO.Cli;
 
@@ -26,7 +27,7 @@ internal static class Program
                              Default for .nwf: <input-without-ext>.glb (or standard output if '-').
 
         Options:
-          --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
+          --nwc <file.nwc>   Save or convert to a .nwc file (NwcIO layout)
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
@@ -42,12 +43,12 @@ internal static class Program
           --clash-matrix-md <file.md> Export clash matrix coordination report as Markdown table
           --clash-matrix-bcf <file.bcfzip> Export clash matrix conflicts to buildingSMART BCF 2.1 zip
           --clash-group <mode> Group clashes: proximity, element, grid, layer
-          --clash-radius <m>   Cluster radius in meters for proximity grouping (default: 1.0)
-          --clash-tolerance <m> Set clash detection tolerance in meters (default: 0.001)
+          --clash-radius <units> Cluster radius in document units for proximity grouping (default: 1.0)
+          --clash-tolerance <units> Clash detection tolerance in document units (default: 0.001)
           --diff <baseline.nwc> Compare model against baseline revision
           --diff-json <file.json> Export revision comparison report to JSON
           --diff-bcf <file.bcfzip> Export revision comparison to buildingSMART BCF 2.1 zip
-          --diff-tolerance <m> Geometric displacement tolerance for diff (default: 0.005m)
+          --diff-tolerance <units> Geometric displacement tolerance for diff in document units (default: 0.005)
           --grids <file.xml>   Load spatial grid system from XML (.xml)
           --export-grids <file.xml> Export extracted or loaded grid system to XML (.xml)
           --nwf-xml <file.xml> Export Navisworks federated coordination manifest (.nwf.xml)
@@ -835,7 +836,7 @@ internal static class Program
             if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
             {
                 EnsureParentDirectory(explicitHtmlViewerPath);
-                doc.SaveHtmlViewer(explicitHtmlViewerPath);
+                WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, doc), @err);
             }
 
             if (!string.IsNullOrEmpty(explicitGridsPath))
@@ -1167,7 +1168,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1258,7 +1259,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
         {
             EnsureParentDirectory(explicitHtmlViewerPath);
-            assembly.SaveHtmlViewer(explicitHtmlViewerPath);
+            WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, assembly), @err);
         }
         if (!string.IsNullOrEmpty(explicitNwfXmlPath))
         {
@@ -1467,7 +1468,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1558,7 +1559,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
         {
             EnsureParentDirectory(explicitHtmlViewerPath);
-            assembly.SaveHtmlViewer(explicitHtmlViewerPath);
+            WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, assembly), @err);
         }
         if (!string.IsNullOrEmpty(explicitNwfXmlPath))
         {
@@ -1735,6 +1736,18 @@ internal static class Program
         {
             Directory.CreateDirectory(dir);
         }
+    }
+
+    internal static void WarnIfViewerTruncated(NwcHtmlViewerExportResult result, TextWriter err)
+    {
+        if (!result.Truncated)
+        {
+            return;
+        }
+
+        err.WriteLine(
+            $"Warning: HTML viewer export skipped {result.SkippedMeshes} of {result.TotalMeshes} meshes " +
+            $"({result.SkippedVertices:N0} vertices) because MaxMeshVertices ({result.ExportedVertices:N0} written) was reached.");
     }
 
     private static int CountNodes(NwcNode? node)
