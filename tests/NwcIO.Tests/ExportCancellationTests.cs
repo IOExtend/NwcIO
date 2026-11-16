@@ -93,14 +93,72 @@ public sealed class ExportCancellationTests
     }
 
     [Fact]
-    public async Task SaveJsonAsync_CanceledToken_IsCanceled()
+    public void AssemblySaveJson_ProgressCancelsBeforeWrite_WritesNothing()
+    {
+        var assembly = NwcAssembly.Create("Fed", Document());
+        using var cancellation = new CancellationTokenSource();
+        using var stream = new MemoryStream();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            assembly.SaveJson(stream, null, new CancellingProgress(cancellation), cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public void AssemblyBcfStream_ProgressCancelsBeforeWrite_WritesNothing()
+    {
+        var assembly = NwcAssembly.Create("Fed", Document());
+        using var cancellation = new CancellationTokenSource();
+        using var stream = new MemoryStream();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            assembly.SaveBcf(stream, [], new CancellingProgress(cancellation), cancellation.Token));
+
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public void AssemblyBcfAndHtmlFiles_ProgressCancelsBeforeWrite_CreateNoFile()
+    {
+        var assembly = NwcAssembly.Create("Fed", Document());
+        string bcf = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.bcfzip");
+        string html = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.html");
+        try
+        {
+            using (var cancellation = new CancellationTokenSource())
+            {
+                Assert.Throws<OperationCanceledException>(() =>
+                    assembly.SaveBcf(bcf, [], new CancellingProgress(cancellation), cancellation.Token));
+            }
+
+            using (var cancellation = new CancellationTokenSource())
+            {
+                Assert.Throws<OperationCanceledException>(() =>
+                    assembly.SaveClashReportHtml(html, [], new CancellingProgress(cancellation), cancellation.Token));
+            }
+
+            Assert.False(File.Exists(bcf));
+            Assert.False(File.Exists(html));
+        }
+        finally
+        {
+            if (File.Exists(bcf)) File.Delete(bcf);
+            if (File.Exists(html)) File.Delete(html);
+        }
+    }
+
+    [Fact]
+    public async Task SaveJsonAsync_CanceledWhileWriting_IsCanceled()
     {
         var document = Document();
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        using var stream = new CancelOnWriteStream(cancellation);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            document.SaveJsonAsync(Path.GetTempFileName(), cancellationToken: cancellation.Token));
+            document.SaveJsonAsync(stream, cancellationToken: cancellation.Token));
+
+        Assert.True(stream.Written);
     }
 
     private static NwcDocument Document() => NwcDocument.Create(meshes:
@@ -124,5 +182,24 @@ public sealed class ExportCancellationTests
     private sealed class CancellingProgress(CancellationTokenSource cancellation) : IProgress<NwcProgress>
     {
         public void Report(NwcProgress value) => cancellation.Cancel();
+    }
+
+    private sealed class CancelOnWriteStream(CancellationTokenSource cancellation) : MemoryStream
+    {
+        public bool Written { get; private set; }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            Written = true;
+            cancellation.Cancel();
+            base.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            Written = true;
+            cancellation.Cancel();
+            base.Write(buffer);
+        }
     }
 }
