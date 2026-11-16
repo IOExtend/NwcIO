@@ -268,7 +268,20 @@ public sealed class NwcDocument
             container = container with { Streams = [] };
         }
 
-        return new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        var document = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        if (container.TrailingGap > 0)
+        {
+            document.Diagnostics =
+            [
+                new NwcDiagnostic(
+                    NwcDiagnosticSeverity.Warning,
+                    "ContainerTrailingGap",
+                    $"Unrecognized {container.TrailingGap} byte tail after the last stream.",
+                    ByteOffset: container.FileLength - container.TrailingGap),
+            ];
+        }
+
+        return document;
     }
 
     /// <summary>
@@ -307,16 +320,6 @@ public sealed class NwcDocument
         };
 
         var doc = new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
-        if (container.TrailingGap > 0)
-        {
-            doc.Diagnostics =
-            [
-                new NwcDiagnostic(
-                    NwcDiagnosticSeverity.Warning,
-                    "ContainerTrailingGap",
-                    $"Unrecognized {container.TrailingGap} byte tail after the last stream."),
-            ];
-        }
         if (appearanceProfiler is not null)
         {
             doc.ApplyAppearanceProfiler(appearanceProfiler);
