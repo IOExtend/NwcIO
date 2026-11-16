@@ -160,7 +160,7 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 ## Limitations
 
 - Version 0.12.1 is a preview. The API can evolve before 1.0.
-- Geometry extraction decodes triangle strips, polylines and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported.
+- Geometry extraction decodes triangle strips, polylines (including two-vertex line records) and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported. On the lenient path, records above `NwcReaderOptions.MaxMeshVertices` (200,000 by default) are skipped; raise the option for exceptionally large records.
 - `.nwd` scene trees with partition nodes are not decoded yet, and linked Revit models (a tree that places one element under two parents) are not supported: open them with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference such files.
 - The `.nwc` writer stores vertex positions, triangle indices, mesh ids and names, and rotation/translation; it rejects scaled transforms, line meshes and indices outside the vertex buffer.
 - Scene trees of files without a DbCache directory come from the lenient tag 52/53 scan: the Category/Family/Type nesting is recognized by the stored marker names (the common localized spellings are covered), a repeated marker keeps its level, and other collection names are derived from record order. Node classes other than the observed `LcRevit*` names are recognized by suffix; `LcRevitElement` material definitions stay properties. Model files read through their DbCache hierarchy are not affected by these heuristics.

@@ -17,9 +17,17 @@ public static class MeshParser
     /// <summary>
     /// Parses all 3D meshes found in the container streams.
     /// </summary>
-    public static IReadOnlyList<NwcMesh> Parse(NwcContainer container, IReadOnlyList<NwcTransform>? transforms = null)
+    /// <param name="maxVertices">Cap on one record's vertices; records above it are skipped. Defaults to <see cref="MaxPlausibleVertices"/>.</param>
+    public static IReadOnlyList<NwcMesh> Parse(
+        NwcContainer container,
+        IReadOnlyList<NwcTransform>? transforms = null,
+        int maxVertices = MaxPlausibleVertices)
     {
         ArgumentNullException.ThrowIfNull(container);
+        if (maxVertices < MinMeshVertices)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxVertices), maxVertices, $"The vertex cap is at least {MinMeshVertices}.");
+        }
 
         var meshes = new List<NwcMesh>();
 
@@ -27,13 +35,13 @@ public static class MeshParser
         var tocStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (tocStream is not null)
         {
-            ParseViaToc(container, tocStream, meshes, transforms);
+            ParseViaToc(container, tocStream, meshes, transforms, maxVertices);
         }
 
         // 2. Secondary fallback: if TOC yielded no meshes, scan individual streams for vertex buffers.
         if (meshes.Count == 0)
         {
-            ParseViaHeuristicScan(container, meshes, transforms);
+            ParseViaHeuristicScan(container, meshes, transforms, maxVertices);
         }
 
         return meshes;
@@ -43,7 +51,8 @@ public static class MeshParser
         NwcContainer container,
         LcRawStream tocStream,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices)
     {
         var tocData = tocStream.Data;
         if (tocData.Length < 16)
@@ -140,10 +149,12 @@ public static class MeshParser
                         vCount = p1;
                     }
 
-                    if (vCount >= MinMeshVertices && vCount <= MaxPlausibleVertices)
+                    bool lines = recTag == 95 || vCount == 2;
+                    int minVertices = lines ? 2 : MinMeshVertices;
+                    if (vCount >= minVertices && vCount <= maxVertices)
                     {
                         int recId = BinaryPrimitives.ReadInt32LittleEndian(combined.AsSpan(curPos));
-                        var mesh = TryBuildMesh(combined, curPos, curPos + 24, vCount, recId, rLen, meshes.Count, usedIds);
+                        var mesh = TryBuildMesh(combined, curPos, curPos + 24, vCount, recId, rLen, meshes.Count, lines, usedIds);
                         if (mesh is not null)
                         {
                             if (transforms is not null && meshes.Count < transforms.Count)
@@ -164,7 +175,8 @@ public static class MeshParser
     private static void ParseViaHeuristicScan(
         NwcContainer container,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices)
     {
         foreach (var stream in container.Streams)
         {
@@ -183,18 +195,20 @@ public static class MeshParser
                 }
 
                 int vCount = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(i + 8));
-                if (vCount < MinMeshVertices || vCount > MaxPlausibleVertices)
+                bool lines = vCount == 2;
+                int minVertices = lines ? 2 : MinMeshVertices;
+                if (vCount < minVertices || vCount > maxVertices)
                 {
                     continue;
                 }
 
-                int vBytes = vCount * 12;
-                if (i + 16 + vBytes > data.Length)
+                // vCount can reach int.MaxValue through MaxMeshVertices: compare without multiplying.
+                if (vCount > (data.Length - (i + 16)) / 12)
                 {
                     continue;
                 }
 
-                var mesh = TryBuildMesh(data, i, i + 16, vCount, 0, 0, meshes.Count);
+                var mesh = TryBuildMesh(data, i, i + 16, vCount, 0, 0, meshes.Count, lines);
                 if (mesh is not null)
                 {
                     if (transforms is not null && meshes.Count < transforms.Count)
@@ -203,7 +217,7 @@ public static class MeshParser
                     }
 
                     meshes.Add(mesh);
-                    i += 12 + vBytes;
+                    i += 12 + vCount * 12;
                 }
             }
         }
@@ -217,8 +231,14 @@ public static class MeshParser
         int storedId,
         int recordLength,
         int meshId,
+        bool lines,
         HashSet<int>? usedIds = null)
     {
+        if (vertexOffset < 0 || vertexCount > (buffer.Length - vertexOffset) / 12)
+        {
+            return null;
+        }
+
         var vertices = new Vector3d[vertexCount];
         double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
         double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
@@ -250,11 +270,11 @@ public static class MeshParser
 
         int id = meshId;
         string name = $"Mesh_{meshId}";
-        IReadOnlyList<int> indices = BuildStripIndices(vertexCount);
+        IReadOnlyList<int> indices = lines ? [] : BuildStripIndices(vertexCount);
 
         // The writer's own records append the exact triangle indices and the mesh name after the positions.
         // Real Navisworks records have no such trailer, so anything that does not validate keeps the strip.
-        if (recordLength > 0 &&
+        if (!lines && recordLength > 0 &&
             TryReadMeshTrailer(buffer, recordOffset, recordLength, vertexCount, storedId, out var trailerId, out var trailerIndices, out var trailerName))
         {
             id = trailerId;
@@ -279,6 +299,7 @@ public static class MeshParser
             Name = name,
             Vertices = vertices,
             Indices = indices,
+            LineIndices = lines ? BuildLineIndices(vertexCount) : [],
             BoundingBox = new BoundingBox3d(new Vector3d(minX, minY, minZ), new Vector3d(maxX, maxY, maxZ)),
         };
     }
@@ -360,6 +381,23 @@ public static class MeshParser
         var characters = name.Where(c => !(char.IsControl(c) || c is '\u2028' or '\u2029')).ToArray();
         string trimmed = new string(characters).Trim();
         return trimmed.Length == 0 ? $"Mesh_{id}" : trimmed;
+    }
+
+    /// <summary>
+    /// Consecutive segment pairs over the vertices: (0,1), (1,2), ... — one open polyline. The lenient path does not read the polyline lengths,
+    /// so a record that holds several polylines gets a segment between each pair of neighbours.
+    /// </summary>
+    internal static int[] BuildLineIndices(int vertexCount)
+    {
+        var indices = new int[Math.Max(0, (vertexCount - 1) * 2)];
+        int idx = 0;
+        for (int i = 0; i < vertexCount - 1; i++)
+        {
+            indices[idx++] = i;
+            indices[idx++] = i + 1;
+        }
+
+        return indices;
     }
 
     /// <summary>

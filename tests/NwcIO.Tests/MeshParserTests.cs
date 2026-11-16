@@ -69,6 +69,93 @@ public class MeshParserTests
         Assert.Empty(MeshParser.Parse(container));
     }
 
+    [Fact]
+    public void Parse_TwoVertexClass95Record_ReturnsLineMesh()
+    {
+        var record = Int32Bytes(0, 95, 0, 60, 2, 6,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0);
+        var toc = Int32Bytes(1, 1, record.Length, record.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([record, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var mesh = Assert.Single(MeshParser.Parse(container));
+
+        Assert.Equal(2, mesh.Vertices.Count);
+        Assert.Empty(mesh.Indices);
+        Assert.Equal([0, 1], mesh.LineIndices);
+        Assert.Equal(0, mesh.TriangleCount);
+    }
+
+    [Fact]
+    public void Parse_MaxMeshVertices_IsConfigurable()
+    {
+        var record = Int32Bytes(0, 94, 0, 60, 4, 12,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0,
+            BitConverter.SingleToInt32Bits(1f), BitConverter.SingleToInt32Bits(1f), 0);
+        var toc = Int32Bytes(1, 1, record.Length, record.Length);
+        var bytes = NwcContainerWriter.Write([record, toc]);
+
+        var container = NwcContainerReader.Read(bytes);
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        Assert.Empty(MeshParser.Parse(container, maxVertices: 3));
+        Assert.Single(MeshParser.Parse(container, maxVertices: 4));
+
+        using var file = new MemoryStream(bytes);
+        Assert.Empty(NwcDocument.Open(file, new NwcReaderOptions { MaxMeshVertices = 3 }).Meshes);
+    }
+
+    [Fact]
+    public void Parse_Class95RecordWithThreeVertices_ReturnsPolylineNotTriangles()
+    {
+        var record = Int32Bytes(0, 95, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var toc = Int32Bytes(1, 1, record.Length, record.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([record, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var mesh = Assert.Single(MeshParser.Parse(container));
+
+        Assert.Empty(mesh.Indices);
+        Assert.Equal([0, 1, 1, 2], mesh.LineIndices);
+    }
+
+    [Fact]
+    public void Parse_TwoVertexRecordWithoutToc_ReturnsLineMesh()
+    {
+        var data = Int32Bytes(0, 60, 2, 0,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([data]));
+
+        var mesh = Assert.Single(MeshParser.Parse(container));
+
+        Assert.Equal([0, 1], mesh.LineIndices);
+    }
+
+    [Fact]
+    public void Parse_HeuristicVertexCountBeyondTheBuffer_SkipsRecordWithoutAllocating()
+    {
+        // 357913942 * 12 wraps to 8 in an int; the cap is raised so the count reaches the size check.
+        var data = Int32Bytes(0, 60, 357913942, 0, 0, 0, 0, 0);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([data]));
+
+        Assert.Empty(MeshParser.Parse(container, maxVertices: int.MaxValue));
+    }
+
+    [Fact]
+    public void Parse_MaxVerticesBelowTheMinimum_Throws()
+    {
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([Int32Bytes(0, 0, 0, 0)]));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => MeshParser.Parse(container, maxVertices: 2));
+    }
+
     private static byte[] Int32Bytes(params int[] values)
     {
         var data = new byte[values.Length * 4];

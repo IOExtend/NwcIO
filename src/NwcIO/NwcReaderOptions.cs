@@ -51,4 +51,10 @@ public sealed class NwcReaderOptions
     /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
     /// </summary>
     public long MaxTotalDecompressedBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxTotalDecompressedBytes;
+
+    /// <summary>
+    /// Cap on the vertices of one geometry record on the lenient reader path (default: 200,000). Larger records are skipped.
+    /// Model files read through their DbCache directory use the strict geometry parser and its own bounds.
+    /// </summary>
+    public int MaxMeshVertices { get; set; } = Internal.Parsing.MeshParser.MaxPlausibleVertices;
 }

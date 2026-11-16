@@ -203,7 +203,7 @@ public sealed class NwcDocument
 
             if (options.ReadMeshes)
             {
-                meshes.AddRange(MeshParser.Parse(container, transforms));
+                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices));
             }
 
             if (options.BuildSceneTree)
