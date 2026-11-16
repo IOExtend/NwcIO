@@ -4,10 +4,11 @@ namespace NwcIO;
 
 /// <summary>
 /// Provides methods for serializing and saving <see cref="NwcDocument"/> instances into
-/// Autodesk Navisworks (.nwc) files using pure managed compression and binary layouts.
-/// Stores vertex positions and rotation/translation placement. Triangle indices are not stored: the reader
-/// rebuilds one strip over the positions, so meshes whose triangles differ from that strip are rejected, as are
-/// scaled transforms and line meshes, before anything is written. Normals are not stored.
+/// .nwc files in NwcIO's own layout (not verified to open in Autodesk Navisworks) using pure managed compression and binary layouts.
+/// Stores vertex positions, triangle indices, the mesh id and name, and rotation/translation placement.
+/// Meshes whose triangles differ from the single strip the reader rebuilds are written with the writer's
+/// index trailer (docs/format-notes.md §2.6), which the reader prefers over the strip.
+/// Scaled transforms and line meshes are rejected before anything is written. Normals are not stored.
 /// </summary>
 public static class NwcWriter
 {

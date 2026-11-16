@@ -53,6 +53,13 @@ public sealed class PropertyRecordScanner
                 int pNext = _pos + 8;
                 if (TryReadLengthPrefixedString(ref pNext, out var nodeName) && !string.IsNullOrEmpty(nodeName))
                 {
+                    int? parentId = null;
+                    if (pNext + 8 <= _data.Length && ReadInt32At(pNext) == -2)
+                    {
+                        parentId = ReadInt32At(pNext + 4);
+                        pNext += 8;
+                    }
+
                     records.Add(new NwcPropertyRecord
                     {
                         FirstInt = recId,
@@ -61,6 +68,7 @@ public sealed class PropertyRecordScanner
                         Class = "Node",
                         ValueType = 0,
                         Value = null,
+                        ParentId = parentId,
                     });
                     _pos = pNext;
                     continue;

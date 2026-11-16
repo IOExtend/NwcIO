@@ -41,4 +41,11 @@ public sealed class NwcPropertyRecord
 
     /// <summary>The internal name of the property key on node properties of the strict path; null on scanned records.</summary>
     public string? InternalName { get; init; }
+
+    /// <summary>
+    /// Parent node id for tag-53 node records, both when written from an <see cref="NwcNode"/> tree by <c>NwcWriter</c>
+    /// and when scanned from a stream that carries the <c>-2</c> parent marker. Null when the hierarchy is derived
+    /// from collection names and record order instead.
+    /// </summary>
+    public int? ParentId { get; init; }
 }
