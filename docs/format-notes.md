@@ -242,8 +242,10 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - Geometric elements are assigned to storeys via `IfcRelContainedInSpatialStructure`.
   - In federated assemblies (`NwcAssembly`), each sub-model forms an independent building storey.
 - **Semantic Classification**:
-  - Dynamic mapping of Navisworks elements, categories, and materials to standard IFC entities:
-    - `IFCWALL`, `IFCSLAB`, `IFCCOLUMN`, `IFCBEAM`, `IFCREINFORCINGBAR`, `IFCWINDOW`, `IFCDOOR`, `IFCFOOTING`, `IFCSTAIR`, `IFCRAILING`, `IFCROOF`, `IFCPIPESEGMENT`, `IFCDUCTSEGMENT`, falling back to `IFCBUILDINGELEMENTPROXY`.
+  - Mapping of Navisworks elements to standard IFC entities:
+    - Priority: the node's `Category`, `Family`, `Type`/`Тип`, `Element Type`, `IFC Type` or `IfcEntity` property, then the node class and name, then the mesh name. Material names never decide the class.
+    - Keywords match at word-token starts only (`Drywall` is not a wall, `Outdoor` is not a door), so Russian stems such as `стен`, `перекрыт`, `колонн`, `арматур` and English words such as `wall`, `slab`, `column`, `rebar`, `pipe`, `duct` are recognized. Nothing matching falls back to `IFCBUILDINGELEMENTPROXY` (or `IFCFLOWSEGMENT` for pipes/ducts in IFC2X3).
+    - Type objects are named from the node's `Family`/`Type` property, then the element name; the material name is not used.
     - Attribute lists follow the selected schema (IFC2x3 or IFC4). IFC2x3 requires `NominalDiameter` and `CrossSectionArea` on `IFCREINFORCINGBAR`, which an NWC file does not carry, so the placeholders `1.` and `0.` are written there; IFC4 writes `$`.
 - **Materials & Properties**:
   - Shading styles serialized via `IfcSurfaceStyle`, `IfcSurfaceStyleShading`, and `IfcColourRgb`, assigned to geometry via `IfcStyledItem`.

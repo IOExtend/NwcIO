@@ -188,11 +188,9 @@ internal static class IfcExporter
                 $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
             var owner = mesh.Node?.Element ?? mesh.Node;
-            string elemName = !string.IsNullOrEmpty(owner?.Name)
-                ? owner.Name
-                : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+            string elemName = ElementName(mesh, owner);
             string elemGuid = NwcElementGuid.ForMesh(mesh, doc);
-            string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
+            string ifcType = ClassifyElement(elemName, owner);
 
             int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
             elementIds.Add(elemId);
@@ -200,7 +198,7 @@ internal static class IfcExporter
             // Type assignment
             if (options.ExportTypeObjects)
             {
-                string typeName = CleanTypeName(elemName, mesh.Material?.Name, ifcType);
+                string typeName = CleanTypeName(elemName, owner, ifcType);
                 string typeKey = $"{ifcType}::{typeName}";
                 if (!typeMap.TryGetValue(typeKey, out var entry))
                 {
@@ -422,11 +420,9 @@ internal static class IfcExporter
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
                 var owner = mesh.Node?.Element ?? mesh.Node;
-                string elemName = !string.IsNullOrEmpty(owner?.Name)
-                    ? owner.Name
-                    : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+                string elemName = ElementName(mesh, owner);
                 string elemGuid = NwcElementGuid.ForMesh(mesh, modelKeys[modelIdx]);
-                string ifcType = ClassifyElement(elemName, mesh.Material?.Name);
+                string ifcType = ClassifyElement(elemName, owner);
 
                 int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
                 modelElementIds.Add(elemId);
@@ -434,7 +430,7 @@ internal static class IfcExporter
                 // Type assignment
                 if (options.ExportTypeObjects)
                 {
-                    string typeName = CleanTypeName(elemName, mesh.Material?.Name, ifcType);
+                    string typeName = CleanTypeName(elemName, owner, ifcType);
                     string typeKey = $"{ifcType}::{typeName}";
                     if (!typeMap.TryGetValue(typeKey, out var entry))
                     {
@@ -705,38 +701,125 @@ internal static class IfcExporter
         }
     }
 
-    private static string ClassifyElement(string name, string? materialName)
+    private static string ClassifyElement(string name, NwcNode? node)
     {
-        string target = $"{name} {materialName}";
+        foreach (string text in ClassificationTexts(node))
+        {
+            string? classified = ClassifyText(text);
+            if (classified is not null)
+            {
+                return classified;
+            }
+        }
 
-        if (ContainsAny(target, "стена", "стены", "wall", "walls"))
-            return "IFCWALL";
-        if (ContainsAny(target, "перекрытие", "перекрытия", "плита", "плиты", "floor", "floors", "slab", "slabs"))
-            return "IFCSLAB";
-        if (ContainsAny(target, "колонна", "колонны", "column", "columns"))
-            return "IFCCOLUMN";
-        if (ContainsAny(target, "балка", "балки", "beam", "beams", "ригель"))
-            return "IFCBEAM";
-        if (ContainsAny(target, "арматур", "rebar", "стержень", "каркас"))
-            return "IFCREINFORCINGBAR";
-        if (ContainsAny(target, "окно", "окна", "window", "windows"))
-            return "IFCWINDOW";
-        if (ContainsAny(target, "дверь", "двери", "door", "doors"))
-            return "IFCDOOR";
-        if (ContainsAny(target, "фундамент", "ростверк", "foundation", "footing"))
-            return "IFCFOOTING";
-        if (ContainsAny(target, "лестница", "лестницы", "stair", "stairs"))
-            return "IFCSTAIR";
-        if (ContainsAny(target, "ограждение", "ограждения", "railing", "railings", "перила"))
-            return "IFCRAILING";
-        if (ContainsAny(target, "кровля", "крыша", "roof", "roofs"))
-            return "IFCROOF";
-        if (ContainsAny(target, "труба", "трубы", "pipe", "pipes"))
+        return ClassifyText(name) ?? "IFCBUILDINGELEMENTPROXY";
+    }
+
+    private static IEnumerable<string> ClassificationTexts(NwcNode? node)
+    {
+        if (node is null)
+        {
+            yield break;
+        }
+
+        yield return node.Class;
+        foreach (var property in node.Properties)
+        {
+            if (IsClassificationProperty(property.Name) && !string.IsNullOrWhiteSpace(property.Value))
+            {
+                yield return property.Value;
+            }
+        }
+
+        yield return node.Name;
+    }
+
+    private static bool IsClassificationProperty(string name) =>
+        name is "Category" or "Категория" or "Family" or "Семейство" or "Type" or "Тип"
+            or "Element Type" or "Type Name" or "System Type" or "IFC Type" or "IfcType" or "IfcEntity";
+
+    private static string? ClassifyText(string text)
+    {
+        if (text.StartsWith("Ifc", StringComparison.OrdinalIgnoreCase) && text.Length > 3)
+        {
+            return ClassifyText(text[3..]);
+        }
+
+        if (HasTokenPrefix(text, "труб", "pipe"))
             return "IFCPIPESEGMENT";
-        if (ContainsAny(target, "воздуховод", "воздуховоды", "duct", "ducts"))
+        if (HasTokenPrefix(text, "воздуховод", "duct"))
             return "IFCDUCTSEGMENT";
+        if (HasTokenPrefix(text, "стен", "wall"))
+            return "IFCWALL";
+        if (HasTokenPrefix(text, "перекрыт", "плит", "floor", "slab"))
+            return "IFCSLAB";
+        if (HasTokenPrefix(text, "колонн", "column"))
+            return "IFCCOLUMN";
+        if (HasTokenPrefix(text, "балк", "ригел", "beam"))
+            return "IFCBEAM";
+        if (HasTokenPrefix(text, "арматур", "rebar", "стерж", "каркас"))
+            return "IFCREINFORCINGBAR";
+        if (HasTokenPrefix(text, "окн", "window"))
+            return "IFCWINDOW";
+        if (HasTokenPrefix(text, "двер", "door"))
+            return "IFCDOOR";
+        if (HasTokenPrefix(text, "фундамент", "ростверк", "foundation", "footing"))
+            return "IFCFOOTING";
+        if (HasTokenPrefix(text, "лестниц", "stair"))
+            return "IFCSTAIR";
+        if (HasTokenPrefix(text, "огражден", "перил", "rail"))
+            return "IFCRAILING";
+        if (HasTokenPrefix(text, "кровл", "крыш", "roof"))
+            return "IFCROOF";
 
-        return "IFCBUILDINGELEMENTPROXY";
+        return null;
+    }
+
+    /// <summary>Words that merely start like a structural keyword (balcony vs beam, lid vs roof, tile vs slab); they are ignored, the rest of the text is still classified.</summary>
+    private static bool IsNonStructuralToken(ReadOnlySpan<char> token) =>
+        token.StartsWith("балкон", StringComparison.OrdinalIgnoreCase)
+        || token.StartsWith("крышк", StringComparison.OrdinalIgnoreCase)
+        || token.StartsWith("плитк", StringComparison.OrdinalIgnoreCase);
+
+    private static string ElementName(NwcMesh mesh, NwcNode? owner) =>
+        !string.IsNullOrEmpty(owner?.Name)
+            ? owner.Name
+            : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+
+    /// <summary>Matches a keyword only at the start of a word token, so "Drywall" is not a wall and "Outdoor" is not a door.</summary>
+    private static bool HasTokenPrefix(string text, params string[] prefixes)
+    {
+        int i = 0;
+        while (i < text.Length)
+        {
+            if (!char.IsLetterOrDigit(text[i]))
+            {
+                i++;
+                continue;
+            }
+
+            int start = i;
+            while (i < text.Length && char.IsLetterOrDigit(text[i]))
+            {
+                i++;
+            }
+
+            var token = text.AsSpan(start, i - start);
+            if (IsNonStructuralToken(token))
+            {
+                continue;
+            }
+
+            foreach (string prefix in prefixes)
+            {
+                if (token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static int WriteMeshTriangulatedFaceSet(
@@ -898,11 +981,12 @@ internal static class IfcExporter
         };
     }
 
-    private static string CleanTypeName(string elemName, string? matName, string ifcType)
+    private static string CleanTypeName(string elemName, NwcNode? node, string ifcType)
     {
-        if (!string.IsNullOrWhiteSpace(matName))
+        string? familyOrType = NodeProperty(node, "Family", "Семейство", "Type", "Тип", "Element Type", "Type Name", "System Type");
+        if (!string.IsNullOrWhiteSpace(familyOrType))
         {
-            return matName.Trim();
+            return familyOrType.Trim();
         }
 
         if (elemName.StartsWith("Mesh_", StringComparison.OrdinalIgnoreCase))
@@ -917,6 +1001,28 @@ internal static class IfcExporter
         }
 
         return elemName.Trim();
+    }
+
+    private static string? NodeProperty(NwcNode? node, params string[] names)
+    {
+        if (node is null)
+        {
+            return null;
+        }
+
+        foreach (string name in names)
+        {
+            foreach (var property in node.Properties)
+            {
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(property.Value))
+                {
+                    return property.Value;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static bool ContainsAny(string text, params string[] needles)
