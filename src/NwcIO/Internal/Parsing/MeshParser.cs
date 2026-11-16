@@ -183,10 +183,12 @@ public static class MeshParser
                     if (vCount >= minVertices && vCount <= maxVertices)
                     {
                         int recId = BinaryPrimitives.ReadInt32LittleEndian(combined.AsSpan(curPos));
-                        var mesh = TryBuildMesh(combined, curPos, curPos + 24, vCount, recId, rLen, meshes.Count, lines, usedIds);
+                        // Ids and transforms follow record order, not the count of accepted meshes: a skipped
+                        // record must not shift the placement of the records after it.
+                        var mesh = TryBuildMesh(combined, curPos, curPos + 24, vCount, recId, rLen, r, lines, usedIds);
                         if (mesh is not null)
                         {
-                            AssignTransform(mesh, meshes.Count, transforms, transformIndices);
+                            AssignTransform(mesh, r, transforms, transformIndices);
 
                             meshes.Add(mesh);
                         }

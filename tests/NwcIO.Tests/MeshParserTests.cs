@@ -70,6 +70,118 @@ public class MeshParserTests
     }
 
     [Fact]
+    public void Parse_SkippedRecord_DoesNotShiftLaterIdsOrTransforms()
+    {
+        // Record 0 is malformed and rejected; records 1 and 2 are triangles.
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = skipped.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, skipped.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100, Translation = new Vector3d(100, 0, 0) },
+            new NwcTransform { Id = 101, Translation = new Vector3d(101, 0, 0) },
+            new NwcTransform { Id = 102, Translation = new Vector3d(102, 0, 0) },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms);
+
+        Assert.Equal(2, meshes.Count);
+        Assert.Equal([1, 2], meshes.Select(m => m.Id));
+        Assert.Same(transforms[1], meshes[0].Transform);
+        Assert.Same(transforms[2], meshes[1].Transform);
+    }
+
+    [Fact]
+    public void Parse_RecordRejectedByVertexValidation_DoesNotShiftLaterIdsOrTransforms()
+    {
+        // Record 0 passes the header checks but its coordinate is beyond the reader limit.
+        var overLimit = Int32Bytes(0, 94, 0, 60, 3, 9,
+            BitConverter.SingleToInt32Bits(3e8f), 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = overLimit.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, overLimit.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100 },
+            new NwcTransform { Id = 101 },
+            new NwcTransform { Id = 102 },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms);
+
+        Assert.Equal([1, 2], meshes.Select(m => m.Id));
+        Assert.Same(transforms[1], meshes[0].Transform);
+        Assert.Same(transforms[2], meshes[1].Transform);
+    }
+
+    [Fact]
+    public void Parse_SkippedRecord_BindsLinkIndicesByRecordOrder()
+    {
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = skipped.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, skipped.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100 },
+            new NwcTransform { Id = 101 },
+            new NwcTransform { Id = 102 },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms, transformIndices: [0, 2, 1]);
+
+        Assert.Same(transforms[2], meshes[0].Transform);
+        Assert.Same(transforms[1], meshes[1].Transform);
+    }
+
+    [Fact]
+    public void Parse_FewerTransformsThanRecords_LeavesTheLaterRecordsUnplaced()
+    {
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = skipped.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, skipped.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100 },
+            new NwcTransform { Id = 101 },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms);
+
+        Assert.Equal(2, meshes.Count);
+        Assert.Same(transforms[1], meshes[0].Transform);
+        Assert.Null(meshes[1].Transform);
+    }
+
+    [Fact]
     public void Parse_TwoVertexClass95Record_ReturnsLineMesh()
     {
         var record = Int32Bytes(0, 95, 0, 60, 2, 6,
