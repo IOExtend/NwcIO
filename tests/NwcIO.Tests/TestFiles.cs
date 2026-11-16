@@ -48,16 +48,26 @@ internal static class TestFiles
             return env;
         }
 
-        var files = EnumerateAll();
-        return files.Count > 0 ? files[0] : null;
+        foreach (var root in SearchRoots())
+        {
+            var candidate = Directory.EnumerateFiles(root, "*.nwc", SearchOption.AllDirectories).FirstOrDefault();
+            if (candidate is not null)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
     /// Every local fixture file in a stable order: only the file named by <see cref="EnvironmentVariable"/>
-    /// when it exists, otherwise all *.nwc, *.nwd and *.nwf files of the first search root that holds any,
-    /// ordered by full path. Reports refer to files by position in this list.
+    /// when it exists, otherwise all *.nwc and *.nwd files of the first search root that holds any,
+    /// ordered by (length, full path). Reports refer to files by position in this list.
+    /// With <paramref name="includeFederations"/> *.nwf files join the list; the suites that treat every
+    /// non-.nwd file as a Revit-sourced .nwc leave it off.
     /// </summary>
-    public static IReadOnlyList<string> EnumerateAll()
+    public static IReadOnlyList<string> EnumerateAll(bool includeFederations = false)
     {
         var env = Environment.GetEnvironmentVariable(EnvironmentVariable);
         if (!string.IsNullOrEmpty(env) && File.Exists(env))
@@ -70,8 +80,9 @@ internal static class TestFiles
             var files = Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
                 .Where(f => f.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase)
                     || f.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase)
-                    || f.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(f => f, StringComparer.Ordinal)
+                    || (includeFederations && f.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(f => new FileInfo(f).Length)
+                .ThenBy(f => f, StringComparer.Ordinal)
                 .ToList();
             if (files.Count > 0)
             {
@@ -97,22 +108,15 @@ internal static class TestFiles
         var env = Environment.GetEnvironmentVariable(EnvironmentVariable);
         if (!string.IsNullOrEmpty(env))
         {
-            return $"No .nwc/.nwd/.nwf fixture found: {EnvironmentVariable} is set to '{env}', which is neither an existing model file nor a directory containing one.";
+            return $"No .nwc fixture found: {EnvironmentVariable} is set to '{env}', which is neither an existing .nwc file nor a directory containing one.";
         }
 
-        return $"No .nwc/.nwd/.nwf fixture found (set {EnvironmentVariable} or add a test_files directory).";
+        return $"No .nwc fixture found (set {EnvironmentVariable} or add a test_files directory).";
     }
 
     /// <summary>
-    /// Returns the path to a secondary test model for multi-model federated testing, or null if none is available.
+    /// Like <see cref="DescribeSkipReason"/>, but a lone *.nwf counts as a fixture too.
     /// </summary>
-    public static string? TryResolveSecondary(string? primaryPath)
-    {
-        if (primaryPath is null) return null;
-        var dir = Path.GetDirectoryName(primaryPath);
-        if (dir is null || !Directory.Exists(dir)) return null;
-
-        return Directory.EnumerateFiles(dir, "*.nwc", SearchOption.TopDirectoryOnly)
-            .FirstOrDefault(f => !string.Equals(f, primaryPath, StringComparison.OrdinalIgnoreCase));
-    }
+    public static string? DescribeModelSkipReason() =>
+        EnumerateAll(includeFederations: true).Count > 0 ? null : DescribeSkipReason();
 }
