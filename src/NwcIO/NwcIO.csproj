@@ -4,6 +4,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>NwcIO</PackageId>
     <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- CompatibilitySuppressions.xml accepts the removal of NwcIO.Internal types that 0.12.1 exposed;
+         delete it when this baseline moves to a release that no longer contains them. -->
     <PackageValidationBaselineVersion>0.12.1</PackageValidationBaselineVersion>
   </PropertyGroup>
 
