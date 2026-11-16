@@ -696,7 +696,8 @@ public class WriterTests
 
         var reopened = NwcDocument.Open(ms);
         Assert.NotNull(reopened.RootNode);
-        var prop = Assert.Single(reopened.RootNode.Properties, p => p.Name == "Phase Status");
+        var element = Assert.Single(reopened.RootNode.Children, n => n.Name == "Element 1");
+        var prop = Assert.Single(element.Properties, p => p.Name == "Phase Status");
         Assert.Equal("Phase Status", prop.Name);
         Assert.Equal((int)NwcVariantDataType.NamedConstant, prop.ValueType);
         Assert.Equal("Existing", prop.Value);
