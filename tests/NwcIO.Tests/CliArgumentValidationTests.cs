@@ -235,4 +235,91 @@ public class CliArgumentValidationTests
             if (File.Exists(model)) File.Delete(model);
         }
     }
+
+    [Fact]
+    public void SingleFile_AssemblyOnlyOptions_AreRejected()
+    {
+        string model = TempModel();
+        try
+        {
+            var (exit1, _, err1) = Run([model, "--nwf-xml", model + ".nwf.xml"]);
+            Assert.Equal(1, exit1);
+            Assert.Contains("--nwf-xml is only supported for folder and .nwf assembly inputs", err1);
+
+            var (exit2, _, err2) = Run([model, "--clashes"]);
+            Assert.Equal(1, exit2);
+            Assert.Contains("--clashes is only supported for folder and .nwf assembly inputs", err2);
+        }
+        finally
+        {
+            if (File.Exists(model)) File.Delete(model);
+        }
+    }
+
+    private static void SaveModel(string path)
+    {
+        new NwcDocumentBuilder().SetFileInfo("test.rvt")
+            .AddMesh(new NwcMesh
+            {
+                Id = 1,
+                Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0)),
+            })
+            .Build()
+            .Save(path);
+    }
+
+    [Theory]
+    [InlineData("--sets-xml")]
+    [InlineData("--timeliner-csv")]
+    [InlineData("--grids")]
+    [InlineData("--export-grids")]
+    public void Assembly_SingleFileOnlyOptions_AreRejected(string flag)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            SaveModel(Path.Combine(dir, "a.nwc"));
+            string nwf = Path.Combine(dir, "fed.nwf");
+            File.WriteAllBytes(nwf, [0]);
+
+            foreach (string input in new[] { dir, nwf })
+            {
+                var (exit, _, err) = Run([input, Path.Combine(dir, "out.json"), flag, Path.Combine(dir, "x.dat")]);
+                Assert.Equal(1, exit);
+                Assert.Contains(flag + " is only supported for single-file input", err);
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Folder_ReaderOptions_AreApplied()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            SaveModel(Path.Combine(dir, "a.nwc"));
+
+            string withMeshes = Path.Combine(dir, "with.json");
+            var (exit0, _, err0) = Run([dir, withMeshes]);
+            Assert.True(exit0 == 0, err0);
+            Assert.Contains("\"totalMeshes\":1", File.ReadAllText(withMeshes).Replace(" ", ""));
+
+            string noMeshes = Path.Combine(dir, "without.json");
+            var (exit, _, err) = Run([dir, noMeshes, "--no-meshes"]);
+            Assert.True(exit == 0, err);
+            Assert.Contains("\"totalMeshes\":0", File.ReadAllText(noMeshes).Replace(" ", ""));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }

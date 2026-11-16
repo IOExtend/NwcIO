@@ -77,6 +77,11 @@ internal static class Program
           -h, --help         Show this help message and exit
           -v, --version      Show version information and exit
 
+        Input-type scope:
+          --nwf-xml and --clashes require folder or .nwf assembly input.
+          --sets-xml, --timeliner-csv, --grids and --export-grids require a
+          single .nwc/.nwd input.
+
         Exit codes:
           0  Success
           1  Usage error (missing or invalid arguments)
@@ -434,6 +439,49 @@ internal static class Program
             return 2;
         }
 
+        var readerOptions = new NwcReaderOptions
+        {
+            ReadMeshes = readMeshes,
+            ReadMaterials = readMaterials,
+            ReadPropertyRecords = true,
+            ReadGuids = true,
+            ReadTransforms = includeTransforms,
+            BuildSceneTree = includeTree,
+            KeepStreamCatalog = includeCatalog,
+        };
+
+        bool isNwf = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
+        if (!isDirectory && !isNwf)
+        {
+            if (!string.IsNullOrEmpty(explicitNwfXmlPath))
+            {
+                @err.WriteLine("Error: --nwf-xml is only supported for folder and .nwf assembly inputs.");
+                return 1;
+            }
+            if (checkClashes)
+            {
+                @err.WriteLine("Error: --clashes is only supported for folder and .nwf assembly inputs.");
+                return 1;
+            }
+        }
+        else
+        {
+            foreach (var (flag, value) in new (string, string?)[]
+            {
+                ("--sets-xml", explicitSetsXmlPath),
+                ("--timeliner-csv", explicitTimeLinerCsvPath),
+                ("--grids", explicitGridsPath),
+                ("--export-grids", explicitExportGridsPath),
+            })
+            {
+                if (!string.IsNullOrEmpty(value))
+                {
+                    @err.WriteLine($"Error: {flag} is only supported for single-file input, not for folder or .nwf assemblies.");
+                    return 1;
+                }
+            }
+        }
+
         var sw = Stopwatch.StartNew();
 
         var ifcExportOptions = new NwcIfcExportOptions
@@ -458,7 +506,9 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                    readerOptions,
+                    includeTree,
                     stdoutStream, @out, @err);
             }
 
@@ -470,7 +520,9 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                    readerOptions,
+                    includeTree,
                     stdoutStream, @out, @err);
             }
         }
@@ -487,16 +539,7 @@ internal static class Program
         NwcDocument doc;
         try
         {
-            doc = NwcDocument.Open(inputPath, new NwcReaderOptions
-            {
-                ReadMeshes = readMeshes,
-                ReadMaterials = readMaterials,
-                ReadPropertyRecords = true,
-                ReadGuids = true,
-                ReadTransforms = includeTransforms,
-                BuildSceneTree = includeTree,
-                KeepStreamCatalog = includeCatalog,
-            });
+            doc = NwcDocument.Open(inputPath, readerOptions);
         }
         catch (InvalidDataException ex)
         {
@@ -1031,6 +1074,7 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
+        NwcReaderOptions? readerOptions = null,
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
@@ -1045,7 +1089,7 @@ internal static class Program
             outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
         }
 
-        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: new NwcReaderOptions { BuildSceneTree = includeTree });
+        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1331,6 +1375,7 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
+        NwcReaderOptions? readerOptions = null,
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
@@ -1344,7 +1389,7 @@ internal static class Program
         {
             outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         }
-        var assembly = NwcAssembly.OpenNwf(nwfPath, new NwcReaderOptions { BuildSceneTree = includeTree });
+        var assembly = NwcAssembly.OpenNwf(nwfPath, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1574,6 +1619,11 @@ internal static class Program
             @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
             @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
             @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
+            if (bvhStats)
+            {
+                var idx = assembly.SpatialIndex;
+                @err.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
+            }
             foreach (var xref in assembly.UnresolvedXRefs)
             {
                 @err.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
