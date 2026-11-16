@@ -8,7 +8,7 @@ title: NwcIO
 
 - **Reading the format (`NwcDocument`)**: the scene hierarchy, geometry meshes, transforms, GUID tables, materials, and property categories of a Navisworks cache or document.
 - **Writing `.nwc` (`NwcWriter` / `NwcDocumentBuilder`)**: create and save valid `#LcUStream-V1.1` Navisworks files directly from code.
-- **JSON export (`NwcDocument.SaveJson`)**: writes the scene tree, properties, GUIDs, transforms, materials, and saved viewpoints the reader parses to structured JSON. It is core and grows with the reader.
+- **JSON export (`NwcDocument.SaveJson`)**: writes structured JSON with the file information, property records, GUIDs, transforms, scene tree (each node with its id, name, class, value, element GUID, transform, properties, and hyperlinks), materials, XRefs, DbCache entries, and saved viewpoints, plus optional mesh summaries (id, name, vertex and triangle counts, material, bounding box) and a catalog of the container's sections and streams. It is core and grows with the reader.
 - **Scene adapter (`NwcIO.Scene`)**: turns a Navisworks model into an `IOScene` document for IOViewer. See the [scene adapter](scene.md).
 
 The HTML viewer, IFC, GLB and OBJ export, clash, measure, grids, diff, BCF, TimeLiner, selection and search sets, appearance profiler, mesh clipper, spatial index with raycast, section planes and boxes, redlines, and Navisworks XML exchange are frozen: bug fixes only. See [Scope and frozen features](https://github.com/IOExtend/NwcIO#scope-and-frozen-features).
