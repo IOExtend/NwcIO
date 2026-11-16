@@ -90,4 +90,53 @@ public class HtmlViewerTimeLinerTests
             if (File.Exists(tempHtml)) File.Delete(tempHtml);
         }
     }
+
+    [Fact]
+    public void ExportHtml_TimeLinerUsesScheduleOffsetAndAggregatesNodes()
+    {
+        var node = new NwcNode { Id = 10, Name = "Shared", Class = "Element" };
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = node,
+        };
+
+        var schedule = new NwcTimeLinerSchedule("Offset schedule");
+        var first = new NwcTimeLinerTask("T1", "A",
+            DateTimeOffset.Parse("2026-06-01T00:00:00+03:00", CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse("2026-06-10T00:00:00+03:00", CultureInfo.InvariantCulture));
+        var second = new NwcTimeLinerTask("T2", "B",
+            DateTimeOffset.Parse("2026-06-05T00:00:00+03:00", CultureInfo.InvariantCulture),
+            DateTimeOffset.Parse("2026-06-20T00:00:00+03:00", CultureInfo.InvariantCulture));
+        first.AttachedNodeIds.Add(10);
+        second.AttachedNodeIds.Add(10);
+        schedule.Tasks.Add(first);
+        schedule.Tasks.Add(second);
+
+        var doc = NwcDocument.Create(meshes: [mesh], timeLiner: schedule);
+        string path = Path.Combine(Path.GetTempPath(), $"viewer_{Guid.NewGuid():N}.html");
+        try
+        {
+            doc.SaveHtmlViewer(path);
+            string html = File.ReadAllText(path);
+
+            Assert.Contains("\"offsetMinutes\":180", html);
+            Assert.Contains("const nodeTasks = new Map();", html);
+            Assert.Contains("simTime > tEnd", html);
+            Assert.Contains("new Date(simDate.getTime() + offsetMs)", html);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        Assert.Equal(
+            NwcTimeLinerSimulationState.InProgress,
+            schedule.GetNodeStateAt(10, DateTimeOffset.Parse("2026-06-10T00:00:00+03:00", CultureInfo.InvariantCulture)));
+        Assert.Equal(
+            NwcTimeLinerSimulationState.NotStarted,
+            schedule.GetNodeStateAt(10, DateTimeOffset.Parse("2026-05-31T00:00:00+03:00", CultureInfo.InvariantCulture)));
+    }
 }

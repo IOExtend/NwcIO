@@ -1157,7 +1157,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
     function updateTlSimulation() {
       const simDate = getSimDate(parseFloat(tlSlider.value));
-      tlDate.textContent = simDate.toISOString().slice(0, 10);
+      const offsetMs = (modelData.timeliner.offsetMinutes || 0) * 60000;
+      tlDate.textContent = new Date(simDate.getTime() + offsetMs).toISOString().slice(0, 10);
 
       if (!tlActive) {
         gpuMeshes.forEach(gm => { gm.hidden = false; gm.simColor = null; });
@@ -1166,17 +1167,28 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       }
 
       const simTime = simDate.getTime();
-      const nodeState = new Map();
+      const nodeTasks = new Map();
       modelData.timeliner.tasks.forEach(t => {
-        const tStart = new Date(t.start).getTime();
-        const tEnd = new Date(t.end).getTime();
-        let state = 'NotStarted';
-        if (simTime >= tEnd) state = 'Completed';
-        else if (simTime >= tStart) state = 'InProgress';
-
         (t.nodeIds || []).forEach(nid => {
-          nodeState.set(nid, { type: t.taskType, state: state });
+          if (!nodeTasks.has(nid)) nodeTasks.set(nid, []);
+          nodeTasks.get(nid).push(t);
         });
+      });
+
+      const nodeState = new Map();
+      nodeTasks.forEach((tasks, nid) => {
+        let inProgress = false;
+        let allCompleted = true;
+        tasks.forEach(t => {
+          const tStart = new Date(t.start).getTime();
+          const tEnd = new Date(t.end).getTime();
+          if (simTime > tEnd) return;
+          allCompleted = false;
+          if (simTime >= tStart) inProgress = true;
+        });
+
+        const state = inProgress ? 'InProgress' : (allCompleted ? 'Completed' : 'NotStarted');
+        nodeState.set(nid, { type: tasks[0].taskType, state: state });
       });
 
       gpuMeshes.forEach(gm => {
@@ -1768,6 +1780,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 writer.WriteStartObject("timeliner");
                 writer.WriteString("start", start.Value.ToString("o", CultureInfo.InvariantCulture));
                 writer.WriteString("end", end.Value.ToString("o", CultureInfo.InvariantCulture));
+                writer.WriteNumber("offsetMinutes", start.Value.Offset.TotalMinutes);
                 writer.WriteStartArray("tasks");
                 foreach (var task in options.TimeLiner.FlattenTasks())
                 {
