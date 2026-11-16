@@ -179,19 +179,18 @@ public static class NwcTimeLinerMsProjectXmlSerializer
             }
 
             string? startStr = taskElem.Element(ns + "Start")?.Value;
-            DateTimeOffset start;
-            if (string.IsNullOrEmpty(startStr) ||
-                !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out start))
+            string? finishStr = taskElem.Element(ns + "Finish")?.Value;
+            bool hasStart = DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var start);
+            bool hasFinish = DateTimeOffset.TryParse(finishStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var finish);
+            if (!hasStart)
             {
-                start = DateTimeOffset.UnixEpoch;
+                // A valid finish pins the task; only with no dates at all does the epoch placeholder remain.
+                start = hasFinish ? NwcTimeLinerDates.AddDays(finish, -1) : DateTimeOffset.UnixEpoch;
                 schedule.Warnings.Add(
                     $"Task '{id}': start '{startStr}' is missing or invalid; using {start:o}.");
             }
 
-            string? finishStr = taskElem.Element(ns + "Finish")?.Value;
-            DateTimeOffset finish;
-            if (string.IsNullOrEmpty(finishStr) ||
-                !DateTimeOffset.TryParse(finishStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out finish))
+            if (!hasFinish)
             {
                 finish = NwcTimeLinerDates.AddDays(start, 1);
                 schedule.Warnings.Add(

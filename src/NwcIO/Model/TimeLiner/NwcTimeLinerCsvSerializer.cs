@@ -97,13 +97,16 @@ public static class NwcTimeLinerCsvSerializer
                 taskType = NwcTimeLinerTaskType.Construct;
             }
 
-            if (!DateTimeOffset.TryParse(plannedStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pStart))
+            bool hasStart = DateTimeOffset.TryParse(plannedStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pStart);
+            bool hasEnd = DateTimeOffset.TryParse(plannedEndStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd);
+            if (!hasStart)
             {
-                pStart = DateTimeOffset.UnixEpoch;
+                // A valid end pins the task; only with no dates at all does the epoch placeholder remain.
+                pStart = hasEnd ? NwcTimeLinerDates.AddDays(pEnd, -7) : DateTimeOffset.UnixEpoch;
                 schedule.Warnings.Add(
                     $"Row {rowNumber} ('{id}'): planned start '{plannedStartStr}' is missing or invalid; using {pStart:o}.");
             }
-            if (!DateTimeOffset.TryParse(plannedEndStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd))
+            if (!hasEnd)
             {
                 pEnd = NwcTimeLinerDates.AddDays(pStart, 7);
                 schedule.Warnings.Add(

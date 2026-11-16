@@ -153,19 +153,18 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                     }
                     string name = rowMap.GetValueOrDefault("task_name") ?? "Task";
 
-                    DateTimeOffset start;
-                    if (!rowMap.TryGetValue("target_start_date", out var startStr) ||
-                        string.IsNullOrWhiteSpace(startStr) ||
-                        !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out start))
+                    rowMap.TryGetValue("target_start_date", out var startStr);
+                    rowMap.TryGetValue("target_end_date", out var endStr);
+                    bool hasStart = DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var start);
+                    bool hasEnd = DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var end);
+                    if (!hasStart)
                     {
-                        start = DateTimeOffset.UnixEpoch;
+                        // A valid end pins the task; only with no dates at all does the epoch placeholder remain.
+                        start = hasEnd ? NwcTimeLinerDates.AddDays(end, -1) : DateTimeOffset.UnixEpoch;
                         warnings.Add($"Task '{id}': target start '{startStr}' is missing or invalid; using {start:o}.");
                     }
 
-                    DateTimeOffset end;
-                    if (!rowMap.TryGetValue("target_end_date", out var endStr) ||
-                        string.IsNullOrWhiteSpace(endStr) ||
-                        !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out end))
+                    if (!hasEnd)
                     {
                         end = NwcTimeLinerDates.AddDays(start, 1);
                         warnings.Add($"Task '{id}': target end '{endStr}' is missing or invalid; using {end:o}.");
