@@ -1,8 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Tests run on a single TFM to avoid requiring every runtime on the dev machine. -->
-    <TargetFrameworks>net10.0</TargetFrameworks>
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>

@@ -21,9 +21,13 @@ public enum NwcClashStatus
 /// </summary>
 public enum NwcClashTestType
 {
+    /// <summary>Triangle-level intersection; positive AABB penetration below the tolerance is ignored.</summary>
     Hard,
+    /// <summary>Shortest mesh-to-mesh distance at or below the tolerance; Distance is positive for a gap.</summary>
     Clearance,
+    /// <summary>Same world geometry and topology within the tolerance, regardless of id, name or material.</summary>
     Duplicates,
+    /// <summary>World bounding boxes overlap; no triangle test is performed.</summary>
     Conservative,
 }
 
@@ -40,7 +44,7 @@ public enum NwcClashRuleType
     IgnoreSameFile,
     /// <summary>Declared for compatibility; not evaluated by <see cref="NwcClashRule.ShouldIgnore"/>. Use selection set names instead.</summary>
     IgnoreSpecifiedSets,
-    /// <summary>Ignore a pair whose absolute result distance is below <see cref="NwcClashRule.Threshold"/>.</summary>
+    /// <summary>Ignore a pair whose absolute result distance is below <see cref="NwcClashRule.Threshold"/>. Meant for penetration tests (Hard, Conservative): Duplicates report distance 0 and Clearance a gap, so they are dropped too.</summary>
     IgnoreMinPenetration,
     /// <summary>Ignore a pair whose nodes both carry the configured property and value.</summary>
     IgnoreSpecifiedProperty,
@@ -331,7 +335,13 @@ public sealed class NwcClashTest
     public Guid TestGuid { get; set; } = Guid.NewGuid();
     public NwcClashTestType TestType { get; set; } = NwcClashTestType.Hard;
     public string Status { get; set; } = "active";
-    public double Tolerance { get; set; } = 0.001; // in meters (default: 1 mm)
+    /// <summary>
+    /// Test tolerance in document length units (default 0.001). For <see cref="NwcClashTestType.Hard"/>,
+    /// intersections whose penetration is below the tolerance are not reported. For
+    /// <see cref="NwcClashTestType.Clearance"/>, pairs whose shortest mesh distance is at or below the tolerance
+    /// are reported.
+    /// </summary>
+    public double Tolerance { get; set; } = 0.001; // document length units
     public NwcClashSelection SelectionA { get; set; } = NwcClashSelection.All();
     public NwcClashSelection SelectionB { get; set; } = NwcClashSelection.All();
     public List<NwcClashRule> Rules { get; } = [];

@@ -26,7 +26,7 @@ internal static class Program
                              Default for .nwf: <input-without-ext>.glb (or standard output if '-').
 
         Options:
-          --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
+          --nwc <file.nwc>   Save or convert to a .nwc file (NwcIO layout)
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
@@ -1123,7 +1123,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1422,7 +1422,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
