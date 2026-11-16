@@ -140,12 +140,14 @@ public static class MeshParser
 
                     if (vCount >= MinMeshVertices && vCount <= MaxPlausibleVertices)
                     {
-                        var mesh = TryBuildMesh(combined, curPos + 24, vCount, meshes.Count);
+                        var mesh = TryBuildMesh(combined, curPos + 24, vCount, r);
                         if (mesh is not null)
                         {
-                            if (transforms is not null && meshes.Count < transforms.Count)
+                            // Transforms follow record order, not the count of accepted meshes: a skipped
+                            // record must not shift the placement of the records after it.
+                            if (transforms is not null && r < transforms.Count)
                             {
-                                mesh.Transform = transforms[meshes.Count];
+                                mesh.Transform = transforms[r];
                             }
 
                             meshes.Add(mesh);

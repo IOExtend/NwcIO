@@ -69,6 +69,35 @@ public class MeshParserTests
         Assert.Empty(MeshParser.Parse(container));
     }
 
+    [Fact]
+    public void Parse_SkippedRecord_DoesNotShiftLaterIdsOrTransforms()
+    {
+        // Record 0 is malformed and rejected; records 1 and 2 are triangles.
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var chunk = skipped.Concat(triangle).Concat(triangle).ToArray();
+        var toc = Int32Bytes(3, 1, chunk.Length, skipped.Length, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var transforms = new[]
+        {
+            new NwcTransform { Id = 100, Translation = new Vector3d(100, 0, 0) },
+            new NwcTransform { Id = 101, Translation = new Vector3d(101, 0, 0) },
+            new NwcTransform { Id = 102, Translation = new Vector3d(102, 0, 0) },
+        };
+
+        var meshes = MeshParser.Parse(container, transforms);
+
+        Assert.Equal(2, meshes.Count);
+        Assert.Equal([1, 2], meshes.Select(m => m.Id));
+        Assert.Same(transforms[1], meshes[0].Transform);
+        Assert.Same(transforms[2], meshes[1].Transform);
+    }
+
     private static byte[] Int32Bytes(params int[] values)
     {
         var data = new byte[values.Length * 4];
