@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 using NwcIO.Internal.Container;
 using NwcIO.Model;
 
@@ -7,7 +8,7 @@ namespace NwcIO.Internal.Parsing;
 /// <summary>
 /// Extracts 3D polygon meshes from Navisworks geometry streams and TOC tables.
 /// </summary>
-public static class MeshParser
+internal static class MeshParser
 {
     internal const int MinMeshVertices = 3;
     internal const int MaxPlausibleVertices = 200_000;
@@ -16,33 +17,88 @@ public static class MeshParser
     /// <summary>
     /// Parses all 3D meshes found in the container streams.
     /// </summary>
-    public static IReadOnlyList<NwcMesh> Parse(NwcContainer container, IReadOnlyList<NwcTransform>? transforms = null)
+    /// <param name="maxVertices">Cap on one record's vertices; records above it are skipped. Defaults to <see cref="MaxPlausibleVertices"/>.</param>
+    /// <param name="transformIndices">Per-mesh indices into <paramref name="transforms"/> from the writer-side link stream; positional binding when null.</param>
+    public static IReadOnlyList<NwcMesh> Parse(
+        NwcContainer container,
+        IReadOnlyList<NwcTransform>? transforms = null,
+        int maxVertices = MaxPlausibleVertices,
+        IReadOnlyList<int>? transformIndices = null)
+        => Parse(container, transforms, maxVertices, transformIndices, out _);
+
+    /// <summary>
+    /// Parses all 3D meshes and reports how many geometry records were recognised but skipped
+    /// (vertex count out of range, record truncated or malformed).
+    /// </summary>
+    public static IReadOnlyList<NwcMesh> Parse(
+        NwcContainer container,
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices,
+        IReadOnlyList<int>? transformIndices,
+        out int skippedRecords)
     {
         ArgumentNullException.ThrowIfNull(container);
+        if (maxVertices < MinMeshVertices)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxVertices), maxVertices, $"The vertex cap is at least {MinMeshVertices}.");
+        }
 
         var meshes = new List<NwcMesh>();
+        int tocSkipped = 0;
+        int scanSkipped = 0;
 
         // 1. Primary path: parse via Table of Contents (TOC) stream and chunked geometry block.
         var tocStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (tocStream is not null)
         {
-            ParseViaToc(container, tocStream, meshes, transforms);
+            ParseViaToc(container, tocStream, meshes, transforms, maxVertices, transformIndices, ref tocSkipped);
         }
 
         // 2. Secondary fallback: if TOC yielded no meshes, scan individual streams for vertex buffers.
         if (meshes.Count == 0)
         {
-            ParseViaHeuristicScan(container, meshes, transforms);
+            ParseViaHeuristicScan(container, meshes, transforms, maxVertices, transformIndices, ref scanSkipped);
         }
 
+        // The fallback replaces the TOC attempt; take the larger count so neither path hides a skipped record.
+        skippedRecords = Math.Max(tocSkipped, scanSkipped);
         return meshes;
+    }
+
+    private static void AssignTransform(
+        NwcMesh mesh,
+        int index,
+        IReadOnlyList<NwcTransform>? transforms,
+        IReadOnlyList<int>? transformIndices)
+    {
+        if (transformIndices is not null)
+        {
+            if (index < transformIndices.Count)
+            {
+                int transformIndex = transformIndices[index];
+                if (transformIndex >= 0 && transforms is not null && transformIndex < transforms.Count)
+                {
+                    mesh.Transform = transforms[transformIndex];
+                }
+            }
+
+            return;
+        }
+
+        if (transforms is not null && index < transforms.Count)
+        {
+            mesh.Transform = transforms[index];
+        }
     }
 
     private static void ParseViaToc(
         NwcContainer container,
         LcRawStream tocStream,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices,
+        IReadOnlyList<int>? transformIndices,
+        ref int skippedRecords)
     {
         var tocData = tocStream.Data;
         if (tocData.Length < 16)
@@ -106,6 +162,7 @@ public static class MeshParser
         }
 
         int curPos = 0;
+        var usedIds = new HashSet<int>();
         for (int r = 0; r < recordCount; r++)
         {
             int rLen = recordLengths[r];
@@ -138,18 +195,28 @@ public static class MeshParser
                         vCount = p1;
                     }
 
-                    if (vCount >= MinMeshVertices && vCount <= MaxPlausibleVertices)
+                    bool lines = recTag == 95 || vCount == 2;
+                    int minVertices = lines ? 2 : MinMeshVertices;
+                    if (vCount >= minVertices && vCount <= maxVertices)
                     {
-                        var mesh = TryBuildMesh(combined, curPos + 24, vCount, meshes.Count);
+                        int recId = BinaryPrimitives.ReadInt32LittleEndian(combined.AsSpan(curPos));
+                        // Ids and transforms follow record order, not the count of accepted meshes: a skipped
+                        // record must not shift the placement of the records after it.
+                        var mesh = TryBuildMesh(combined, curPos, curPos + 24, vCount, recId, rLen, r, lines, usedIds);
                         if (mesh is not null)
                         {
-                            if (transforms is not null && meshes.Count < transforms.Count)
-                            {
-                                mesh.Transform = transforms[meshes.Count];
-                            }
+                            AssignTransform(mesh, r, transforms, transformIndices);
 
                             meshes.Add(mesh);
                         }
+                        else
+                        {
+                            skippedRecords++;
+                        }
+                    }
+                    else
+                    {
+                        skippedRecords++;
                     }
                 }
             }
@@ -161,7 +228,10 @@ public static class MeshParser
     private static void ParseViaHeuristicScan(
         NwcContainer container,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices,
+        IReadOnlyList<int>? transformIndices,
+        ref int skippedRecords)
     {
         foreach (var stream in container.Streams)
         {
@@ -180,34 +250,53 @@ public static class MeshParser
                 }
 
                 int vCount = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(i + 8));
-                if (vCount < MinMeshVertices || vCount > MaxPlausibleVertices)
+                bool lines = vCount == 2;
+                int minVertices = lines ? 2 : MinMeshVertices;
+                if (vCount < minVertices || vCount > maxVertices)
                 {
+                    skippedRecords++;
                     continue;
                 }
 
-                int vBytes = vCount * 12;
-                if (i + 16 + vBytes > data.Length)
+                // vCount can reach int.MaxValue through MaxMeshVertices: compare without multiplying.
+                if (vCount > (data.Length - (i + 16)) / 12)
                 {
+                    skippedRecords++;
                     continue;
                 }
 
-                var mesh = TryBuildMesh(data, i + 16, vCount, meshes.Count);
+                var mesh = TryBuildMesh(data, i, i + 16, vCount, 0, 0, meshes.Count, lines);
                 if (mesh is not null)
                 {
-                    if (transforms is not null && meshes.Count < transforms.Count)
-                    {
-                        mesh.Transform = transforms[meshes.Count];
-                    }
+                    AssignTransform(mesh, meshes.Count, transforms, transformIndices);
 
                     meshes.Add(mesh);
-                    i += 12 + vBytes;
+                    i += 12 + vCount * 12;
+                }
+                else
+                {
+                    skippedRecords++;
                 }
             }
         }
     }
 
-    private static NwcMesh? TryBuildMesh(byte[] buffer, int vertexOffset, int vertexCount, int meshId)
+    private static NwcMesh? TryBuildMesh(
+        byte[] buffer,
+        int recordOffset,
+        int vertexOffset,
+        int vertexCount,
+        int storedId,
+        int recordLength,
+        int meshId,
+        bool lines,
+        HashSet<int>? usedIds = null)
     {
+        if (vertexOffset < 0 || vertexCount > (buffer.Length - vertexOffset) / 12)
+        {
+            return null;
+        }
+
         var vertices = new Vector3d[vertexCount];
         double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
         double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
@@ -237,14 +326,136 @@ public static class MeshParser
             if (z > maxZ) maxZ = z;
         }
 
+        int id = meshId;
+        string name = $"Mesh_{meshId}";
+        IReadOnlyList<int> indices = lines ? [] : BuildStripIndices(vertexCount);
+
+        // The writer's own records append the exact triangle indices and the mesh name after the positions.
+        // Real Navisworks records have no such trailer, so anything that does not validate keeps the strip.
+        if (!lines && recordLength > 0 &&
+            TryReadMeshTrailer(buffer, recordOffset, recordLength, vertexCount, storedId, out var trailerId, out var trailerIndices, out var trailerName))
+        {
+            id = trailerId;
+            name = SanitizeMeshName(trailerName, id);
+            indices = trailerIndices;
+        }
+
+        // A merged document can repeat ids. Keep the first occurrence exact and give later duplicates a
+        // unique fallback, so clash detection and IFC export do not silently pair unrelated meshes.
+        if (usedIds is not null && !usedIds.Add(id))
+        {
+            id = meshId;
+            while (!usedIds.Add(id))
+            {
+                id++;
+            }
+        }
+
         return new NwcMesh
         {
-            Id = meshId,
-            Name = $"Mesh_{meshId}",
+            Id = id,
+            Name = name,
             Vertices = vertices,
-            Indices = BuildStripIndices(vertexCount),
+            Indices = indices,
+            LineIndices = lines ? BuildLineIndices(vertexCount) : [],
             BoundingBox = new BoundingBox3d(new Vector3d(minX, minY, minZ), new Vector3d(maxX, maxY, maxZ)),
         };
+    }
+
+    private static bool TryReadMeshTrailer(
+        byte[] buffer,
+        int recordOffset,
+        int recordLength,
+        int vertexCount,
+        int storedId,
+        out int id,
+        out IReadOnlyList<int> indices,
+        out string? name)
+    {
+        id = storedId;
+        indices = [];
+        name = null;
+
+        int baseLength = 24 + vertexCount * 12;
+        long trailerOffset = (long)recordOffset + baseLength;
+        long recordEnd = (long)recordOffset + recordLength;
+        // magic, index count, mesh id and name length are all required before the optional indices.
+        if (recordLength < baseLength + 16 || trailerOffset + 16 > buffer.Length || recordEnd > buffer.Length)
+        {
+            return false;
+        }
+
+        if (BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)trailerOffset)) != NwcStreamSerializer.MeshTrailerMagic)
+        {
+            return false;
+        }
+
+        int indexCount = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)trailerOffset + 4));
+        if (indexCount < 0 || indexCount % 3 != 0)
+        {
+            return false;
+        }
+
+        long indicesEnd = trailerOffset + 8 + 4L * indexCount;
+        if (indicesEnd + 8 > recordEnd)
+        {
+            return false;
+        }
+
+        var parsedIndices = new int[indexCount];
+        for (int i = 0; i < indexCount; i++)
+        {
+            int index = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)trailerOffset + 8 + 4 * i));
+            if (index < 0 || index >= vertexCount)
+            {
+                return false;
+            }
+
+            parsedIndices[i] = index;
+        }
+
+        int trailerId = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)indicesEnd));
+        long nameLengthAt = indicesEnd + 4;
+        int nameLength = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)nameLengthAt));
+        long nameEnd = nameLengthAt + 4 + nameLength;
+        if (nameLength < 0 || nameEnd > recordEnd)
+        {
+            return false;
+        }
+
+        id = trailerId;
+        indices = parsedIndices;
+        name = nameLength == 0 ? null : Encoding.UTF8.GetString(buffer, (int)nameLengthAt + 4, nameLength);
+        return true;
+    }
+
+    private static string SanitizeMeshName(string? name, int id)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return $"Mesh_{id}";
+        }
+
+        var characters = name.Where(c => !(char.IsControl(c) || c is '\u2028' or '\u2029')).ToArray();
+        string trimmed = new string(characters).Trim();
+        return trimmed.Length == 0 ? $"Mesh_{id}" : trimmed;
+    }
+
+    /// <summary>
+    /// Consecutive segment pairs over the vertices: (0,1), (1,2), ... — one open polyline. The lenient path does not read the polyline lengths,
+    /// so a record that holds several polylines gets a segment between each pair of neighbours.
+    /// </summary>
+    internal static int[] BuildLineIndices(int vertexCount)
+    {
+        var indices = new int[Math.Max(0, (vertexCount - 1) * 2)];
+        int idx = 0;
+        for (int i = 0; i < vertexCount - 1; i++)
+        {
+            indices[idx++] = i;
+            indices[idx++] = i + 1;
+        }
+
+        return indices;
     }
 
     /// <summary>

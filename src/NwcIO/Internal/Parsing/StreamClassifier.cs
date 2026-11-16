@@ -8,7 +8,7 @@ namespace NwcIO.Internal.Parsing;
 /// Classification is best-effort: unrecognized streams stay <see cref="NwcStreamKind.Unknown"/>
 /// rather than being guessed into a wrong category.
 /// </summary>
-public static class StreamClassifier
+internal static class StreamClassifier
 {
     public static void ClassifyAll(IReadOnlyList<LcRawStream> streams)
     {
@@ -48,15 +48,28 @@ public static class StreamClassifier
             return NwcStreamKind.PartitionHeader;
         }
 
-        // Scene tree / property records: starts with [100][86] or contains LcRevit signatures.
+        // Scene tree / property records: starts with [100][86] or contains a node class signature.
+        // Revit exports write LcRevit*; other loaders write LcOa* object classes.
         if ((ReadInt32(data, 0) == 100 && ReadInt32(data, 4) == 86) ||
-            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcRevit"))
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcRevit") ||
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcOaNode") ||
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcOaGroup") ||
+            ContainsAscii(data, 0, Math.Min(data.Length, 256), "LcOaScene"))
         {
             return NwcStreamKind.SceneTree;
         }
 
-        // Transforms: [n][100][13].
-        if (data.Length >= 12 && ReadInt32(data, 4) == 100 && ReadInt32(data, 8) == 13)
+        // Writer-side per-mesh transform links: [magic "NWTL"][count][indices]. A link stream with
+        // exactly 100 meshes whose first index is 13 also matches the legacy [n][100][13] layout,
+        // so the explicit magic must win.
+        if (data.Length >= 8 && ReadInt32(data, 0) == TransformStreamFormat.LinksMagic)
+        {
+            return NwcStreamKind.TransformLinks;
+        }
+
+        // Transforms: writer marker "NWTR", or the Navisworks layout [n][100][13].
+        if ((data.Length >= 4 && ReadInt32(data, 0) == TransformStreamFormat.TransformsMagic) ||
+            (data.Length >= 12 && ReadInt32(data, 4) == 100 && ReadInt32(data, 8) == 13))
         {
             return NwcStreamKind.Transforms;
         }
@@ -157,7 +170,7 @@ public static class StreamClassifier
         int limit = Math.Min(data.Length - 96, 512);
         for (int i = 0; i <= limit; i += 4)
         {
-            if (ReadInt32(data, i) == 517 && ReadInt32(data, i + 4) == 1)
+            if (ReadInt32(data, i) == 517 && ReadInt32(data, i + 4) is 0 or 1)
             {
                 // Check if quaternion at i + 36 is approximately normalized
                 double qx = BinaryPrimitives.ReadDoubleLittleEndian(data.AsSpan(i + 36));

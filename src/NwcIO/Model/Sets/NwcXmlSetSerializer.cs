@@ -4,8 +4,10 @@ using System.Xml.Linq;
 namespace NwcIO.Model.Sets;
 
 /// <summary>
-/// Serializes and deserializes Navisworks Selection Sets and Search Sets to/from standard Navisworks XML (.xml) format.
-/// Fully compatible with Autodesk Navisworks Manage, Simulate, and Freedom "Import/Export Selection Sets".
+/// Serializes and deserializes Navisworks Selection Sets and Search Sets to/from the Navisworks
+/// "Import/Export Selection Sets" XML exchange structure. Condition <c>test</c>, <c>flags</c>, internal names
+/// and value data types are preserved; compatibility with every attribute Navisworks writes has not been
+/// verified against a Navisworks-produced export.
 /// </summary>
 public static class NwcXmlSetSerializer
 {
@@ -121,11 +123,16 @@ public static class NwcXmlSetSerializer
             {
                 string testOp = NwcSearchOperatorFormat.Format(c.Operator);
 
-                var condElem = new XElement("condition",
-                    new XAttribute("test", testOp),
-                    new XElement("category", new XElement("name", c.Category)),
-                    new XElement("property", new XElement("name", c.Property)),
-                    new XElement("value", new XElement("data", new XAttribute("type", "wstring"), c.Value)));
+                var condElem = new XElement("condition", new XAttribute("test", testOp));
+                if (!string.IsNullOrEmpty(c.Flags))
+                {
+                    condElem.Add(new XAttribute("flags", c.Flags));
+                }
+
+                condElem.Add(new XElement("category", NameElement(c.Category, c.InternalCategory)));
+                condElem.Add(new XElement("property", NameElement(c.Property, c.InternalProperty)));
+                condElem.Add(new XElement("value",
+                    new XElement("data", new XAttribute("type", string.IsNullOrEmpty(c.ValueType) ? "wstring" : c.ValueType), c.Value)));
 
                 conditions.Add(condElem);
             }
@@ -164,6 +171,17 @@ public static class NwcXmlSetSerializer
         }
 
         return new XElement("selectionset", new XAttribute("name", item.Name));
+    }
+
+    private static XElement NameElement(string name, string? internalName)
+    {
+        var element = new XElement("name", name);
+        if (!string.IsNullOrEmpty(internalName))
+        {
+            element.Add(new XAttribute("internal", internalName));
+        }
+
+        return element;
     }
 
     private static NwcSetItem? DeserializeItem(XElement elem)
@@ -216,13 +234,22 @@ public static class NwcXmlSetSerializer
                 {
                     foreach (var cElem in conditionsElem.Elements("condition"))
                     {
-                        string category = cElem.Element("category")?.Element("name")?.Value ?? "Item";
-                        string property = cElem.Element("property")?.Element("name")?.Value ?? "Name";
-                        string val = cElem.Element("value")?.Element("data")?.Value ?? string.Empty;
+                        var categoryElem = cElem.Element("category")?.Element("name");
+                        var propertyElem = cElem.Element("property")?.Element("name");
+                        string category = categoryElem?.Value ?? "Item";
+                        string property = propertyElem?.Value ?? "Name";
+                        var valueElem = cElem.Element("value")?.Element("data");
+                        string val = valueElem?.Value ?? string.Empty;
 
                         var op = NwcSearchOperatorFormat.Parse(cElem.Attribute("test")?.Value);
 
-                        searchSet.Conditions.Add(new NwcSearchCondition(category, property, op, val));
+                        searchSet.Conditions.Add(new NwcSearchCondition(category, property, op, val)
+                        {
+                            Flags = cElem.Attribute("flags")?.Value,
+                            InternalCategory = categoryElem?.Attribute("internal")?.Value,
+                            InternalProperty = propertyElem?.Attribute("internal")?.Value,
+                            ValueType = valueElem?.Attribute("type")?.Value ?? "wstring",
+                        });
                     }
                 }
 

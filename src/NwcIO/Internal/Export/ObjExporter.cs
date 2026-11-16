@@ -7,7 +7,7 @@ namespace NwcIO.Internal.Export;
 /// Streams 3D meshes to Wavefront OBJ format (.obj), compatible with Blender, 3ds Max,
 /// MeshLab, Windows 3D Viewer, and standard CAD/BIM visualizers.
 /// </summary>
-public static class ObjExporter
+internal static class ObjExporter
 {
     /// <summary>
     /// Writes meshes to a file in Wavefront OBJ format.
@@ -16,14 +16,15 @@ public static class ObjExporter
         IReadOnlyList<NwcMesh> meshes,
         string path,
         bool worldCoordinates = true,
-        string? sourceDocument = null)
+        string? sourceDocument = null,
+        Func<NwcMesh, string?>? objectNamePrefix = null)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(path);
 
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
-        Write(meshes, writer, worldCoordinates, sourceDocument);
+        Write(meshes, writer, worldCoordinates, sourceDocument, objectNamePrefix);
     }
 
     /// <summary>
@@ -33,7 +34,8 @@ public static class ObjExporter
         IReadOnlyList<NwcMesh> meshes,
         TextWriter writer,
         bool worldCoordinates = true,
-        string? sourceDocument = null)
+        string? sourceDocument = null,
+        Func<NwcMesh, string?>? objectNamePrefix = null)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(writer);
@@ -41,7 +43,7 @@ public static class ObjExporter
         writer.WriteLine("# Wavefront OBJ exported by NwcIO");
         if (!string.IsNullOrEmpty(sourceDocument))
         {
-            writer.WriteLine(FormattableString.Invariant($"# Source: {sourceDocument}"));
+            writer.WriteLine(FormattableString.Invariant($"# Source: {SanitizeObjLine(sourceDocument)}"));
         }
 
         writer.WriteLine(FormattableString.Invariant($"# Meshes: {meshes.Count}"));
@@ -59,7 +61,18 @@ public static class ObjExporter
                 continue;
             }
 
-            string objectName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+            string objectName = string.IsNullOrEmpty(mesh.Name) ? string.Empty : SanitizeObjLine(mesh.Name);
+            if (objectName.Length == 0)
+            {
+                objectName = $"Mesh_{mesh.Id}";
+            }
+
+            string? prefix = objectNamePrefix?.Invoke(mesh);
+            if (!string.IsNullOrEmpty(prefix))
+            {
+                objectName = $"{SanitizeObjLine(prefix)}/{objectName}";
+            }
+
             writer.WriteLine(FormattableString.Invariant($"o {objectName}"));
 
             // Vertex positions
@@ -96,5 +109,12 @@ public static class ObjExporter
             baseVertexIndex += vertices.Count;
             writer.WriteLine();
         }
+    }
+
+    /// <summary>OBJ directives are line based; never let a name from the file inject its own line.</summary>
+    private static string SanitizeObjLine(string value)
+    {
+        var characters = value.Select(c => char.IsControl(c) || c is '\u2028' or '\u2029' ? '_' : c).ToArray();
+        return new string(characters).Trim();
     }
 }

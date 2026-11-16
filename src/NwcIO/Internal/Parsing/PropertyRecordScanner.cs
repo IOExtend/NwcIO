@@ -24,7 +24,7 @@ namespace NwcIO.Internal.Parsing;
 ///     - 13: Point2D (16 bytes)
 /// The scanner searches forward resiliently for tags 52/53 across the decompressed chunk.
 /// </remarks>
-public sealed class PropertyRecordScanner
+internal sealed class PropertyRecordScanner
 {
     private readonly byte[] _data;
     private int _pos;
@@ -36,12 +36,16 @@ public sealed class PropertyRecordScanner
 
     public string? FailureReason { get; private set; }
 
+    /// <summary>Byte offset of the first malformed probe; null when no probe failed.</summary>
+    public int? FailureOffset { get; private set; }
+
     public List<NwcPropertyRecord> Scan()
     {
         var records = new List<NwcPropertyRecord>();
         _pos = 0;
         StoppedAt = 0;
         FailureReason = null;
+        FailureOffset = null;
 
         while (_pos + 8 <= _data.Length)
         {
@@ -53,6 +57,13 @@ public sealed class PropertyRecordScanner
                 int pNext = _pos + 8;
                 if (TryReadLengthPrefixedString(ref pNext, out var nodeName) && !string.IsNullOrEmpty(nodeName))
                 {
+                    int? parentId = null;
+                    if (pNext + 8 <= _data.Length && ReadInt32At(pNext) == -2)
+                    {
+                        parentId = ReadInt32At(pNext + 4);
+                        pNext += 8;
+                    }
+
                     records.Add(new NwcPropertyRecord
                     {
                         FirstInt = recId,
@@ -61,6 +72,7 @@ public sealed class PropertyRecordScanner
                         Class = "Node",
                         ValueType = 0,
                         Value = null,
+                        ParentId = parentId,
                     });
                     _pos = pNext;
                     continue;
@@ -76,6 +88,11 @@ public sealed class PropertyRecordScanner
                 {
                     int valueType = 0;
                     string? value = null;
+                    long? intValue = null;
+                    double? doubleValue = null;
+                    int? referenceId = null;
+                    int? referenceTag = null;
+                    string? referenceClass = null;
 
                     if (pNext + 4 <= _data.Length)
                     {
@@ -96,7 +113,8 @@ public sealed class PropertyRecordScanner
                             case 3: // int32 / bool / counter
                                 if (pNext + 4 <= _data.Length)
                                 {
-                                    value = ReadInt32At(pNext).ToString(CultureInfo.InvariantCulture);
+                                    intValue = ReadInt32At(pNext);
+                                    value = intValue.Value.ToString(CultureInfo.InvariantCulture);
                                     pNext += 4;
                                 }
                                 break;
@@ -107,8 +125,8 @@ public sealed class PropertyRecordScanner
                             case 11: // double / double length / angle / area / volume
                                 if (pNext + 8 <= _data.Length)
                                 {
-                                    value = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext))
-                                        .ToString(CultureInfo.InvariantCulture);
+                                    doubleValue = BinaryPrimitives.ReadDoubleLittleEndian(_data.AsSpan(pNext));
+                                    value = doubleValue.Value.ToString(CultureInfo.InvariantCulture);
                                     pNext += 8;
                                 }
                                 break;
@@ -116,6 +134,7 @@ public sealed class PropertyRecordScanner
                                 if (pNext + 8 <= _data.Length)
                                 {
                                     long unixSec = BinaryPrimitives.ReadInt64LittleEndian(_data.AsSpan(pNext));
+                                    intValue = unixSec;
                                     value = HierarchyParser.FormatUnixSeconds(unixSec);
                                     pNext += 8;
                                 }
@@ -123,11 +142,16 @@ public sealed class PropertyRecordScanner
                             case 8: // reference element / NamedConstant: [refId][refTag][refName][refClass]
                                 if (pNext + 8 <= _data.Length)
                                 {
+                                    int refId = ReadInt32At(pNext);
+                                    int refTag = ReadInt32At(pNext + 4);
                                     pNext += 8;
                                     if (TryReadLengthPrefixedString(ref pNext, out var refName))
                                     {
-                                        TryReadLengthPrefixedString(ref pNext, out _);
+                                        TryReadLengthPrefixedString(ref pNext, out var refClass);
                                         value = refName;
+                                        referenceId = refId;
+                                        referenceTag = refTag;
+                                        referenceClass = refClass;
                                     }
                                 }
                                 break;
@@ -161,6 +185,11 @@ public sealed class PropertyRecordScanner
                         Class = className,
                         ValueType = valueType,
                         Value = value,
+                        IntValue = intValue,
+                        DoubleValue = doubleValue,
+                        ReferenceId = referenceId,
+                        ReferenceTag = referenceTag,
+                        ReferenceClass = referenceClass,
                     });
                     _pos = pNext;
                     continue;
@@ -182,12 +211,24 @@ public sealed class PropertyRecordScanner
         value = null;
         if (pos + 4 > _data.Length)
         {
+            FailureReason ??= $"A length-prefixed string at byte {pos} runs past the end of the stream.";
+            FailureOffset ??= pos;
             return false;
         }
 
         int len = ReadInt32At(pos);
-        if (len is < 0 or > 65536 || pos + 4 + len > _data.Length)
+        if (len == -1)
         {
+            // The format uses -1 for a null string; it is valid in both strict and lenient readers.
+            value = null;
+            pos += 4;
+            return true;
+        }
+
+        if (len < 0 || len > 65536 || pos + 4 + len > _data.Length)
+        {
+            FailureReason ??= $"A length-prefixed string at byte {pos} has invalid length {len}.";
+            FailureOffset ??= pos;
             return false;
         }
 

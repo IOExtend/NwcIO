@@ -12,11 +12,12 @@ internal static class RevitSample
     public static readonly Guid G4 = Guid.Parse("a0b1c2d3-e4f5-4a6b-9c7d-8e9fa0b1c2d3");
 
     public static byte[] Build(string loader = "LcNwcLoaderPlugin:lcldrevit", int doorCategoryId = -2000023, int lineCategoryId = -2000051,
-        IReadOnlyList<(string Name, byte[] Data)>? extraStreams = null)
+        IReadOnlyList<(string Name, byte[] Data)>? extraStreams = null,
+        object? levelElevation = null, int levelElevationType = 6, string levelElevationName = "lcldrevit_parameter_-1007102")
     {
         var level = new Tab(null, "Level", "LcRevitData_Parameter",
             new Prop("Name", "LcRevitPropertyElementName", 4, "Level 1"), new Prop("Category Id", "LcRevitPropertyElementCategoryId", 2, -2000240),
-            new Prop("Id", "LcRevitPropertyElementId", 2, 311), new Prop("Elevation", "lcldrevit_parameter_-1007102", 6, 3000 / 304.8));
+            new Prop("Id", "LcRevitPropertyElementId", 2, 311), new Prop("Elevation", levelElevationName, levelElevationType, levelElevation ?? 3000 / 304.8));
         var type = new Tab(null, "Type", "LcRevitData_Type",
             new Prop("Name", "LcRevitPropertyElementName", 4, "Generic 200"), new Prop("Width", "lcldrevit_parameter_-1000010", 6, 200 / 304.8));
         var wallA = new Tab(null, "Element", "LcRevitData_Element",

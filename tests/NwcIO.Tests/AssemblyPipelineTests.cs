@@ -7,36 +7,72 @@ namespace NwcIO.Tests;
 public sealed class AssemblyPipelineTests
 {
     [Fact]
-    public void FolderAndNwf_UseTheSameReportPipeline()
+    public void Folder_ReportsFolderLabelsAndWritesDefaultOutput()
     {
-        string directory = Path.Combine(Path.GetTempPath(), "nwcio-pipeline-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        try
-        {
-            string model = Path.Combine(directory, "a.nwc");
-            NwcDocument.Create().Save(model);
+        using var dir = new TempDir();
+        NwcDocument.Create().Save(Path.Combine(dir.Path, "a.nwc"));
 
-            var folder = Run([directory, Path.Combine(directory, "folder.json"), "--report", "--bvh-stats"]);
-            Assert.Equal(0, folder.ExitCode);
-            Assert.Contains("=== NwcIO Assembly Report ===", folder.StdErr);
-            Assert.Contains("Assembly:", folder.StdErr);
-            Assert.Contains("Total Materials:", folder.StdErr);
-            Assert.Contains("BVH Nodes:", folder.StdErr);
+        var report = Run([dir.Path, Path.Combine(dir.Path, "folder.json"), "--report", "--bvh-stats"]);
+        Assert.Equal(0, report.ExitCode);
+        Assert.Contains("=== NwcIO Assembly Report ===", report.StdErr);
+        Assert.DoesNotContain("NWF", report.StdErr);
+        Assert.Contains("Models:           1", report.StdErr);
+        Assert.Contains("Total Materials:", report.StdErr);
+        Assert.Contains("BVH Nodes:", report.StdErr);
 
-            string nwf = Path.Combine(directory, "fed.nwf");
-            WriteNwfWithXRefs(nwf, model);
+        var summary = Run([dir.Path]);
+        Assert.Equal(0, summary.ExitCode);
+        Assert.StartsWith("Assembly '", summary.StdOut);
+        string expected = Path.Combine(dir.Path, Path.GetFileName(dir.Path) + "_assembly.glb");
+        Assert.Contains($"exported to '{expected}'", summary.StdOut);
+        Assert.True(File.Exists(expected));
+    }
 
-            var nwfRun = Run([nwf, Path.Combine(directory, "nwf.json"), "--report", "--bvh-stats"]);
-            Assert.Equal(0, nwfRun.ExitCode);
-            Assert.Contains("=== NwcIO NWF Assembly Report ===", nwfRun.StdErr);
-            Assert.Contains("Loaded Models:", nwfRun.StdErr);
-            Assert.Contains("Total Materials:", nwfRun.StdErr);
-            Assert.Contains("BVH Nodes:", nwfRun.StdErr);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+    [Fact]
+    public void Nwf_ReportsNwfLabelsResolvesComponentsAndWritesDefaultOutput()
+    {
+        using var dir = new TempDir();
+        string model = Path.Combine(dir.Path, "a.nwc");
+        NwcDocument.Create().Save(model);
+        string nwf = Path.Combine(dir.Path, "fed.nwf");
+        WriteNwfWithXRefs(nwf, model);
+
+        var report = Run([nwf, Path.Combine(dir.Path, "nwf.json"), "--report", "--bvh-stats"]);
+        Assert.Equal(0, report.ExitCode);
+        Assert.Contains("=== NwcIO NWF Assembly Report ===", report.StdErr);
+        Assert.Contains("Loaded Models:    2 (component files: 1)", report.StdErr);
+        Assert.DoesNotContain("Warning: unresolved reference", report.StdErr);
+        Assert.Contains("BVH Nodes:", report.StdErr);
+
+        var summary = Run([nwf]);
+        Assert.Equal(0, summary.ExitCode);
+        Assert.StartsWith("NWF Assembly '", summary.StdOut);
+        string expected = Path.ChangeExtension(nwf, ".glb");
+        Assert.Contains($"exported to '{expected}'", summary.StdOut);
+        Assert.True(File.Exists(expected));
+    }
+
+    [Fact]
+    public void Nwf_WithMissingComponent_WarnsInReport()
+    {
+        using var dir = new TempDir();
+        string missing = Path.Combine(dir.Path, "gone.nwc");
+        string nwf = Path.Combine(dir.Path, "fed.nwf");
+        WriteNwfWithXRefs(nwf, missing);
+
+        var report = Run([nwf, Path.Combine(dir.Path, "nwf.json"), "--report"]);
+        Assert.Equal(0, report.ExitCode);
+        Assert.Contains("Loaded Models:    1 (component files: 0)", report.StdErr);
+        Assert.Contains("Warning: unresolved reference, component model missing: '" + missing.Replace('\\', '/') + "'", report.StdErr);
+    }
+
+    private sealed class TempDir : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "nwcio-pipeline-" + Guid.NewGuid().ToString("N"));
+
+        public TempDir() => Directory.CreateDirectory(Path);
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
     }
 
     private static (int ExitCode, string StdOut, string StdErr) Run(params string[] args)

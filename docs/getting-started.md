@@ -39,9 +39,10 @@ dotnet tool install --global NwcIO.Cli
 ```csharp
 using NwcIO;
 
-// Open a .nwc file directly from disk. A .nwd whose scene tree holds partition nodes, and a linked
-// Revit model (a tree that places one element under two parents), need
-// new NwcReaderOptions { BuildSceneTree = false }, because such trees are not decoded yet.
+// Open a .nwc file directly from disk. A .nwd whose scene tree holds partition nodes needs
+// new NwcReaderOptions { BuildSceneTree = false }, because those nodes are not decoded yet.
+// A linked Revit model (a tree that places one element under two parents) is kept and
+// converted into separate scene models.
 var doc = NwcDocument.Open("model.nwc");
 
 Console.WriteLine($"Source: {doc.FileInfo?.SourcePath}");
@@ -96,10 +97,10 @@ matrix.AddDiscipline("Structure", "STRUCT");
 matrix.AddDiscipline("MEP", "MEP");
 matrix.PopulateStandardMatrix(defaultTolerance: 0.002);
 
-// Configure tolerance per cell (in meters); PopulateStandardMatrix fills cells in
-// discipline order: [0]=Architecture–Structure, [1]=Architecture–MEP, [2]=Structure–MEP
-matrix.Cells.Single(c => c.DisciplineA == "Architecture" && c.DisciplineB == "Structure").Tolerance = 0.005; // 5mm
-matrix.Cells.Single(c => c.DisciplineA == "Structure" && c.DisciplineB == "MEP").Tolerance = 0.010;          // 10mm
+// Configure tolerance per cell in document units; PopulateStandardMatrix fills cells in
+// discipline order: [0]=Architecture-Structure, [1]=Architecture-MEP, [2]=Structure-MEP
+matrix.Cells.Single(c => c.DisciplineA == "Architecture" && c.DisciplineB == "Structure").Tolerance = 0.005; // 5 document units
+matrix.Cells.Single(c => c.DisciplineA == "Structure" && c.DisciplineB == "MEP").Tolerance = 0.010;          // 10 document units
 
 // Execute the entire coordination matrix
 matrix.Execute(assembly);
@@ -129,6 +130,8 @@ doc.SaveHtmlViewer("interactive_site.html", new NwcHtmlViewerOptions
     IncludeSelectionSets = true
 });
 ```
+
+`NwcHtmlViewerOptions.MaxMeshVertices` (default 500,000) bounds the geometry written to the viewer. Geometry is stored as base64-encoded `Float32` positions and 16-bit indices, so the file stays compact and meshes above 65,535 vertices are split into safe chunks. Meshes that would exceed the remaining vertex budget are skipped instead of silently truncating the model: the HUD shows `Showing N of M meshes`, `NwcHtmlViewerExporter.SaveWithResult` returns the exported and skipped counts, and the CLI prints a warning to stderr. Set the budget to `0` to export a viewer without geometry.
 
 ---
 

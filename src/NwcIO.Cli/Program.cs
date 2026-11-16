@@ -5,13 +5,14 @@ using NwcIO;
 using NwcIO.Internal.Json;
 using NwcIO.Model;
 using NwcIO.Model.Spatial;
+using NwcIO.Model.Viewer;
 
 namespace NwcIO.Cli;
 
 internal static class Program
 {
     private const string UsageText = """
-        Usage: nwcio <input.nwc|input.nwd|input.nwf|input_dir> [output.json|output.obj|output.glb|output.ifc|output.bcfzip|output.html|output.nwc] [options]
+        Usage: nwcio <input.nwc|input.nwd|input.nwf|input.nwf.xml|input_dir> [output.json|output.obj|output.glb|output.ifc|output.bcfzip|output.html|output.nwc] [options]
                nwcio --help | --version
 
         Reads Autodesk Navisworks files (.nwc, .nwd, .nwf) or assemblies of models
@@ -19,14 +20,20 @@ internal static class Program
         (IFC/GLB/OBJ/JSON/BCF/HTML/NWC) with BVH spatial acceleration, without requiring Navisworks.
 
         Arguments:
-          <input>            Path to .nwc, .nwd, .nwf file or a folder of .nwc models.
+          <input>            Path to .nwc, .nwd, .nwf file, .nwf.xml manifest or a folder of .nwc models.
           [output]           Destination path for exported file (.json, .obj, .glb, .ifc, .bcfzip, .html, or .nwc).
                              Default for file: <input-without-ext>.json (or standard output if '-').
                              Default for folder: <dir>/<dirname>_assembly.glb (or standard output if '-').
-                             Default for .nwf: <input-without-ext>.glb (or standard output if '-').
+                             Default for .nwf and .nwf.xml: <input-without-ext>.glb (or standard output if '-').
 
         Options:
-          --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
+          --nwc <file.nwc>   Save or convert to a .nwc file (NwcIO layout)
+          --scene <file.json> Export an IOScene scene document (.json)
+          --scene-length-unit <unit> Scene length unit: ft, m, cm or mm
+          -i, --input <path> Add an input model; repeat to build a federation
+          -o, --output <path> Explicit output path (required with multiple -i inputs)
+          --recursive        Search subfolders for folder input
+          --pattern <globs>  Semicolon-separated folder patterns (default: *.nwc)
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
@@ -42,12 +49,12 @@ internal static class Program
           --clash-matrix-md <file.md> Export clash matrix coordination report as Markdown table
           --clash-matrix-bcf <file.bcfzip> Export clash matrix conflicts to buildingSMART BCF 2.1 zip
           --clash-group <mode> Group clashes: proximity, element, grid, layer
-          --clash-radius <m>   Cluster radius in meters for proximity grouping (default: 1.0)
-          --clash-tolerance <m> Set clash detection tolerance in meters (default: 0.001)
+          --clash-radius <units> Cluster radius in document units for proximity grouping (default: 1.0)
+          --clash-tolerance <units> Clash detection tolerance in document units (default: 0.001)
           --diff <baseline.nwc> Compare model against baseline revision
           --diff-json <file.json> Export revision comparison report to JSON
           --diff-bcf <file.bcfzip> Export revision comparison to buildingSMART BCF 2.1 zip
-          --diff-tolerance <m> Geometric displacement tolerance for diff (default: 0.005m)
+          --diff-tolerance <units> Geometric displacement tolerance for diff in document units (default: 0.005)
           --grids <file.xml>   Load spatial grid system from XML (.xml)
           --export-grids <file.xml> Export extracted or loaded grid system to XML (.xml)
           --nwf-xml <file.xml> Export Navisworks federated coordination manifest (.nwf.xml)
@@ -67,7 +74,7 @@ internal static class Program
           --no-materials     Disable material and surface color extraction
           --catalog          Include raw container stream catalog (offsets, sizes, kinds)
           --no-transforms    Exclude 3D transform matrices from JSON export
-          --no-tree          Skip reading the scene tree and exclude it from JSON export (required to open a .nwd with partition nodes or a linked Revit model)
+          --no-tree          Skip reading the scene tree and exclude it from JSON export (required to open a .nwd with partition nodes)
           --no-indent        Write compact JSON instead of pretty-printed indented JSON
           --bvh-stats        Include Bounding Volume Hierarchy (BVH) spatial index statistics
           --raycast <coords> Perform 3D raycast test: "originX,originY,originZ,dirX,dirY,dirZ"
@@ -76,6 +83,13 @@ internal static class Program
           -h, --help         Show this help message and exit
           -v, --version      Show version information and exit
 
+        Input-type scope:
+          --nwf-xml and --clashes require an assembly input: folder, .nwf, .nwf.xml or
+          several -i inputs.
+          --sets-xml, --timeliner-csv, --grids and --export-grids require a
+          single .nwc/.nwd input.
+          --recursive and --pattern require folder input.
+
         Exit codes:
           0  Success
           1  Usage error (missing or invalid arguments)
@@ -83,7 +97,7 @@ internal static class Program
           3  Data format error or parsing failure
         """;
 
-    // The reader throws NotSupportedException only for a scene tree it cannot convert (class-32 partition nodes, linked Revit models); --no-tree reads around both.
+    // The reader throws NotSupportedException only for a scene tree it cannot convert (class-32 partition nodes); --no-tree reads around it.
     private const string NoTreeHint = " Use --no-tree to read geometry and placement without the scene tree.";
 
     public static int Main(string[] args) => Run(args, null, null, null);
@@ -105,6 +119,10 @@ internal static class Program
 
         string? inputPath = null;
         string? outputPath = null;
+        var explicitInputPaths = new List<string>();
+        string? explicitOutputPath = null;
+        bool recursiveFolders = false;
+        string? folderPattern = null;
         string? explicitObjPath = null;
         string? explicitGlbPath = null;
         string? explicitIfcPath = null;
@@ -124,6 +142,8 @@ internal static class Program
         string? explicitClashXmlPath = null;
         string? explicitClashBcfPath = null;
         string? explicitNwfXmlPath = null;
+        string? explicitScenePath = null;
+        NwcLengthUnit? sceneLengthUnit = null;
         double clashTolerance = 0.001;
         string? explicitBcfPath = null;
         string? explicitViewpointsBcfPath = null;
@@ -174,6 +194,21 @@ internal static class Program
                 case "--catalog":
                     includeCatalog = true;
                     break;
+                case "-i":
+                case "--input":
+                    if (!TryConsumeValue(args, ref i, arg, out string inputValue, @err)) return 1;
+                    explicitInputPaths.Add(inputValue);
+                    break;
+                case "-o":
+                case "--output":
+                    if (!TryConsumeValue(args, ref i, arg, out explicitOutputPath, @err)) return 1;
+                    break;
+                case "--recursive":
+                    recursiveFolders = true;
+                    break;
+                case "--pattern":
+                    if (!TryConsumeValue(args, ref i, "--pattern", out folderPattern, @err)) return 1;
+                    break;
                 case "--no-transforms":
                     includeTransforms = false;
                     break;
@@ -212,6 +247,18 @@ internal static class Program
                     break;
                 case "--nwc":
                     if (!TryConsumeValue(args, ref i, "--nwc", out explicitNwcPath, @err)) return 1;
+                    break;
+                case "--scene":
+                    if (!TryConsumeValue(args, ref i, "--scene", out explicitScenePath, @err)) return 1;
+                    break;
+                case "--scene-length-unit":
+                    if (!TryConsumeValue(args, ref i, "--scene-length-unit", out string sceneUnitStr, @err)) return 1;
+                    if (!TryParseSceneLengthUnit(sceneUnitStr, out var parsedSceneUnit))
+                    {
+                        @err.WriteLine($"Error: Invalid scene length unit '{sceneUnitStr}'. Use ft, m, cm or mm.");
+                        return 1;
+                    }
+                    sceneLengthUnit = parsedSceneUnit;
                     break;
                 case "--sets-xml":
                     if (!TryConsumeValue(args, ref i, "--sets-xml", out explicitSetsXmlPath, @err)) return 1;
@@ -397,6 +444,32 @@ internal static class Program
             }
         }
 
+        bool multipleInputs = explicitInputPaths.Count > 1;
+        if (explicitInputPaths.Count > 0)
+        {
+            if (inputPath is not null || outputPath is not null)
+            {
+                @err.WriteLine("Error: -i/--input and -o/--output cannot be combined with positional input or output paths.");
+                return 1;
+            }
+            if (multipleInputs && string.IsNullOrEmpty(explicitOutputPath))
+            {
+                @err.WriteLine("Error: -o/--output is required when using multiple -i/--input paths.");
+                return 1;
+            }
+            inputPath = explicitInputPaths[0];
+            outputPath = explicitOutputPath;
+        }
+        else if (explicitOutputPath is not null)
+        {
+            if (outputPath is not null)
+            {
+                @err.WriteLine("Error: -o/--output cannot be combined with a positional output path.");
+                return 1;
+            }
+            outputPath = explicitOutputPath;
+        }
+
         if (string.IsNullOrWhiteSpace(inputPath))
         {
             @err.WriteLine("Error: Missing input file path.");
@@ -412,8 +485,35 @@ internal static class Program
 
         bool isDirectory = Directory.Exists(inputPath);
         bool isFile = File.Exists(inputPath);
+        bool isNwf = inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase);
+        bool isManifest = inputPath.EndsWith(".nwf.xml", StringComparison.OrdinalIgnoreCase);
 
-        if (isDirectory || inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrEmpty(explicitScenePath))
+        {
+            if (isDirectory || isNwf || isManifest || multipleInputs)
+            {
+                @err.WriteLine("Error: --scene is only supported for a single .nwc or .nwd document.");
+                return 1;
+            }
+            if (!readMeshes || !readMaterials || !includeTransforms || !includeTree)
+            {
+                @err.WriteLine("Error: --scene cannot be combined with --no-meshes, --no-materials, --no-transforms or --no-tree.");
+                return 1;
+            }
+        }
+
+        if ((recursiveFolders || folderPattern is not null) && !isDirectory)
+        {
+            @err.WriteLine("Error: --recursive and --pattern are only supported for folder input.");
+            return 1;
+        }
+        if (folderPattern is not null && SplitPatterns(folderPattern).Length == 0)
+        {
+            @err.WriteLine("Error: --pattern needs at least one non-empty pattern.");
+            return 1;
+        }
+
+        if (isDirectory || isNwf || isManifest || multipleInputs)
         {
             if (explicitDiffBaseline != null || explicitDiffJsonPath != null || explicitDiffBcfPath != null || diffToleranceSpecified)
             {
@@ -433,6 +533,48 @@ internal static class Program
             return 2;
         }
 
+        var readerOptions = new NwcReaderOptions
+        {
+            ReadMeshes = readMeshes,
+            ReadMaterials = readMaterials,
+            ReadPropertyRecords = true,
+            ReadGuids = true,
+            ReadTransforms = includeTransforms,
+            BuildSceneTree = includeTree,
+            KeepStreamCatalog = includeCatalog,
+        };
+
+        if (!multipleInputs && !isDirectory && !isNwf && !isManifest)
+        {
+            if (!string.IsNullOrEmpty(explicitNwfXmlPath))
+            {
+                @err.WriteLine("Error: --nwf-xml is only supported for folder and .nwf assembly inputs.");
+                return 1;
+            }
+            if (checkClashes)
+            {
+                @err.WriteLine("Error: --clashes is only supported for folder and .nwf assembly inputs.");
+                return 1;
+            }
+        }
+        else
+        {
+            foreach (var (flag, value) in new (string, string?)[]
+            {
+                ("--sets-xml", explicitSetsXmlPath),
+                ("--timeliner-csv", explicitTimeLinerCsvPath),
+                ("--grids", explicitGridsPath),
+                ("--export-grids", explicitExportGridsPath),
+            })
+            {
+                if (!string.IsNullOrEmpty(value))
+                {
+                    @err.WriteLine($"Error: {flag} is only supported for single-file input, not for folder or .nwf assemblies.");
+                    return 1;
+                }
+            }
+        }
+
         var sw = Stopwatch.StartNew();
 
         var ifcExportOptions = new NwcIfcExportOptions
@@ -443,12 +585,77 @@ internal static class Program
             ExportMaterials = readMaterials,
         };
 
+        int ProcessLoadedAssembly(NwcAssembly preloaded, string displayPath, string? outPath) =>
+            ProcessNwfAssembly(
+                displayPath, outPath, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
+                explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
+                worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
+                explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
+                explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
+                explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                readerOptions,
+                includeTree, stdoutStream, @out, @err, preloadedAssembly: preloaded);
+
         // Handle multi-model directory assembly and NWF assembly files with the same
         // exit-code mapping as the single-file path: a missing folder or a folder with
         // no models is a level-2 error, anything thrown while reading model data is a
         // data format error (3) — never an unhandled exception with a stack trace.
         try
         {
+            if (multipleInputs)
+            {
+                var docs = new List<NwcDocument>(explicitInputPaths.Count);
+                var seenInputs = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+                foreach (var path in explicitInputPaths)
+                {
+                    if (!File.Exists(path))
+                    {
+                        @err.WriteLine($"Error: Input '{path}' does not exist as a file.");
+                        return 2;
+                    }
+                    if (!path.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) &&
+                        !path.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
+                    {
+                        @err.WriteLine($"Error: Multiple inputs must be .nwc or .nwd files; '{path}' is not supported.");
+                        return 1;
+                    }
+                    if (!seenInputs.Add(Path.GetFullPath(path)))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        docs.Add(NwcDocument.Open(path, readerOptions));
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        @err.WriteLine($"Error: File '{path}' is not a valid Navisworks container: {ex.Message}");
+                        return 3;
+                    }
+                }
+
+                return ProcessLoadedAssembly(NwcAssembly.Create("Federation", docs), "Federation", outputPath);
+            }
+
+            if (inputPath.EndsWith(".nwf.xml", StringComparison.OrdinalIgnoreCase))
+            {
+                var manifestAssembly = NwcAssembly.OpenManifest(inputPath, readerOptions);
+                outputPath ??= inputPath[..^".nwf.xml".Length] + ".glb";
+                if (!printReport)
+                {
+                    // The report prints these itself; without it a missing model would be silent.
+                    foreach (var xref in manifestAssembly.UnresolvedXRefs)
+                    {
+                        @err.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
+                    }
+                    foreach (var xref in manifestAssembly.SkippedXRefs)
+                    {
+                        @err.WriteLine($"Warning: skipped unsupported reference (not .nwc/.nwd): '{xref.EffectivePath}'");
+                    }
+                }
+                return ProcessLoadedAssembly(manifestAssembly, inputPath, outputPath);
+            }
+
             if (isDirectory)
             {
                 return ProcessAssemblyDirectory(
@@ -457,8 +664,10 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
-                    stdoutStream, @out, @err);
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                    readerOptions,
+                    includeTree,
+                    stdoutStream, @out, @err, recursiveFolders: recursiveFolders, folderPattern: folderPattern);
             }
 
             if (inputPath.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase))
@@ -469,7 +678,9 @@ internal static class Program
                     worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcExportOptions, sw,
                     explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
                     explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
+                    explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+                    readerOptions,
+                    includeTree,
                     stdoutStream, @out, @err);
             }
         }
@@ -486,16 +697,7 @@ internal static class Program
         NwcDocument doc;
         try
         {
-            doc = NwcDocument.Open(inputPath, new NwcReaderOptions
-            {
-                ReadMeshes = readMeshes,
-                ReadMaterials = readMaterials,
-                ReadPropertyRecords = true,
-                ReadGuids = true,
-                ReadTransforms = includeTransforms,
-                BuildSceneTree = includeTree,
-                KeepStreamCatalog = includeCatalog,
-            });
+            doc = NwcDocument.Open(inputPath, readerOptions);
         }
         catch (InvalidDataException ex)
         {
@@ -506,6 +708,30 @@ internal static class Program
         {
             @err.WriteLine($"Error reading '{inputPath}': {ex.Message}{(ex is NotSupportedException ? NoTreeHint : "")}");
             return 3;
+        }
+
+        if (!string.IsNullOrEmpty(explicitScenePath))
+        {
+            NwcIO.Scene.NwcSceneResult sceneResult;
+            try
+            {
+                EnsureParentDirectory(explicitScenePath);
+                sceneResult = NwcIO.Scene.NwcSceneReader.Read(doc, new NwcIO.Scene.NwcSceneOptions
+                {
+                    ModelKey = Path.GetFileName(inputPath),
+                    LengthUnit = sceneLengthUnit,
+                });
+                IOScene.SceneJson.Save(sceneResult.Document, explicitScenePath);
+            }
+            catch (Exception ex)
+            {
+                @err.WriteLine($"Error writing scene '{explicitScenePath}': {ex.Message}");
+                return ex is DirectoryNotFoundException or FileNotFoundException ? 2 : 3;
+            }
+            foreach (var diagnostic in sceneResult.Diagnostics)
+            {
+                @err.WriteLine($"Scene {diagnostic.Severity}: {diagnostic.Code}: {diagnostic.Message}");
+            }
         }
 
         bool outputIsIfc = outputPath.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase);
@@ -792,7 +1018,7 @@ internal static class Program
             if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
             {
                 EnsureParentDirectory(explicitHtmlViewerPath);
-                doc.SaveHtmlViewer(explicitHtmlViewerPath);
+                WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, doc), @err);
             }
 
             if (!string.IsNullOrEmpty(explicitGridsPath))
@@ -944,6 +1170,7 @@ internal static class Program
             int totalTriangles = doc.Meshes.Sum(m => m.TriangleCount);
 
             @err.WriteLine("=== NwcIO Execution Report ===");
+            PrintDiagnostics(doc.Diagnostics, @err);
             @err.WriteLine($"Input:            {inputPath}");
             @err.WriteLine($"Source document:  {doc.FileInfo.SourcePath ?? "<unknown>"}");
             @err.WriteLine($"Loader plugin:    {doc.FileInfo.LoaderPlugin ?? "<unknown>"}");
@@ -1030,10 +1257,13 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
+        NwcReaderOptions? readerOptions = null,
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
-        TextWriter? errorWriter = null)
+        TextWriter? errorWriter = null,
+        bool recursiveFolders = false,
+        string? folderPattern = null)
     {
         var @out = outWriter ?? Console.Out;
         var @err = errorWriter ?? Console.Error;
@@ -1042,17 +1272,21 @@ internal static class Program
             outputPath ??= Path.Combine(dirPath, Path.GetFileName(dirPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + "_assembly.glb");
         }
 
-        var assembly = NwcAssembly.LoadFromDirectory(dirPath, options: new NwcReaderOptions { BuildSceneTree = includeTree });
+        var patterns = string.IsNullOrWhiteSpace(folderPattern) ? ["*.nwc"] : SplitPatterns(folderPattern);
+        var assembly = NwcAssembly.LoadFromDirectory(
+            dirPath, patterns, recursiveFolders, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
         return ProcessAssembly(
-            dirPath, outputPath!, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
+            assembly, dirPath, outputPath!, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
             explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
             worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcOptions, sw,
             explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
             explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-            explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
-            stdoutStream, @out, @err, preloadedAssembly: assembly, isNwf: false);
+            explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+            stdoutStream, @out, @err, isNwf: false);
     }
+
     private static int ProcessAssembly(
+        NwcAssembly assembly,
         string sourceLabel,
         string outputPath,
         string? explicitGlbPath,
@@ -1087,18 +1321,14 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
-        bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
         TextWriter? errorWriter = null,
-        NwcAssembly? preloadedAssembly = null,
         bool isNwf = true)
     {
         var @out = outWriter ?? Console.Out;
         var @err = errorWriter ?? Console.Error;
         TextWriter infoOut = (outputPath == "-") ? @err : @out;
-
-        var assembly = preloadedAssembly ?? NwcAssembly.OpenNwf(sourceLabel, new NwcReaderOptions { BuildSceneTree = includeTree });
 
         if (!string.IsNullOrEmpty(explicitTimeLinerXmlPath))
         {
@@ -1177,7 +1407,7 @@ internal static class Program
 
         if (needClashes)
         {
-            clashes = assembly.FindClashes();
+            clashes = assembly.FindClashes(clashTolerance);
         }
 
         if (outputPath.EndsWith(".bcf", StringComparison.OrdinalIgnoreCase) || outputPath.EndsWith(".bcfzip", StringComparison.OrdinalIgnoreCase))
@@ -1208,10 +1438,7 @@ internal static class Program
         else if (outputPath.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase))
         {
             EnsureParentDirectory(outputPath);
-            var merged = NwcDocument.Create(
-                fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
-                meshes: assembly.AllMeshes);
-            merged.Save(outputPath);
+            assembly.SaveNwc(outputPath);
         }
         else if (outputPath == "-")
         {
@@ -1237,10 +1464,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitNwcPath))
         {
             EnsureParentDirectory(explicitNwcPath);
-            var merged = NwcDocument.Create(
-                fileInfo: new NwcFileInfo { SourcePath = assembly.Name + ".rvt" },
-                meshes: assembly.AllMeshes);
-            merged.Save(explicitNwcPath);
+            assembly.SaveNwc(explicitNwcPath);
         }
         if (!string.IsNullOrEmpty(explicitGlbPath)) { EnsureParentDirectory(explicitGlbPath); assembly.SaveGlb(explicitGlbPath, worldCoords); }
         if (!string.IsNullOrEmpty(explicitObjPath)) { EnsureParentDirectory(explicitObjPath); assembly.SaveObj(explicitObjPath, worldCoords); }
@@ -1268,7 +1492,7 @@ internal static class Program
         if (!string.IsNullOrEmpty(explicitHtmlViewerPath))
         {
             EnsureParentDirectory(explicitHtmlViewerPath);
-            assembly.SaveHtmlViewer(explicitHtmlViewerPath);
+            WarnIfViewerTruncated(NwcHtmlViewerExporter.SaveWithResult(explicitHtmlViewerPath, assembly), @err);
         }
         if (!string.IsNullOrEmpty(explicitNwfXmlPath))
         {
@@ -1309,7 +1533,7 @@ internal static class Program
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err);
+            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err, assembly);
         }
 
         if (listViewpoints)
@@ -1322,6 +1546,7 @@ internal static class Program
         if (printReport)
         {
             @err.WriteLine(isNwf ? "=== NwcIO NWF Assembly Report ===" : "=== NwcIO Assembly Report ===");
+            PrintDiagnostics(assembly.Diagnostics, @err);
             if (isNwf)
             {
                 @err.WriteLine($"NWF File:         {sourceLabel}");
@@ -1401,10 +1626,12 @@ internal static class Program
         string? explicitClashMatrixBcfPath = null,
         string? explicitTimeLinerMsProjectPath = null,
         string? explicitTimeLinerPrimaveraPath = null,
+        NwcReaderOptions? readerOptions = null,
         bool includeTree = true,
         Stream? stdoutStream = null,
         TextWriter? outWriter = null,
-        TextWriter? errorWriter = null)
+        TextWriter? errorWriter = null,
+        NwcAssembly? preloadedAssembly = null)
     {
         var @out = outWriter ?? Console.Out;
         var @err = errorWriter ?? Console.Error;
@@ -1413,15 +1640,19 @@ internal static class Program
             outputPath ??= Path.ChangeExtension(nwfPath, ".glb");
         }
 
+        var assembly = preloadedAssembly ?? NwcAssembly.OpenNwf(nwfPath, readerOptions ?? new NwcReaderOptions { BuildSceneTree = includeTree });
         return ProcessAssembly(
-            nwfPath, outputPath!, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
+            assembly, nwfPath, outputPath!, explicitGlbPath, explicitObjPath, explicitIfcPath, explicitNwcPath,
             explicitBcfPath, explicitViewpointsBcfPath, explicitViewpointsXmlPath, explicitClashHtmlPath, explicitProfilerPath,
             worldCoords, checkClashes, listViewpoints, bvhStats, raycastArg, printReport, indent, ifcOptions, sw,
             explicitClashXmlPath, explicitClashBcfPath, explicitNwfXmlPath, clashTolerance, explicitHtmlViewerPath, clashGroupMode, clashRadius,
             explicitTimeLinerXmlPath, linkTimeLiner, explicitClashMatrixJsonPath, explicitClashMatrixMdPath, explicitClashMatrixBcfPath,
-            explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath, includeTree,
-            stdoutStream, @out, @err, isNwf: true);
+            explicitTimeLinerMsProjectPath, explicitTimeLinerPrimaveraPath,
+            stdoutStream, @out, @err, isNwf: preloadedAssembly is null);
     }
+
+    private static string[] SplitPatterns(string patterns) =>
+        patterns.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static void PrintViewpoints(IReadOnlyList<NwcSavedViewpoint> viewpoints, TextWriter? writer = null)
     {
@@ -1446,7 +1677,12 @@ internal static class Program
         }
     }
 
-    private static void ExecuteRaycastTest(NwcSpatialIndex index, string coords, TextWriter? writer = null, TextWriter? errWriter = null)
+    private static void ExecuteRaycastTest(
+        NwcSpatialIndex index,
+        string coords,
+        TextWriter? writer = null,
+        TextWriter? errWriter = null,
+        NwcAssembly? assembly = null)
     {
         var @out = writer ?? Console.Out;
         var @err = errWriter ?? Console.Error;
@@ -1468,8 +1704,10 @@ internal static class Program
 
         if (index.Raycast(origin, dir, out var hit))
         {
+            string? modelLabel = assembly?.GetModelLabel(hit.Mesh);
+            string modelSuffix = modelLabel is null ? string.Empty : FormattableString.Invariant($", Model={modelLabel}");
             @out.WriteLine(FormattableString.Invariant(
-                $"Raycast HIT at distance {hit.Distance:F3}: Point={hit.Point}, Normal={hit.Normal}, MeshId={hit.Mesh.Id}, Triangle={hit.TriangleIndex}"));
+                $"Raycast HIT at distance {hit.Distance:F3}: Point={hit.Point}, Normal={hit.Normal}, MeshId={hit.Mesh.Id}, Triangle={hit.TriangleIndex}{modelSuffix}"));
         }
         else
         {
@@ -1504,6 +1742,22 @@ internal static class Program
         }
     }
 
+    private static void PrintDiagnostics(IReadOnlyList<NwcDiagnostic> diagnostics, TextWriter err)
+    {
+        // Unresolved and skipped references already have their own "Warning:" lines in the NWF report.
+        var shown = diagnostics.Where(d => d.Code is not ("NwfUnresolvedXref" or "NwfSkippedXref")).ToList();
+        if (shown.Count == 0)
+        {
+            return;
+        }
+
+        err.WriteLine($"Diagnostics:      {shown.Count}");
+        foreach (var diagnostic in shown)
+        {
+            err.WriteLine($"  [{diagnostic.Severity}] {diagnostic.Code}: {diagnostic.Message}");
+        }
+    }
+
     private static void EnsureParentDirectory(string path)
     {
         var dir = Path.GetDirectoryName(path);
@@ -1511,6 +1765,18 @@ internal static class Program
         {
             Directory.CreateDirectory(dir);
         }
+    }
+
+    internal static void WarnIfViewerTruncated(NwcHtmlViewerExportResult result, TextWriter err)
+    {
+        if (!result.Truncated)
+        {
+            return;
+        }
+
+        err.WriteLine(
+            $"Warning: HTML viewer export skipped {result.SkippedMeshes} of {result.TotalMeshes} meshes " +
+            $"({result.SkippedVertices:N0} vertices) because MaxMeshVertices ({result.ExportedVertices:N0} written) was reached.");
     }
 
     private static int CountNodes(NwcNode? node)
@@ -1527,6 +1793,41 @@ internal static class Program
         }
 
         return count;
+    }
+
+    private static bool TryParseSceneLengthUnit(string value, out NwcLengthUnit unit)
+    {
+        switch (value.ToLowerInvariant())
+        {
+            case "ft":
+            case "feet":
+                unit = NwcLengthUnit.Feet;
+                return true;
+            case "m":
+            case "meter":
+            case "meters":
+            case "metre":
+            case "metres":
+                unit = NwcLengthUnit.Meters;
+                return true;
+            case "cm":
+            case "centimeter":
+            case "centimeters":
+            case "centimetre":
+            case "centimetres":
+                unit = NwcLengthUnit.Centimeters;
+                return true;
+            case "mm":
+            case "millimeter":
+            case "millimeters":
+            case "millimetre":
+            case "millimetres":
+                unit = NwcLengthUnit.Millimeters;
+                return true;
+            default:
+                unit = NwcLengthUnit.Unknown;
+                return false;
+        }
     }
 
     private static bool TryConsumeValue(string[] args, ref int i, string optionName, out string value, TextWriter? err = null)
