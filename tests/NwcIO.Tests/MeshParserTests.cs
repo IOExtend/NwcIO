@@ -445,6 +445,108 @@ public class MeshParserTests
     }
 
     [Fact]
+    public void Parse_TrailerIds_PreserveZeroAndMakeDuplicatesUnique()
+    {
+        var first = TrailerRecord(0, meshId: 5, [0, 1, 2], "A");
+        var second = TrailerRecord(1, meshId: 0, [0, 1, 2], "B");
+        var third = TrailerRecord(2, meshId: 0, [0, 1, 2], "C");
+
+        var meshes = ParseRecords(first, second, third);
+
+        Assert.Equal([5, 0, 2], meshes.Select(mesh => mesh.Id));
+    }
+
+    [Theory]
+    [InlineData("magic")]
+    [InlineData("indexCount")]
+    [InlineData("negativeIndexCount")]
+    [InlineData("indexRange")]
+    [InlineData("nameLength")]
+    [InlineData("truncated")]
+    public void Parse_MalformedTrailer_FallsBackToTheStrip(string defect)
+    {
+        var record = TrailerRecord(0, meshId: 0, [0, 1, 2], "Name", defect);
+
+        var mesh = Assert.Single(ParseRecords(record));
+
+        Assert.Equal([0, 1, 2], mesh.Indices);
+        Assert.Equal("Mesh_0", mesh.Name);
+    }
+
+    [Fact]
+    public void Parse_TrailerName_DropsControlCharacters()
+    {
+        var record = TrailerRecord(0, meshId: 0, [0, 1, 2], "A\nB\rC");
+
+        var mesh = Assert.Single(ParseRecords(record));
+
+        Assert.Equal("ABC", mesh.Name);
+    }
+
+    [Fact]
+    public void Parse_EmptyTrailerName_UsesTrailerIdForSynthesizedName()
+    {
+        var record = TrailerRecord(0, meshId: 7, [0, 1, 2], "");
+
+        var mesh = Assert.Single(ParseRecords(record));
+
+        Assert.Equal(7, mesh.Id);
+        Assert.Equal("Mesh_7", mesh.Name);
+    }
+
+    private static List<NwcMesh> ParseRecords(params byte[][] records)
+    {
+        var chunk = records.SelectMany(record => record).ToArray();
+        var toc = new int[3 + records.Length];
+        toc[0] = records.Length;
+        toc[1] = 1;
+        toc[2] = chunk.Length;
+        for (int i = 0; i < records.Length; i++)
+        {
+            toc[3 + i] = records[i].Length;
+        }
+
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, Int32Bytes(toc)]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+        return MeshParser.Parse(container).ToList();
+    }
+
+    private static byte[] TrailerRecord(int recId, int meshId, int[] indices, string name, string? defect = null)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        writer.Write(recId);
+        writer.Write(94);
+        writer.Write(0);
+        writer.Write(60);
+        writer.Write(3);
+        writer.Write(9);
+        writer.Write(0f); writer.Write(0f); writer.Write(0f);
+        writer.Write(1f); writer.Write(0f); writer.Write(0f);
+        writer.Write(0f); writer.Write(1f); writer.Write(0f);
+
+        int magic = defect == "magic" ? 0x12345678 : NwcStreamSerializer.MeshTrailerMagic;
+        writer.Write(magic);
+        writer.Write(defect == "indexCount" ? 4 : defect == "negativeIndexCount" ? -3 : indices.Length);
+        foreach (int index in indices)
+        {
+            writer.Write(defect == "indexRange" ? 3 : index);
+        }
+
+        writer.Write(meshId);
+        byte[] nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
+        writer.Write(defect == "nameLength" ? -1 : nameBytes.Length);
+        writer.Write(nameBytes);
+        while ((ms.Position & 3) != 0)
+        {
+            writer.Write((byte)0);
+        }
+
+        byte[] record = ms.ToArray();
+        return defect == "truncated" ? record[..^2] : record;
+    }
+
+    [Fact]
     public void IsStrip_AgreesWithBuildStripIndices_AndRejectsSwappedPair()
     {
         for (int n = 3; n <= 8; n++)

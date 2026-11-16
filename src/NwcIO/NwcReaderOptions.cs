@@ -41,6 +41,18 @@ public sealed class NwcReaderOptions
     public bool KeepStreamCatalog { get; set; } = true;
 
     /// <summary>
+    /// Cap on the decompressed size of one container stream (default: 512 MiB). Exceeding it makes
+    /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
+    /// </summary>
+    public long MaxDecompressedStreamBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxDecompressedStreamBytes;
+
+    /// <summary>
+    /// Cap on the decompressed size of all container streams together (default: 2 GiB). Exceeding it makes
+    /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
+    /// </summary>
+    public long MaxTotalDecompressedBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxTotalDecompressedBytes;
+
+    /// <summary>
     /// Cap on the vertices of one geometry record on the lenient reader path (default: 200,000). Larger records are skipped.
     /// Model files read through their DbCache directory use the strict geometry parser and its own bounds.
     /// </summary>

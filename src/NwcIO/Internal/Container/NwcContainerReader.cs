@@ -12,8 +12,29 @@ public static class NwcContainerReader
 {
     private const string SectionMarker = "#LcUStream";
 
-    public static NwcContainer Read(byte[] data)
+    /// <summary>Default cap on the decompressed size of one stream: 512 MiB.</summary>
+    public const long DefaultMaxDecompressedStreamBytes = 512L * 1024 * 1024;
+
+    /// <summary>Default cap on the decompressed size of all streams of one container: 2 GiB.</summary>
+    public const long DefaultMaxTotalDecompressedBytes = 2L * 1024 * 1024 * 1024;
+
+    public static NwcContainer Read(byte[] data) =>
+        Read(data, DefaultMaxDecompressedStreamBytes, DefaultMaxTotalDecompressedBytes);
+
+    /// <param name="maxDecompressedStreamBytes">Cap on one inflated stream; exceeding it throws <see cref="InvalidDataException"/>.</param>
+    /// <param name="maxTotalDecompressedBytes">Cap on all inflated streams together; exceeding it throws <see cref="InvalidDataException"/>.</param>
+    public static NwcContainer Read(byte[] data, long maxDecompressedStreamBytes, long maxTotalDecompressedBytes)
     {
+        if (maxDecompressedStreamBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxDecompressedStreamBytes), "The per-stream decompression limit must be positive.");
+        }
+
+        if (maxTotalDecompressedBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxTotalDecompressedBytes), "The total decompression limit must be positive.");
+        }
+
         if (data.Length < 16 || !StartsWithAscii(data, 0, SectionMarker))
         {
             throw new InvalidDataException("Not an LcUStream container: missing '#LcUStream' header.");
@@ -21,9 +42,11 @@ public static class NwcContainerReader
 
         var sections = new List<LcUStreamHeader>();
         var streams = new List<LcRawStream>();
+        long totalDecompressed = 0;
 
         int sectionIndex = -1;
         int pos = 0;
+        int rejectedOffset = -1; // zlib signature at this offset already failed to inflate
         while (pos < data.Length)
         {
             if (StartsWithAscii(data, pos, SectionMarker))
@@ -35,9 +58,9 @@ public static class NwcContainerReader
                 continue;
             }
 
-            if (IsZlibSignature(data, pos))
+            if (pos != rejectedOffset && IsZlibSignature(data, pos))
             {
-                if (TryInflateAt(data, pos, out var stream))
+                if (TryInflateAt(data, pos, maxDecompressedStreamBytes, maxTotalDecompressedBytes, ref totalDecompressed, out var stream))
                 {
                     streams.Add(stream with
                     {
@@ -72,7 +95,8 @@ public static class NwcContainerReader
                 break; // unrecognized tail
             }
 
-            if (IsZlibSignature(data, gapEnd) && TryInflateAt(data, gapEnd, out var gapStream))
+            if (IsZlibSignature(data, gapEnd) &&
+                TryInflateAt(data, gapEnd, maxDecompressedStreamBytes, maxTotalDecompressedBytes, ref totalDecompressed, out var gapStream))
             {
                 streams.Add(gapStream with
                 {
@@ -84,6 +108,7 @@ public static class NwcContainerReader
             }
             else
             {
+                rejectedOffset = IsZlibSignature(data, gapEnd) ? gapEnd : -1;
                 pos = gapEnd;
             }
         }
@@ -97,14 +122,21 @@ public static class NwcContainerReader
         };
     }
 
-    public static NwcContainer Read(Stream input)
+    public static NwcContainer Read(Stream input) =>
+        Read(input, DefaultMaxDecompressedStreamBytes, DefaultMaxTotalDecompressedBytes);
+
+    public static NwcContainer Read(Stream input, long maxDecompressedStreamBytes, long maxTotalDecompressedBytes)
     {
         using var ms = new MemoryStream();
         input.CopyTo(ms);
-        return Read(ms.ToArray());
+        return Read(ms.ToArray(), maxDecompressedStreamBytes, maxTotalDecompressedBytes);
     }
 
-    public static NwcContainer ReadFile(string path) => Read(File.ReadAllBytes(path));
+    public static NwcContainer ReadFile(string path) =>
+        ReadFile(path, DefaultMaxDecompressedStreamBytes, DefaultMaxTotalDecompressedBytes);
+
+    public static NwcContainer ReadFile(string path, long maxDecompressedStreamBytes, long maxTotalDecompressedBytes) =>
+        Read(File.ReadAllBytes(path), maxDecompressedStreamBytes, maxTotalDecompressedBytes);
 
     private static bool IsZlibSignature(byte[] data, int pos) =>
         pos + 1 < data.Length && data[pos] == 0x78 && data[pos + 1] is 0x01 or 0x5E or 0x9C or 0xDA;
@@ -127,7 +159,13 @@ public static class NwcContainerReader
         return true;
     }
 
-    private static bool TryInflateAt(byte[] data, int offset, out LcRawStream stream)
+    private static bool TryInflateAt(
+        byte[] data,
+        int offset,
+        long maxDecompressedStreamBytes,
+        long maxTotalDecompressedBytes,
+        ref long totalDecompressed,
+        out LcRawStream stream)
     {
         try
         {
@@ -143,7 +181,20 @@ public static class NwcContainerReader
                     break;
                 }
 
+                if (output.Length + n > maxDecompressedStreamBytes)
+                {
+                    throw new InflateLimitException(
+                        $"Decompressed stream at offset {offset} exceeds the per-stream limit of {maxDecompressedStreamBytes} bytes.");
+                }
+
+                if (totalDecompressed + n > maxTotalDecompressedBytes)
+                {
+                    throw new InflateLimitException(
+                        $"Decompressed streams exceed the total limit of {maxTotalDecompressedBytes} bytes at stream offset {offset}.");
+                }
+
                 output.Write(buffer, 0, n);
+                totalDecompressed += n; // charged even if the stream is later rejected (bad trailer), so crafted garbage cannot dodge the total cap
             }
 
             var compressedLength = (int)feed.BytesServed;
@@ -174,11 +225,21 @@ public static class NwcContainerReader
             };
             return true;
         }
+        catch (InflateLimitException ex)
+        {
+            throw new InvalidDataException(ex.Message);
+        }
         catch (InvalidDataException)
         {
             stream = null!;
             return false;
         }
+    }
+
+    /// <summary>Signals that inflation crossed a configured resource limit; never treated as a false zlib signature.</summary>
+    private sealed class InflateLimitException : Exception
+    {
+        public InflateLimitException(string message) : base(message) { }
     }
 
     /// <summary>
