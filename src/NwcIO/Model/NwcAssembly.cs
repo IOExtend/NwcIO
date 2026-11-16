@@ -910,6 +910,20 @@ public sealed class NwcAssembly
 
     /// <summary>Exports a structured summary of the federated assembly to a stream in JSON format.</summary>
     public void SaveJson(Stream stream, NwcJsonExportOptions? options = null)
+        => SaveJson(stream, options, null, default);
+
+    /// <summary>Exports the assembly JSON to a stream with cancellation and progress.</summary>
+    public void SaveJson(Stream stream, NwcJsonExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 0, 1));
+        cancellationToken.ThrowIfCancellationRequested();
+        SaveJsonCore(stream, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 1, 1));
+    }
+
+    private void SaveJsonCore(Stream stream, NwcJsonExportOptions? options)
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= NwcJsonExportOptions.Default;
@@ -988,9 +1002,29 @@ public sealed class NwcAssembly
 
     /// <summary>Exports a structured summary of the federated assembly to a JSON file.</summary>
     public void SaveJson(string path, NwcJsonExportOptions? options = null)
+        => SaveJson(path, options, null, default);
+
+    /// <summary>Exports the assembly JSON to a file with cancellation and progress.</summary>
+    public void SaveJson(string path, NwcJsonExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
-        using var fs = File.Create(path);
-        SaveJson(fs, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        string temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var fs = File.Create(temp))
+            {
+                SaveJson(fs, options, progress, cancellationToken);
+            }
+
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
     }
 }

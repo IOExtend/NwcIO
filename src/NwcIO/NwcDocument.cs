@@ -610,14 +610,30 @@ public sealed class NwcDocument
     /// tree of an opened document are not persisted unless the records are cleared first.
     /// </summary>
     public void Save(string path, string? header = null)
+        => Save(path, header, null, default);
+
+    /// <summary>Saves the document to an .nwc file with cancellation and progress.</summary>
+    public void Save(string path, string? header, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-nwc", 0, 1));
         NwcWriter.Write(this, path, header);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-nwc", 1, 1));
     }
 
     /// <summary>Saves the document to an output stream in NwcIO's .nwc layout.</summary>
     public void Save(Stream stream, string? header = null)
+        => Save(stream, header, null, default);
+
+    /// <summary>Saves the document to an .nwc stream with cancellation and progress.</summary>
+    public void Save(Stream stream, string? header, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-nwc", 0, 1));
         NwcWriter.Write(this, stream, header);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-nwc", 1, 1));
     }
 
     /// <summary>
@@ -699,16 +715,34 @@ public sealed class NwcDocument
 
     /// <summary>Exports the document to a JSON file.</summary>
     public void SaveJson(string path, NwcJsonExportOptions? options = null)
+        => SaveJson(path, options, null, default);
+
+    /// <summary>Exports the document to JSON with cancellation and progress.</summary>
+    public void SaveJson(string path, NwcJsonExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
         options ??= NwcJsonExportOptions.Default;
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 0, 1));
+        cancellationToken.ThrowIfCancellationRequested();
         Internal.Json.JsonExporter.WriteFile(this, path, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 1, 1));
     }
 
     /// <summary>Exports the document to a JSON stream.</summary>
     public void SaveJson(Stream stream, NwcJsonExportOptions? options = null)
+        => SaveJson(stream, options, null, default);
+
+    /// <summary>Exports the document to a JSON stream with cancellation and progress.</summary>
+    public void SaveJson(Stream stream, NwcJsonExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
         options ??= NwcJsonExportOptions.Default;
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 0, 1));
+        cancellationToken.ThrowIfCancellationRequested();
         Internal.Json.JsonExporter.Write(this, stream, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 1, 1));
     }
 
     /// <summary>Serializes the document to a JSON string.</summary>
@@ -752,11 +786,11 @@ public sealed class NwcDocument
 
     /// <summary>Saves the document asynchronously. The current implementation wraps the synchronous writer.</summary>
     public Task SaveAsync(string path, string? header = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => Save(path, header), cancellationToken);
+        => Task.Run(() => Save(path, header, null, cancellationToken), cancellationToken);
 
     /// <summary>Saves the document to a stream asynchronously.</summary>
     public Task SaveAsync(Stream stream, string? header = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => Save(stream, header), cancellationToken);
+        => Task.Run(() => Save(stream, header, null, cancellationToken), cancellationToken);
 
     /// <summary>
     /// Populates clash grid location tags across all clash detective tests in this document using the provided or attached grid system.
