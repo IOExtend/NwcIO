@@ -56,7 +56,7 @@ public sealed class NwcClashMatrixCell
     public string DisciplineA { get; set; } = string.Empty;
     public string DisciplineB { get; set; } = string.Empty;
     public NwcClashTestType TestType { get; set; } = NwcClashTestType.Hard;
-    public double Tolerance { get; set; } = 0.001; // in meters
+    public double Tolerance { get; set; } = 0.001; // document length units
     public bool Enabled { get; set; } = true;
     public NwcClashTest? ExecutedTest { get; set; }
 
@@ -226,7 +226,7 @@ public sealed class NwcClashMatrix
                         }
 
                         penetration = Math.Min(interBox.Size.X, Math.Min(interBox.Size.Y, interBox.Size.Z));
-                        if (penetration > 0 && penetration < cell.Tolerance)
+                        if (penetration < cell.Tolerance)
                         {
                             continue;
                         }

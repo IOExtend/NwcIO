@@ -854,6 +854,21 @@ public sealed class ClashDetectiveTests
         doc.RunClashDetection(test);
 
         Assert.Equal(expected, test.Results.Count);
+        if (expected == 1)
+        {
+            Assert.Equal(gap, test.Results[0].Distance, 9); // positive for clearance
+        }
+    }
+
+    [Fact]
+    public void ClearanceTolerance_LineMesh_ReportsNoClash()
+    {
+        var box = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var line = new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
+        var doc = new NwcDocumentBuilder().AddMesh(box).AddMesh(line).Build();
+        var test = new NwcClashTest("Lines", NwcClashTestType.Clearance, tolerance: 0.05);
+        doc.RunClashDetection(test);
+        Assert.Empty(test.Results);
     }
 
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)

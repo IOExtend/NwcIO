@@ -269,7 +269,7 @@ public static class NwcClashDetector
 
     /// <summary>
     /// Applies the test's tolerance after the narrow phase. Hard tests keep intersections with penetration at
-    /// or above the tolerance (touching faces are not a clash when the tolerance is positive); Clearance tests
+    /// or above the tolerance, plus zero-depth (coplanar) overlaps; Clearance tests
     /// report meshes whose shortest distance is at or below the tolerance.
     /// </summary>
     private static bool TryGetClash(
@@ -281,9 +281,17 @@ public static class NwcClashDetector
     {
         if (test.TestType == NwcClashTestType.Clearance)
         {
+            // MeasureMeshToMesh reports zero distance at the origin for meshes without triangles.
+            if (meshA.Indices.Count < 3 || meshB.Indices.Count < 3)
+            {
+                clashPoint = default;
+                distance = 0;
+                return false;
+            }
+
             var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
             clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
-            distance = -measurement.Distance;
+            distance = measurement.Distance; // positive for clearance, per NwcClashResult.Distance
             return measurement.Distance <= Math.Max(0.0, test.Tolerance);
         }
 

@@ -315,8 +315,12 @@ public sealed class NwcAssembly
                                     Math.Min(boxA.Max.Z, boxB.Max.Z)));
                             if (overlap.IsEmpty)
                             {
-                                var midpoint = (boxA.Center + boxB.Center) * 0.5;
-                                overlap = new BoundingBox3d(midpoint, midpoint);
+                                // Near miss: point at the middle of the gap (or of the overlap on axes that overlap).
+                                var point = new Vector3d(
+                                    (Math.Max(boxA.Min.X, boxB.Min.X) + Math.Min(boxA.Max.X, boxB.Max.X)) * 0.5,
+                                    (Math.Max(boxA.Min.Y, boxB.Min.Y) + Math.Min(boxA.Max.Y, boxB.Max.Y)) * 0.5,
+                                    (Math.Max(boxA.Min.Z, boxB.Min.Z) + Math.Min(boxA.Max.Z, boxB.Max.Z)) * 0.5);
+                                overlap = new BoundingBox3d(point, point);
                             }
 
                             clashes.Add(new NwcClash(docA, meshA, docB, meshB, overlap));
