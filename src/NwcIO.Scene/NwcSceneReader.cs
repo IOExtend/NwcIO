@@ -264,6 +264,8 @@ public static partial class NwcSceneReader
         }
 
         int skippedViewpoints = 0;
+        int approximatedViewpoints = 0;
+        int viewpointContentSkipped = 0;
         if (metresPerUnit is double viewpointMetres)
         {
             foreach (var saved in document.SavedViewpoints)
@@ -271,6 +273,16 @@ public static partial class NwcSceneReader
                 if (TryMapViewpoint(saved, viewpointMetres, out var viewpoint))
                 {
                     scene.Viewpoints.Add(viewpoint);
+                    if (saved.IsCameraApproximated)
+                    {
+                        approximatedViewpoints++;
+                    }
+
+                    if (saved.SectionPlanes.Count > 0 || saved.SectionBox is not null ||
+                        saved.Redlines.Count > 0 || saved.Comments.Count > 0)
+                    {
+                        viewpointContentSkipped++;
+                    }
                 }
                 else
                 {
@@ -291,6 +303,18 @@ public static partial class NwcSceneReader
                 skippedViewpoints > 0
                     ? FormattableString.Invariant($"{skippedViewpoints} saved viewpoints could not be converted.")
                     : "Saved viewpoints could not be read from this file."));
+        }
+
+        if (approximatedViewpoints > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-camera-approximated",
+                FormattableString.Invariant($"{approximatedViewpoints} saved viewpoints have approximated camera parameters: the file does not store a decoded field of view, projection and far distance.")));
+        }
+
+        if (viewpointContentSkipped > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-content-skipped",
+                FormattableString.Invariant($"{viewpointContentSkipped} saved viewpoints carry section planes, a section box, redlines or comments; only their camera is converted.")));
         }
 
         if (document.XRefs is { References.Count: > 0 } xRefs)
@@ -361,7 +385,8 @@ public static partial class NwcSceneReader
             {
                 Position = ToScene(camera.Position, metresPerUnit),
                 Target = ToScene(camera.Target, metresPerUnit),
-                Up = ToScene(camera.Up, metresPerUnit),
+                // Up is a direction, not a length: only position, target and clip distances scale.
+                Up = new IOScene.Vector3d(camera.Up.X, camera.Up.Y, camera.Up.Z),
                 FieldOfView = camera.FieldOfView * Math.PI / 180.0,
                 AspectRatio = camera.AspectRatio,
                 NearDistance = camera.NearDistance * metresPerUnit,
@@ -415,14 +440,15 @@ public static partial class NwcSceneReader
                     {
                         id = value;
                     }
-                    else if (property.Name == "Elevation" &&
+                    else if (property.InternalName == "lcldrevit_parameter_-1007102" &&
+                             property.ValueType == 6 &&
                              double.TryParse(property.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
                     {
                         elevation = parsed;
                     }
                 }
 
-                if (id is not null && elevation is double e)
+                if (id is not null && elevation is double e && double.IsFinite(e * metres))
                 {
                     result[id] = e * metres;
                 }
@@ -438,7 +464,8 @@ public static partial class NwcSceneReader
 
     // A grid is a line only when it has one line mesh of one segment that is horizontal within 1e-6 m; otherwise it stays an element.
     private static SceneGridLine? GridLine(NwcNode node, List<NwcMesh> meshes, double metresPerUnit)
-    {        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
+    {
+        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
         {
             return null;
         }

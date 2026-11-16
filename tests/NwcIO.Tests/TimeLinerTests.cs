@@ -172,6 +172,25 @@ public class TimeLinerTests
     }
 
     [Fact]
+    public void Csv_InvalidDatesAndMissingId_AreDeterministicAndWarned()
+    {
+        const string csv = "h\nT1,A,Construct,2020-01-01,2020-02-01\n,B,Construct,not-a-date,\n";
+
+        var first = NwcTimeLinerCsvSerializer.Read(new StringReader(csv));
+        var second = NwcTimeLinerCsvSerializer.Read(new StringReader(csv));
+
+        Assert.Equal(2, first.Tasks.Count);
+        Assert.Equal("row-3", first.Tasks[1].Id);
+        Assert.Equal(DateTimeOffset.UnixEpoch, first.Tasks[1].PlannedStart);
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddDays(7), first.Tasks[1].PlannedEnd);
+        Assert.Equal(first.Tasks[1].PlannedStart, second.Tasks[1].PlannedStart);
+        Assert.Equal(first.Tasks[1].PlannedEnd, second.Tasks[1].PlannedEnd);
+        Assert.Contains(first.Warnings, w => w.Contains("id is missing", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(first.Warnings, w => w.Contains("planned start", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(first.Warnings, w => w.Contains("planned end", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void TimeLinerSchedule_RoundtripsThroughNwcFile()
     {
         var start = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
