@@ -348,4 +348,33 @@ public sealed class AppearanceProfilerTests
         Assert.Equal(0, json.RootElement.GetProperty("meshes")[0].GetProperty("primitives")[0].GetProperty("material").GetInt32());
         Assert.Equal(0, json.RootElement.GetProperty("meshes")[1].GetProperty("primitives")[0].GetProperty("material").GetInt32());
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ApplyAppearanceProfiler_SeveralRules_EachGetsOwnMaterialWithUniqueId(bool withTree)
+    {
+        var m1 = new NwcMesh { Id = 1, Name = "Vent", Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] };
+        var m2 = new NwcMesh { Id = 2, Name = "Pipe", Vertices = [new(2, 0, 0), new(3, 0, 0), new(2, 1, 0)], Indices = [0, 1, 2] };
+        NwcNode? root = null;
+        if (withTree)
+        {
+            root = new NwcNode { Id = 0, Name = "Root", Class = "LcOpModelFile" };
+            root.Children.Add(new NwcNode { Id = 1, Name = "Vent", Class = "LcRevitData_Element", Mesh = m1 });
+            root.Children.Add(new NwcNode { Id = 2, Name = "Pipe", Class = "LcRevitData_Element", Mesh = m2 });
+        }
+
+        var doc = NwcDocument.Create(meshes: [m1, m2], rootNode: root);
+        var profiler = new NwcAppearanceProfiler();
+        profiler.AddRule("Red", "Item", "Name", NwcSearchOperator.Equals, "Vent", new RgbaColor(1, 0, 0, 1));
+        profiler.AddRule("Blue", "Item", "Name", NwcSearchOperator.Equals, "Pipe", new RgbaColor(0, 0, 1, 1));
+
+        Assert.Equal(2, doc.ApplyAppearanceProfiler(profiler));
+
+        Assert.Equal("Profiler_Red", m1.Material!.Name);
+        Assert.Equal(new RgbaColor(1, 0, 0, 1), m1.Material.Color);
+        Assert.Equal("Profiler_Blue", m2.Material!.Name);
+        Assert.Equal(new RgbaColor(0, 0, 1, 1), m2.Material.Color);
+        Assert.NotEqual(m1.Material.Id, m2.Material.Id);
+    }
 }

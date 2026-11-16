@@ -127,11 +127,11 @@ public sealed class NwcAppearanceProfiler
                     Mesh = mesh,
                 };
 
-                foreach (var rule in Rules)
+                for (int ruleIndex = 0; ruleIndex < Rules.Count; ruleIndex++)
                 {
-                    if (rule.Matches(pseudoNode))
+                    if (Rules[ruleIndex].Matches(pseudoNode))
                     {
-                        mesh.Material = ruleMaterials[Rules.IndexOf(rule)];
+                        mesh.Material = ruleMaterials[ruleIndex];
                         matchedCount++;
                         break;
                     }
