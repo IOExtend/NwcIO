@@ -474,4 +474,23 @@ public class TimeLinerMsProjectAndPrimaveraTests
         Assert.Equal("Level 1 | Walls", task.AttachedSelectionSetName);
         Assert.Equal(NwcTimeLinerTaskType.Demolish, task.TaskType);
     }
+
+    [Theory]
+    [InlineData("Set: Core Walls | Type: Demolish", "Core Walls", NwcTimeLinerTaskType.Demolish)]
+    [InlineData("Set: Core Walls", "Core Walls", NwcTimeLinerTaskType.Construct)]
+    [InlineData("Type: Temporary", null, NwcTimeLinerTaskType.Temporary)]
+    [InlineData("Set: Level\1 Walls", "Level\1 Walls", NwcTimeLinerTaskType.Construct)]
+    public void MsProjectXml_LegacyAndUnknownEscapeNotes_AreRead(string notes, string? expectedSet, NwcTimeLinerTaskType expectedType)
+    {
+        string xml = "<?xml version=\"1.0\"?><Project xmlns=\"http://schemas.microsoft.com/project\"><Tasks>"
+            + "<Task><UID>1</UID><Name>A</Name><OutlineLevel>1</OutlineLevel>"
+            + "<Start>2025-01-01T08:00:00</Start><Finish>2025-01-01T09:00:00</Finish>"
+            + "<Notes>" + notes + "</Notes></Task></Tasks></Project>";
+        using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
+
+        var task = Assert.Single(NwcTimeLinerMsProjectXmlSerializer.Read(ms).Tasks);
+
+        Assert.Equal(expectedSet, task.AttachedSelectionSetName);
+        Assert.Equal(expectedType, task.TaskType);
+    }
 }

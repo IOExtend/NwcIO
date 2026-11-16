@@ -11,6 +11,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
 
 ### Fixed
+- Microsoft Project XML import skips the project summary task (`UID 0` / `OutlineLevel 0`) instead of adding it as an extra root, and export writes the full elapsed `Duration` (`PT#H#M#S`) instead of truncating to whole hours. Task `Notes` now carry the selection set and task type on separate escaped lines, so a set name may contain `|`; files written by earlier versions (`Set: X | Type: Y`) are still read, but earlier readers do not understand the new multi-line form.
 - `NwcSceneResult.Diagnostics` and `docs/scene.md` say what the conversion reports: what it left out of the document and could detect, not what a document read with `ReadPropertyRecords`, `ReadMeshes` or `ReadMaterials` off already lacked. `docs/scene.md` names `.nwf` under Limits and says that length, area, volume and angle values are left out while the unit is unknown, not while it is not feet.
 - The release workflow runs on tag pushes only and fails before anything is built or pushed unless the tag equals `v<Version>`. It can no longer be started by hand from a branch, and its release step runs `gh release create --verify-tag`, so it never creates a tag and the release tag is always the commit the packages were built from.
 
@@ -150,9 +151,8 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ### Major Additions & Capabilities
 - **Microsoft Project XML 4D Schedule Serialization (`NwcTimeLinerMsProjectXmlSerializer`)**:
   - Full reading and writing of Microsoft Project XML schedule schema (`http://schemas.microsoft.com/project`).
-  - Preserves hierarchical WBS outlines (`OutlineLevel`, `OutlineNumber`, `WBS`), planned and actual dates, the full ISO 8601 elapsed duration (hours, minutes and seconds), percent complete, and costs.
-  - Roundtrips attached Selection Set names and `TaskType` through line-based, escaped task `Notes`; a set name may contain `|`.
-  - Skips the MS Project project summary task (`UID 0` / `OutlineLevel 0`) instead of importing it as an extra root.
+  - Preserves hierarchical WBS outlines (`OutlineLevel`, `OutlineNumber`, `WBS`), planned and actual dates, ISO 8601 duration (`PT#H0M0S`), percent complete, and costs.
+  - Roundtrips attached Selection Set names and `TaskType` through task `Notes`.
   - Direct integration into `NwcDocument` and `NwcAssembly` via `ExportTimeLinerMsProject` and `ImportTimeLinerMsProject`.
 - **Primavera P6 XER 4D Schedule Serialization (`NwcTimeLinerPrimaveraXerSerializer`)**:
   - Full reading and writing of Primavera P6 tab-delimited XER exchange format (`ERMHDR`, `%T PROJECT`, `%T PROJWBS`, `%T TASK`).

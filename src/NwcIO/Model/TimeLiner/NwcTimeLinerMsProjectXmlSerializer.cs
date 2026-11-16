@@ -314,13 +314,13 @@ public static class NwcTimeLinerMsProjectXmlSerializer
             if (value[i] == '\\' && i + 1 < value.Length)
             {
                 var escaped = value[++i];
-                result.Append(escaped switch
+                switch (escaped)
                 {
-                    'n' => '\n',
-                    'r' => '\r',
-                    '\\' => '\\',
-                    _ => escaped,
-                });
+                    case 'n': result.Append('\n'); break;
+                    case 'r': result.Append('\r'); break;
+                    case '\\': result.Append('\\'); break;
+                    default: result.Append('\\').Append(escaped); break; // unknown sequence: keep as written
+                }
             }
             else
             {
@@ -335,6 +335,21 @@ public static class NwcTimeLinerMsProjectXmlSerializer
         // Notes written by this serializer put each metadata entry on its own
         // line, so values may contain '|'. Older files used " | " as separator.
         var structured = false;
+        if (!notes.Contains('\n', StringComparison.Ordinal)
+            && notes.StartsWith("Set:", StringComparison.OrdinalIgnoreCase))
+        {
+            // Legacy single-line form "Set: X | Type: Y" (values were not escaped).
+            const string typeSeparator = " | Type:";
+            var sep = notes.LastIndexOf(typeSeparator, StringComparison.OrdinalIgnoreCase);
+            if (sep > 0
+                && Enum.TryParse<NwcTimeLinerTaskType>(notes[(sep + typeSeparator.Length)..].Trim(), ignoreCase: true, out var legacyType))
+            {
+                task.AttachedSelectionSetName = notes["Set:".Length..sep].Trim();
+                task.TaskType = legacyType;
+                return;
+            }
+        }
+
         foreach (var rawLine in notes.Split('\n'))
         {
             var line = rawLine.TrimEnd('\r');
