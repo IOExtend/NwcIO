@@ -92,6 +92,9 @@ public sealed class NwcDocument
     /// <summary>Configured Clash Detective tests and results for this document.</summary>
     public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
 
+    /// <summary>Reader diagnostics for data that was skipped or substituted.</summary>
+    public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
+
     /// <summary>Spatial grid system (axes and levels) associated with the document.</summary>
     public Model.Grids.NwcGridSystem? GridSystem { get; set; }
 
@@ -304,6 +307,16 @@ public sealed class NwcDocument
         };
 
         var doc = new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
+        if (container.TrailingGap > 0)
+        {
+            doc.Diagnostics =
+            [
+                new NwcDiagnostic(
+                    NwcDiagnosticSeverity.Warning,
+                    "ContainerTrailingGap",
+                    $"Unrecognized {container.TrailingGap} byte tail after the last stream."),
+            ];
+        }
         if (appearanceProfiler is not null)
         {
             doc.ApplyAppearanceProfiler(appearanceProfiler);
