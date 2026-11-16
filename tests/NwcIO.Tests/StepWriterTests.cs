@@ -15,6 +15,7 @@ public class StepWriterTests
         Assert.Contains("ISO-10303-21;", output.ToString());
         Assert.Contains("FILE_SCHEMA(('IFC2X3'));", output.ToString());
         Assert.DoesNotContain("END-ISO-10303-21;", output.ToString());
+        Assert.Equal(1, CountOf(output.ToString(), "ENDSEC;")); // header section only
 
         int first = writer.Add("IFCCARTESIANPOINT", "0.,0.,0.");
         int second = writer.Add("IFCDIRECTION", "(0.,0.,1.)");
@@ -24,7 +25,18 @@ public class StepWriterTests
         Assert.Contains($"#{second}=IFCDIRECTION((0.,0.,1.));", written);
 
         writer.Complete();
-        Assert.Contains("ENDSEC;", output.ToString());
+        Assert.Equal(2, CountOf(output.ToString(), "ENDSEC;")); // header and data sections
         Assert.Contains("END-ISO-10303-21;", output.ToString());
+    }
+
+    private static int CountOf(string text, string value)
+    {
+        int count = 0;
+        for (int i = text.IndexOf(value, StringComparison.Ordinal); i >= 0; i = text.IndexOf(value, i + 1, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 }

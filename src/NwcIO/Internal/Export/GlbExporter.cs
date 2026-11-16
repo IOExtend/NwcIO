@@ -34,8 +34,16 @@ public static class GlbExporter
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(path);
 
-        using var fs = File.Create(path);
-        Write(meshes, materials, fs, worldCoordinates, generatorName, viewpoints);
+        try
+        {
+            using var fs = File.Create(path);
+            Write(meshes, materials, fs, worldCoordinates, generatorName, viewpoints);
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
     }
 
     public static void Write(
@@ -52,9 +60,7 @@ public static class GlbExporter
 
         // 1. Pack binary buffer (positions, normals, indices) into a temporary file, so the BIN payload
         // is not held in a single managed array.
-        string tempPath = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.bin");
-        using Stream binMs = new FileStream(
-            tempPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose);
+        using Stream binMs = CreateBinBuffer();
         var bufferViews = new List<BufferViewDef>();
         var accessors = new List<AccessorDef>();
         var gltfMeshes = new List<MeshDef>();
@@ -789,6 +795,21 @@ public static class GlbExporter
             {
                 stream.WriteByte(0);
             }
+        }
+    }
+
+    // Falls back to memory when TEMP is not writable (sandboxes, read-only containers), as before the spill.
+    private static Stream CreateBinBuffer()
+    {
+        try
+        {
+            string tempPath = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.bin");
+            return new FileStream(
+                tempPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
+        {
+            return new MemoryStream();
         }
     }
 

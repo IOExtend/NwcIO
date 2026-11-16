@@ -8,6 +8,33 @@ namespace NwcIO.Tests;
 
 public class GlbExportTests
 {
+    [Fact]
+    public void GlbExporter_WriteFile_RemovesPartialFileOnFailure()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.glb");
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                GlbExporter.WriteFile(new ThrowingMeshList(), Array.Empty<NwcMaterial>(), path));
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private sealed class ThrowingMeshList : IReadOnlyList<NwcMesh>
+    {
+        public int Count => 1;
+
+        public NwcMesh this[int index] => throw new InvalidOperationException("boom");
+
+        public IEnumerator<NwcMesh> GetEnumerator() => throw new InvalidOperationException("boom");
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

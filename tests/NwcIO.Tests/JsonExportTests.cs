@@ -22,6 +22,42 @@ public sealed class JsonExportTests
     }
 
     [Fact]
+    public void Json_WithoutSceneTree_FlushesBeforeExportEnds()
+    {
+        var builder = new NwcDocumentBuilder();
+        for (int i = 0; i < 2000; i++)
+        {
+            builder.AddTransform(new NwcTransform { Id = i });
+        }
+
+        var doc = builder.Build();
+        using var counting = new CountingStream();
+
+        doc.SaveJson(counting, new NwcJsonExportOptions { IncludeSceneTree = false });
+
+        Assert.True(counting.Writes > 1, "The transforms section was buffered until the end of the export.");
+        using var json = JsonDocument.Parse(counting.ToArray());
+        Assert.Equal(2000, json.RootElement.GetProperty("transforms").GetArrayLength());
+    }
+
+    private sealed class CountingStream : MemoryStream
+    {
+        public int Writes { get; private set; }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            Writes++;
+            base.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            Writes++;
+            base.Write(buffer);
+        }
+    }
+
+    [Fact]
     public void Json_WritesNodeHyperlinks()
     {
         var node = new NwcNode

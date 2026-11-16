@@ -19,9 +19,18 @@ internal static class IfcExporter
         ArgumentNullException.ThrowIfNull(doc);
         ArgumentNullException.ThrowIfNull(path);
 
-        using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
-        Write(doc, writer, options, Path.GetFileName(path));
+        // Output is streamed, so a failure part-way would leave a truncated IFC that looks valid; remove it.
+        try
+        {
+            using var fs = File.Create(path);
+            using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
+            Write(doc, writer, options, Path.GetFileName(path));
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
     }
 
     /// <summary>Writes a single <see cref="NwcDocument"/> to a <see cref="TextWriter"/>.</summary>
@@ -244,9 +253,17 @@ internal static class IfcExporter
         ArgumentNullException.ThrowIfNull(assembly);
         ArgumentNullException.ThrowIfNull(path);
 
-        using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
-        WriteAssembly(assembly, writer, options, Path.GetFileName(path));
+        try
+        {
+            using var fs = File.Create(path);
+            using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
+            WriteAssembly(assembly, writer, options, Path.GetFileName(path));
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
     }
 
     /// <summary>Writes a federated <see cref="NwcAssembly"/> to a <see cref="TextWriter"/>.</summary>
