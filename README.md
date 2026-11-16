@@ -17,8 +17,9 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization 
 ## What it does
 
 - Reads scene hierarchy, geometry meshes, transforms, GUID tables, and property categories. Materials are decoded from the file on the strict path (name, colour, alpha) and assigned by heuristics only for files not read through their DbCache directory. Element nodes of model files carry the element's export GUID and IFC GlobalId.
-- Writes native `.nwc` files from code (`NwcWriter`, `NwcDocumentBuilder`).
+- Writes `.nwc` files from code (`NwcWriter`, `NwcDocumentBuilder`).
 - Exports structured JSON (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`) with the file information, property records, GUIDs, transforms, scene tree (each node with its id, name, class, value, element GUID, transform, properties, and hyperlinks), materials, XRefs, DbCache entries, and saved viewpoints, plus optional mesh summaries (id, name, vertex and triangle counts, material, bounding box) and a catalog of the container's sections and streams. The JSON export is core: it grows with the reader.
+- Links geometry to the scene tree when the file is read through its DbCache directory: every mesh points at its leaf (`NwcMesh.Node`), the leaf's `Element` points at the owning element, and IFC export uses that element's name and IFC GlobalId when present. Each mesh product gets its own mesh-scoped GlobalId.
 - Converts Navisworks models into `IOScene` scene documents for IOViewer and other consumers through the `NwcIO.Scene` adapter, a separate package.
 
 Frozen extras (bug fixes only, see [Scope and frozen features](https://github.com/IOExtend/NwcIO#scope-and-frozen-features)):
@@ -159,11 +160,23 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 ## Limitations
 
 - Version 0.12.1 is a preview. The API can evolve before 1.0.
-- Geometry extraction decodes triangle strips, polylines and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported.
+- Geometry extraction decodes triangle strips, polylines (including two-vertex line records) and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported. On the lenient path, records above `NwcReaderOptions.MaxMeshVertices` (200,000 by default) are skipped; raise the option for exceptionally large records. Vertex positions are stored as 32-bit floats, so double-precision values are rounded on save, and the writer rejects coordinates with magnitude above 1e8 (the reader's limit) before writing.
 - `.nwd` scene trees with partition nodes are not decoded yet, and linked Revit models (a tree that places one element under two parents) are not supported: open them with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference such files.
-- The `.nwc` writer stores vertex positions and rotation/translation; it rejects scaled transforms, line meshes and meshes whose triangles differ from the single strip the reader rebuilds over the positions.
-- The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property and property-tab references (properties from `LcOaPartitionProps` count toward the property cap), and at most one render vertex or corner per geometry-record byte. Files beyond these limits fail with `InvalidDataException`.
-- Writing native `.nwd` files is not supported (export targets native `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
+- The `.nwc` writer stores vertex positions, triangle indices, mesh ids and names, and rotation/translation; it rejects scaled transforms, line meshes and indices outside the vertex buffer. Transform ids are preserved and each mesh keeps its own transform through a writer-side link stream; transforms referenced only by a mesh are written too. Saved viewpoints keep their camera parameters (including FOV, far distance and projection), comments, id, section planes and section box in a writer-specific trailer; redlines are not written. A tree passed as `RootNode` keeps its names, hierarchy and property value types through a writer-specific parent marker; node-level GUID, transform, material and mesh links are not written. When `PropertyRecords` is non-empty it is the source of truth for the scene tree.
+- Scene trees of files without a DbCache directory come from the lenient tag 52/53 scan: the Category/Family/Type nesting is recognized by the stored marker names (the common localized spellings are covered), a repeated marker keeps its level, and other collection names are derived from record order. Node classes other than the observed `LcRevit*` names are recognized by suffix; `LcRevitElement` material definitions stay properties. Model files read through their DbCache hierarchy are not affected by these heuristics.
+- The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property and property-tab references (properties from `LcOaPartitionProps` count toward the property cap), and at most one render vertex or corner per geometry-record byte. Decompressed container streams are capped at 512 MiB each and 2 GiB in total; raising `NwcReaderOptions.MaxDecompressedStreamBytes` or `MaxTotalDecompressedBytes` lifts the caps. Files beyond these limits fail with `InvalidDataException`.
+- The container reader still keeps the whole compressed file and every inflated stream in memory. Seekable inputs larger than 2 GiB are rejected with `IOException` because a single managed array cannot hold them; streaming and on-demand inflation are not implemented yet.
+- Writing native `.nwd` files is not supported (export targets `.nwc`, open standards: IFC, GLB, OBJ, JSON, HTML, BCF, and Navisworks XML exchange).
+
+### Writer limitations
+
+`NwcWriter` / `NwcDocument.Save` produce an `#LcUStream` container that NwcIO reads back. The output uses NwcIO's own layout and has not been verified to open in Autodesk Navisworks.
+
+- Geometry is written as one float32 vertex buffer per mesh in a single TOC chunk, with triangle indices, mesh id and name in a writer-specific trailer; normals, UVs and colors are not stored.
+- `Materials`, `XRefs`, `DbCache`, `AppearanceProfiler`, `ClashTests` and `GridSystem` are not written, so they are empty or heuristic after reopening; `NwcNode.Hyperlinks` and `PropertyTabs` are not written either. Scene-tree and viewpoint details are covered by the `.nwc` writer item in the list above.
+- The partition header stores `FileInfo.SourceByteSize` (`0` when it is not set); a missing source path becomes `Model.rvt` and a missing loader plugin becomes `LcOpRevitExport`. The container header defaults to `navisworks:448 lizlib` unless a header is passed to `NwcWriter`.
+- Selection sets and TimeLiner schedules are written in NwcIO's own XML exchange layouts.
+- Only NwcIO reopening the file is tested; no test opens the output in Navisworks.
 
 ## Scope and frozen features
 
