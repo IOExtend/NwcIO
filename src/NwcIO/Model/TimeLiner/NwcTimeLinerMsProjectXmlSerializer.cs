@@ -79,7 +79,7 @@ public static class NwcTimeLinerMsProjectXmlSerializer
                 new XElement(Ns + "WBS", string.IsNullOrEmpty(task.Id) ? outlineNum : task.Id),
                 new XElement(Ns + "Start", task.PlannedStart.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
                 new XElement(Ns + "Finish", task.PlannedEnd.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture)),
-                new XElement(Ns + "Duration", string.Create(CultureInfo.InvariantCulture, $"PT{(int)Math.Max(0, task.PlannedDuration.TotalHours)}H0M0S")),
+                new XElement(Ns + "Duration", FormatDuration(task.PlannedDuration)),
                 new XElement(Ns + "PercentComplete", (int)Math.Round(Math.Clamp(task.Progress, 0.0, 1.0) * 100)));
 
             if (task.PlannedCost.HasValue)
@@ -105,12 +105,12 @@ public static class NwcTimeLinerMsProjectXmlSerializer
             var notesBuilder = new StringBuilder();
             if (!string.IsNullOrEmpty(task.AttachedSelectionSetName))
             {
-                notesBuilder.Append(CultureInfo.InvariantCulture, $"Set: {task.AttachedSelectionSetName}");
+                notesBuilder.Append("Set: ").Append(EscapeNoteValue(task.AttachedSelectionSetName));
             }
             if (task.TaskType != NwcTimeLinerTaskType.Construct)
             {
-                if (notesBuilder.Length > 0) notesBuilder.Append(" | ");
-                notesBuilder.Append(CultureInfo.InvariantCulture, $"Type: {task.TaskType}");
+                if (notesBuilder.Length > 0) notesBuilder.Append('\n');
+                notesBuilder.Append("Type: ").Append(task.TaskType.ToString());
             }
             if (notesBuilder.Length > 0)
             {
@@ -168,9 +168,23 @@ public static class NwcTimeLinerMsProjectXmlSerializer
                 continue;
             }
 
+            string? uid = taskElem.Element(ns + "UID")?.Value;
+            string? levelStr = taskElem.Element(ns + "OutlineLevel")?.Value;
+            int outlineLevel = 1;
+            if (int.TryParse(levelStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedLevel))
+            {
+                outlineLevel = parsedLevel;
+            }
+
+            // The MS Project project summary task is UID 0 / OutlineLevel 0 and
+            // must not become an extra root next to the real top-level tasks.
+            if (outlineLevel <= 0 || uid == "0")
+            {
+                continue;
+            }
+
             string name = taskElem.Element(ns + "Name")?.Value ?? "Task";
             string? wbs = taskElem.Element(ns + "WBS")?.Value;
-            string? uid = taskElem.Element(ns + "UID")?.Value;
             string id = !string.IsNullOrWhiteSpace(wbs) ? wbs : uid ?? string.Empty;
             if (string.IsNullOrWhiteSpace(id))
             {
@@ -196,13 +210,6 @@ public static class NwcTimeLinerMsProjectXmlSerializer
                 finish = start.AddDays(1);
                 schedule.Warnings.Add(
                     $"Task '{id}': finish '{finishStr}' is missing or invalid; using {finish:o}.");
-            }
-
-            int outlineLevel = 1;
-            string? levelStr = taskElem.Element(ns + "OutlineLevel")?.Value;
-            if (int.TryParse(levelStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedLevel) && parsedLevel >= 1)
-            {
-                outlineLevel = parsedLevel;
             }
 
             var task = new NwcTimeLinerTask(id, name, start, finish);
@@ -284,10 +291,75 @@ public static class NwcTimeLinerMsProjectXmlSerializer
         return schedule;
     }
 
+    private static string FormatDuration(TimeSpan duration)
+    {
+        // Duration is elapsed wall-clock time, not MS Project working time on a
+        // calendar; no Calendars element is written, so keep every component.
+        var totalSeconds = (long)Math.Round(Math.Max(0, duration.TotalSeconds));
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"PT{totalSeconds / 3600}H{totalSeconds % 3600 / 60}M{totalSeconds % 60}S");
+    }
+
+    private static string EscapeNoteValue(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("\r", "\\r", StringComparison.Ordinal)
+        .Replace("\n", "\\n", StringComparison.Ordinal);
+
+    private static string UnescapeNoteValue(string value)
+    {
+        var result = new StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '\\' && i + 1 < value.Length)
+            {
+                var escaped = value[++i];
+                result.Append(escaped switch
+                {
+                    'n' => '\n',
+                    'r' => '\r',
+                    '\\' => '\\',
+                    _ => escaped,
+                });
+            }
+            else
+            {
+                result.Append(value[i]);
+            }
+        }
+        return result.ToString();
+    }
+
     private static void ExtractNotesMetadata(string notes, NwcTimeLinerTask task)
     {
-        var parts = notes.Split('|', StringSplitOptions.TrimEntries);
-        foreach (var part in parts)
+        // Notes written by this serializer put each metadata entry on its own
+        // line, so values may contain '|'. Older files used " | " as separator.
+        var structured = false;
+        foreach (var rawLine in notes.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            if (line.StartsWith("Set:", StringComparison.OrdinalIgnoreCase))
+            {
+                task.AttachedSelectionSetName = UnescapeNoteValue(line["Set:".Length..].Trim());
+                structured = true;
+            }
+            else if (line.StartsWith("Type:", StringComparison.OrdinalIgnoreCase))
+            {
+                string typeStr = line["Type:".Length..].Trim();
+                if (Enum.TryParse<NwcTimeLinerTaskType>(typeStr, ignoreCase: true, out var parsedType))
+                {
+                    task.TaskType = parsedType;
+                }
+                structured = true;
+            }
+        }
+
+        if (structured)
+        {
+            return;
+        }
+
+        foreach (var part in notes.Split('|', StringSplitOptions.TrimEntries))
         {
             if (part.StartsWith("Set:", StringComparison.OrdinalIgnoreCase))
             {

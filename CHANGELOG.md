@@ -150,8 +150,9 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ### Major Additions & Capabilities
 - **Microsoft Project XML 4D Schedule Serialization (`NwcTimeLinerMsProjectXmlSerializer`)**:
   - Full reading and writing of Microsoft Project XML schedule schema (`http://schemas.microsoft.com/project`).
-  - Preserves hierarchical WBS outlines (`OutlineLevel`, `OutlineNumber`, `WBS`), planned and actual dates, ISO 8601 duration (`PT#H0M0S`), percent complete, and costs.
-  - Roundtrips attached Selection Set names and `TaskType` through task `Notes`.
+  - Preserves hierarchical WBS outlines (`OutlineLevel`, `OutlineNumber`, `WBS`), planned and actual dates, the full ISO 8601 elapsed duration (hours, minutes and seconds), percent complete, and costs.
+  - Roundtrips attached Selection Set names and `TaskType` through line-based, escaped task `Notes`; a set name may contain `|`.
+  - Skips the MS Project project summary task (`UID 0` / `OutlineLevel 0`) instead of importing it as an extra root.
   - Direct integration into `NwcDocument` and `NwcAssembly` via `ExportTimeLinerMsProject` and `ImportTimeLinerMsProject`.
 - **Primavera P6 XER 4D Schedule Serialization (`NwcTimeLinerPrimaveraXerSerializer`)**:
   - Full reading and writing of Primavera P6 tab-delimited XER exchange format (`ERMHDR`, `%T PROJECT`, `%T PROJWBS`, `%T TASK`).

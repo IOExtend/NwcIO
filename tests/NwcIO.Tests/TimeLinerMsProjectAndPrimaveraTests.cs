@@ -418,4 +418,60 @@ public class TimeLinerMsProjectAndPrimaveraTests
         Assert.Contains(read.Warnings, w => w.Contains("target start", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(read.Warnings, w => w.Contains("target end", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void MsProjectXml_ProjectSummaryTask_IsSkipped()
+    {
+        const string xml = """
+            <Project xmlns="http://schemas.microsoft.com/project">
+              <Name>P</Name>
+              <Tasks>
+                <Task><UID>0</UID><Name>P</Name><OutlineLevel>0</OutlineLevel><Start>2025-01-01T08:00:00</Start><Finish>2025-01-10T17:00:00</Finish></Task>
+                <Task><UID>1</UID><Name>T1</Name><OutlineLevel>1</OutlineLevel><Start>2025-01-01T08:00:00</Start><Finish>2025-01-02T17:00:00</Finish></Task>
+                <Task><UID>2</UID><Name>T2</Name><OutlineLevel>1</OutlineLevel><Start>2025-01-03T08:00:00</Start><Finish>2025-01-10T17:00:00</Finish></Task>
+              </Tasks>
+            </Project>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
+
+        var schedule = NwcTimeLinerMsProjectXmlSerializer.Read(stream);
+
+        Assert.Equal(["T1", "T2"], schedule.Tasks.Select(t => t.Name));
+    }
+
+    [Fact]
+    public void MsProjectXml_Duration_KeepsHoursMinutesAndSeconds()
+    {
+        var start = new DateTimeOffset(2025, 1, 1, 8, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "A", start, start.AddMinutes(90).AddSeconds(30)));
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerMsProjectXmlSerializer.Write(schedule, ms);
+        ms.Position = 0;
+        string xml = new StreamReader(ms, leaveOpen: true).ReadToEnd();
+
+        Assert.Contains("<Duration>PT1H30M30S</Duration>", xml);
+    }
+
+    [Fact]
+    public void MsProjectXml_SetNameContainingPipe_Roundtrips()
+    {
+        var start = new DateTimeOffset(2025, 1, 1, 8, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "A", start, start.AddHours(1))
+        {
+            AttachedSelectionSetName = "Level 1 | Walls",
+            TaskType = NwcTimeLinerTaskType.Demolish,
+        });
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerMsProjectXmlSerializer.Write(schedule, ms);
+        ms.Position = 0;
+        var read = NwcTimeLinerMsProjectXmlSerializer.Read(ms);
+
+        var task = Assert.Single(read.Tasks);
+        Assert.Equal("Level 1 | Walls", task.AttachedSelectionSetName);
+        Assert.Equal(NwcTimeLinerTaskType.Demolish, task.TaskType);
+    }
 }
