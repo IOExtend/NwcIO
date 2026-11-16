@@ -62,8 +62,8 @@ public sealed class SyntheticAssemblyJsonTests : IDisposable
 
         Assert.Equal(Path.GetFileName(_root), assembly.Name);
         Assert.Equal(
-            ["a.nwc", "B.nwc", "c.nwc"],
-            assembly.Models.Select(m => Path.GetFileName(m.FileInfo.SourcePath)).ToArray());
+            "a.nwc,B.nwc,c.nwc",
+            string.Join(",", assembly.Models.Select(m => Path.GetFileName(m.FileInfo.SourcePath))));
     }
 
     [Fact]
