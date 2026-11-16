@@ -108,14 +108,14 @@ public sealed class ExportCancellationTests
     }
 
     [Fact]
-    public async Task SaveJsonAsync_CanceledWhileWriting_IsCanceled()
+    public async Task SaveAsync_CanceledWhileWriting_IsCanceled()
     {
         var document = Document();
         using var cancellation = new CancellationTokenSource();
         using var stream = new CancelOnWriteStream(cancellation);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            document.SaveJsonAsync(stream, cancellationToken: cancellation.Token));
+            document.SaveAsync(stream, cancellationToken: cancellation.Token));
 
         Assert.True(stream.Written);
     }

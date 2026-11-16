@@ -5,7 +5,7 @@ using NwcIO.Model;
 namespace NwcIO.Internal.Json;
 
 /// <summary>Writes a parsed <see cref="NwcDocument"/> to JSON.</summary>
-public static class JsonExporter
+internal static class JsonExporter
 {
     public static void Write(NwcDocument document, Stream output, NwcJsonExportOptions options)
     {
@@ -57,6 +57,7 @@ public static class JsonExporter
             }
 
             writer.WriteEndObject();
+            FlushIfNeeded(writer);
         }
 
         writer.WriteEndArray();
@@ -66,6 +67,7 @@ public static class JsonExporter
         foreach (var guid in document.Guids)
         {
             writer.WriteStringValue(guid.ToString("D"));
+            FlushIfNeeded(writer);
         }
 
         writer.WriteEndArray();
@@ -123,6 +125,7 @@ public static class JsonExporter
                 writer.WriteEndArray();
 
                 writer.WriteEndObject();
+                FlushIfNeeded(writer);
             }
 
             writer.WriteEndArray();
@@ -168,6 +171,7 @@ public static class JsonExporter
                 }
 
                 writer.WriteEndObject();
+                FlushIfNeeded(writer);
             }
 
             writer.WriteEndArray();
@@ -287,6 +291,28 @@ public static class JsonExporter
             writer.WriteEndArray();
         }
 
+        if (document.Diagnostics.Count > 0)
+        {
+            writer.WriteStartArray("diagnostics");
+            foreach (var diagnostic in document.Diagnostics)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("severity", diagnostic.Severity.ToString());
+                writer.WriteString("code", diagnostic.Code);
+                writer.WriteString("message", diagnostic.Message);
+                if (diagnostic.StreamIndex is int streamIndex)
+                {
+                    writer.WriteNumber("streamIndex", streamIndex);
+                }
+                if (diagnostic.ByteOffset is long byteOffset)
+                {
+                    writer.WriteNumber("byteOffset", byteOffset);
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+        }
+
         if (options.IncludeStreamCatalog)
         {
             WriteStreamCatalog(writer, document);
@@ -298,9 +324,20 @@ public static class JsonExporter
 
     public static void WriteFile(NwcDocument document, string path, NwcJsonExportOptions options)
     {
-        using var stream = File.Create(path);
-        Write(document, stream, options);
+        // Output is flushed while writing, so a failure part-way would leave truncated JSON; remove it.
+        try
+        {
+            using var stream = File.Create(path);
+            Write(document, stream, options);
+        }
+        catch
+        {
+            File.Delete(path);
+            throw;
+        }
     }
+
+    private const int FlushThreshold = 64 * 1024;
 
     private static void WriteNodeRecursive(Utf8JsonWriter writer, NwcNode node)
     {
@@ -409,6 +446,17 @@ public static class JsonExporter
             }
 
             writer.WriteEndArray();
+        }
+
+        FlushIfNeeded(writer);
+    }
+
+    // Keeps the pending buffer bounded so the output stream receives data while the export is still running.
+    private static void FlushIfNeeded(Utf8JsonWriter writer)
+    {
+        if (writer.BytesPending > FlushThreshold)
+        {
+            writer.Flush();
         }
     }
 

@@ -69,20 +69,66 @@ public class MaterialParserTests
         {
             Id = 0,
             Name = "Rebar_Mesh",
-            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(5000, 0, 0), new Vector3d(0, 5000, 0)],
             Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(5000, 5000, 0)),
         };
 
         var materials = MaterialParser.Parse(records, [mesh]);
 
-        Assert.NotEmpty(materials);
-        var rebarMat = materials.FirstOrDefault(m => m.Name == "ADSK_Арматура_А500");
-        Assert.NotNull(rebarMat);
+        var rebarMat = Assert.Single(materials, m => m.Name == "ADSK_Арматура_А500");
         Assert.Equal(4452641, rebarMat.Id);
         Assert.Equal("#FF8000", rebarMat.Color.ToHex());
+        Assert.False(rebarMat.IsInferred);
 
-        // Check mesh assignment
+        // A material without a revit_Color record keeps a neutral colour, not one guessed from its name.
+        var concreteMat = Assert.Single(materials, m => m.Name == "ITR_Бетон_В25");
+        Assert.True(concreteMat.IsInferred);
+        Assert.Equal(new RgbaColor(0.70f, 0.72f, 0.75f, 1.0f), concreteMat.Color);
+
+        // Neither the mesh name nor its size picks a material; the fallback is listed with the others.
         Assert.NotNull(mesh.Material);
-        Assert.Contains("Арматур", mesh.Material.Name);
+        Assert.True(mesh.Material.IsInferred);
+        Assert.Equal("Default Material", mesh.Material.Name);
+        Assert.Contains(mesh.Material, materials);
+        Assert.Equal(3, materials.Count);
+        Assert.Equal(3, materials.Select(m => m.Id).Distinct().Count());
+        Assert.DoesNotContain(materials, m => m.Name is "Default Concrete" or "Default Rebar");
+    }
+
+    [Fact]
+    public void MaterialParser_NoMaterialRecords_ListsInferredDefaultAndKeepsAssignedMaterial()
+    {
+        var assigned = new NwcMaterial { Id = 7, Name = "Assigned" };
+        var meshA = new NwcMesh
+        {
+            Id = 0,
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        var meshB = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = assigned,
+        };
+
+        var first = MaterialParser.Parse([], [meshA, meshB]);
+        var fallback = Assert.Single(first);
+        Assert.Same(fallback, meshA.Material);
+        Assert.Same(assigned, meshB.Material);
+        Assert.True(fallback.IsInferred);
+        Assert.Equal("Default Material", fallback.Name);
+
+        // Each parse gets its own fallback, so editing one document's material leaves others alone.
+        var meshC = new NwcMesh
+        {
+            Id = 0,
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        MaterialParser.Parse([], [meshC]);
+        Assert.NotSame(fallback, meshC.Material);
     }
 }

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using NwcIO.Internal.Container;
 using NwcIO.Internal.Parsing;
 using NwcIO.Model;
 using Xunit;
@@ -7,6 +8,44 @@ namespace NwcIO.Tests;
 
 public class TransformParserTests
 {
+    [Fact]
+    public void TransformLinkParser_ReadsTransformIndices()
+    {
+        var data = new byte[8 + 4 * 3];
+        BinaryPrimitives.WriteInt32LittleEndian(data, TransformStreamFormat.LinksMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 3);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), 2);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(12), -1);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(16), 0);
+
+        var links = TransformLinkParser.TryParse(RawStream(data));
+
+        Assert.Equal([2, -1, 0], links);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(2)]
+    public void TransformLinkParser_TruncatedOrNegativeCount_ReturnsNull(int count)
+    {
+        var data = new byte[12];
+        BinaryPrimitives.WriteInt32LittleEndian(data, TransformStreamFormat.LinksMagic);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), count);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), 0);
+
+        Assert.Null(TransformLinkParser.TryParse(RawStream(data)));
+    }
+
+    private static LcRawStream RawStream(byte[] data) => new()
+    {
+        Index = 0,
+        FileOffset = 0,
+        CompressedLength = data.Length,
+        GapBefore = 0,
+        Data = data,
+        SectionIndex = 0,
+    };
+
     [Fact]
     public void Parse_SyntheticTransformStream_DecodesPoseAndBBox()
     {
@@ -60,6 +99,27 @@ public class TransformParserTests
         Assert.Equal(200.0, matrix[13]);
         Assert.Equal(300.0, matrix[14]);
         Assert.Equal(1.0, matrix[15]);
+    }
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(2, 1)]
+    public void Parse_WriterStreamWithWrongRecordCount_Throws(int declared, int written)
+    {
+        var transforms = Enumerable.Range(0, written).Select(i => new NwcTransform { Id = i }).ToList();
+        var data = NwcIO.Internal.Container.NwcStreamSerializer.BuildTransformsStream(transforms);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), declared);
+
+        Assert.Throws<InvalidDataException>(() => TransformParser.Parse(data));
+    }
+
+    [Fact]
+    public void Parse_WriterStreamWithMatchingCount_ReadsAllRecords()
+    {
+        var data = NwcIO.Internal.Container.NwcStreamSerializer.BuildTransformsStream(
+            [new NwcTransform { Id = 5 }, new NwcTransform { Id = 5 }]);
+
+        Assert.Equal(2, TransformParser.Parse(data).Count);
     }
 
     private static void WriteInt32(MemoryStream ms, int value)

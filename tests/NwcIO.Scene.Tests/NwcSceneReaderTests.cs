@@ -53,7 +53,7 @@ public sealed class NwcSceneReaderTests
         w.Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(1);
         using var file = TempFile(SyntheticNwcFile.Build(w.ToArray(), null, [], []), "Site.nwd");
         var ex = Assert.Throws<NotSupportedException>(() => NwcSceneReader.Read(file.Path));
-        Assert.StartsWith("NwcIO.Scene needs the scene tree: .nwd partition trees and Revit links are not supported yet. ", ex.Message);
+        Assert.StartsWith("NwcIO.Scene needs the scene tree: .nwd partition trees are not supported yet. ", ex.Message);
         Assert.IsType<NotSupportedException>(ex.InnerException);
     }
 
@@ -99,10 +99,32 @@ public sealed class NwcSceneReaderTests
         Assert.Equal(("Lines", ""), (doc.Elements[13].Category, doc.Elements[13].TypeName));
         Assert.All(doc.Elements.Where(e => e.Kind != SceneNodeKind.Element), e => Assert.Equal(("", ""), (e.Category, e.TypeName)));
         var level = Assert.Single(doc.Levels);
-        Assert.Equal((1, 1, "Level 1", (double?)null), (level.Id, level.ModelId, level.Name, level.Elevation));
+        Assert.Equal((1, 1, "Level 1"), (level.Id, level.ModelId, level.Name));
+        Assert.NotNull(level.Elevation);
+        Assert.Equal(3.0, level.Elevation.Value, precision: 6);
         Assert.Equal([null, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, null, null, null], doc.Elements.Select(e => e.LevelId));
         Assert.Equal(4, result.ElementCount);
         AssertSampleDiagnostics(result);
+    }
+
+    [Theory]
+    [InlineData(double.NaN, 6, "lcldrevit_parameter_-1007102", NwcLengthUnit.Feet)]
+    [InlineData(double.PositiveInfinity, 6, "lcldrevit_parameter_-1007102", NwcLengthUnit.Feet)]
+    [InlineData("9.84", 4, "lcldrevit_parameter_-1007102", NwcLengthUnit.Feet)]    // not a length value
+    [InlineData(9.84, 6, "lcldrevit_parameter_-1000010", NwcLengthUnit.Feet)]    // another parameter
+    [InlineData(9.84, 6, "lcldrevit_parameter_-1007102", NwcLengthUnit.Unknown)]
+    public void Read_RevitSample_LevelElevationIsNullWhenNotAFiniteLength(object elevation, int valueType, string internalName, NwcLengthUnit unit)
+    {
+        var doc = Scene(RevitSample.Build(levelElevation: elevation, levelElevationType: valueType, levelElevationName: internalName),
+            new() { ModelKey = "k", LengthUnit = unit }).Document;
+        Assert.Null(Assert.Single(doc.Levels).Elevation);
+    }
+
+    [Fact]
+    public void Read_RevitSample_ConvertsTheLevelElevationToMetres()
+    {
+        var doc = Scene(RevitSample.Build(levelElevation: 10.0), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }).Document;
+        Assert.Equal(10.0, Assert.Single(doc.Levels).Elevation!.Value, precision: 6);
     }
 
     [Theory]   // the second case has a grid, which only a Revit file reads
@@ -217,8 +239,12 @@ public sealed class NwcSceneReaderTests
         Assert.Equal(doc.Elements[5].PropertySetIds[1..3], doc.Elements[7].PropertySetIds[1..3]);    // level and type tabs shared by the walls
         Assert.Equal(doc.Elements[8].PropertySetIds[0], doc.Elements[10].PropertySetIds[0]);         // the pair's element tab
 
-        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Type",
-            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }] };
+        var tab = new NwcPropertyTab
+        {
+            Name = "T",
+            InternalName = "LcRevitData_Type",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }]
+        };
         var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         leaf.PropertyTabs.AddRange([tab, tab]); root.Children.Add(leaf);
@@ -242,8 +268,12 @@ public sealed class NwcSceneReaderTests
     [InlineData("-1", "1")]
     public void Read_BooleanValue_IsZeroOrOne(string stored, string text)
     {
-        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Element",
-            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 3, Value = stored }] };
+        var tab = new NwcPropertyTab
+        {
+            Name = "T",
+            InternalName = "LcRevitData_Element",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 3, Value = stored }]
+        };
         var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         leaf.PropertyTabs.Add(tab); root.Children.Add(leaf);
@@ -259,8 +289,12 @@ public sealed class NwcSceneReaderTests
     [InlineData(13, "x")]
     public void Read_ValueThatCannotBeShown_IsLeftOut(int type, string? value)
     {
-        var tab = new NwcPropertyTab { Name = "T", InternalName = "LcRevitData_Element",
-            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = type, Value = value }] };
+        var tab = new NwcPropertyTab
+        {
+            Name = "T",
+            InternalName = "LcRevitData_Element",
+            Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = type, Value = value }]
+        };
         var root = new NwcNode { Id = 0, Name = "M", Class = "Model" };
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         leaf.PropertyTabs.Add(tab); root.Children.Add(leaf);
@@ -289,8 +323,13 @@ public sealed class NwcSceneReaderTests
     {
         // 90° about Z, translation (1, 2, 3) ft: NwcTransform.ToMatrix4x4 rows are the images of X, Y, Z (row vectors)
         double h = Math.Sqrt(0.5);
-        var mesh = new NwcMesh { Id = 0, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2],
-            Transform = new NwcTransform { Id = 0, Rotation = new(0, 0, h, h), Translation = new(1, 2, 3) } };
+        var mesh = new NwcMesh
+        {
+            Id = 0,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 0, Rotation = new(0, 0, h, h), Translation = new(1, 2, 3) }
+        };
         var result = SceneOf(mesh);
         var t = result.Document.Instances[0].Transform!.Value;
         AssertNear(new Vector3d(0, 1, 0), t.XAxis);
@@ -356,10 +395,14 @@ public sealed class NwcSceneReaderTests
         // 2,000 segments, each of its own colour: one line geometry per colour up to the cap, each with only its two vertices,
         // then one geometry drawn with the material colour for the segments of the further colours
         const int segments = 2000;
-        var mesh = new NwcMesh { Id = 0, Indices = [],
+        var mesh = new NwcMesh
+        {
+            Id = 0,
+            Indices = [],
             Vertices = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.Vector3d(v / 2, v % 2, 0))],
             LineIndices = [.. Enumerable.Range(0, 2 * segments)],
-            LineColors = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.RgbaColor(v / 2 % 256 / 255f, v / 2 / 256 / 255f, 0))] };
+            LineColors = [.. Enumerable.Range(0, 2 * segments).Select(v => new NwcIO.Model.RgbaColor(v / 2 % 256 / 255f, v / 2 / 256 / 255f, 0))]
+        };
         var result = SceneOf(mesh);
         var doc = result.Document;
         Assert.Equal(MaxLineColourGroups + 1, doc.Geometries.Count);
@@ -403,8 +446,11 @@ public sealed class NwcSceneReaderTests
         var leaf = new NwcNode { Id = 1, Name = "L", Class = "Leaf", Tag = 22, Parent = root };
         for (int i = 0; i < tabs; i++)
         {
-            leaf.PropertyTabs.Add(new NwcPropertyTab { Name = "T",
-                Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }] });
+            leaf.PropertyTabs.Add(new NwcPropertyTab
+            {
+                Name = "T",
+                Properties = [new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "N", Class = "T", ValueType = 4, Value = "v" }]
+            });
         }
 
         leaf.PropertyTabs.Add(leaf.PropertyTabs[0]);
@@ -444,8 +490,14 @@ public sealed class NwcSceneReaderTests
     public void Read_ZeroNormals_AreAveragedFromTheTriangles()
     {
         // two triangles of a unit square in z = 0, CCW seen from +Z; vertex 3 stores no normal
-        var mesh = new NwcMesh { Id = 0, GeometryIndex = -1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)], Indices = [0, 1, 2, 2, 1, 3],
-            Normals = [new(0, 0, 1), new(0, 0, 1), new(0, 0, 1), NwcIO.Model.Vector3d.Zero] };
+        var mesh = new NwcMesh
+        {
+            Id = 0,
+            GeometryIndex = -1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)],
+            Indices = [0, 1, 2, 2, 1, 3],
+            Normals = [new(0, 0, 1), new(0, 0, 1), new(0, 0, 1), NwcIO.Model.Vector3d.Zero]
+        };
         Assert.Equal(new Vector3d(0, 0, 1), SceneOf(mesh).Document.Geometries[0].Normals![3]);
     }
 
@@ -524,6 +576,601 @@ public sealed class NwcSceneReaderTests
         var result = Scene(RevitSample.Build(doorCategoryId: -2000220), new() { ModelKey = "k", LengthUnit = NwcLengthUnit.Unknown });
         Assert.Empty(result.Document.Grids);
         AssertSampleDiagnostics(result, (SceneSeverity.Warning, "unit-unknown"));
+    }
+
+    [Fact]
+    public void Read_DocumentWithSavedViewpoints_MapsCameraToSceneViewpoints()
+    {
+        var id = Guid.Parse("11111111-2222-4333-8444-555555555555");
+        var doc = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "model.nwc" },
+            savedViewpoints:
+            [
+                new NwcSavedViewpoint
+                {
+                    Id = id,
+                    Name = "Plan",
+                    Camera = new NwcCamera
+                    {
+                        Position = new NwcIO.Model.Vector3d(10, 20, 30),
+                        Rotation = Quaterniond.Identity,
+                        FocalDistance = 10,
+                        FieldOfView = 90,
+                        AspectRatio = 1.5,
+                        NearDistance = 1,
+                        FarDistance = 500,
+                    },
+                },
+                new NwcSavedViewpoint
+                {
+                    Name = "Elevation",
+                    Camera = new NwcCamera
+                    {
+                        Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                        Rotation = Quaterniond.Identity,
+                        FocalDistance = 4,
+                        Projection = NwcCameraProjection.Orthographic,
+                    },
+                },
+            ],
+            rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = NwcSceneReader.Read(doc, new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        });
+
+        Assert.Equal(2, result.Document.Viewpoints.Count);
+        var plan = result.Document.Viewpoints[0];
+        Assert.Equal(id.ToString(), plan.Id);
+        Assert.Equal("Plan", plan.Name);
+        Assert.Equal(10, plan.Camera.Position.X, 6);
+        Assert.Equal(20, plan.Camera.Position.Y, 6);
+        Assert.Equal(30, plan.Camera.Position.Z, 6);
+        Assert.Equal(Math.PI / 2, plan.Camera.FieldOfView, 6);
+        Assert.Equal(1.5, plan.Camera.AspectRatio, 6);
+        Assert.Equal(500, plan.Camera.FarDistance, 6);
+        Assert.Equal(SceneProjection.Perspective, plan.Camera.Projection);
+        Assert.Equal(SceneProjection.Orthographic, result.Document.Viewpoints[1].Camera.Projection);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoints-skipped");
+    }
+
+    [Fact]
+    public void Read_Assembly_ConvertsEachDocumentWithUniqueIds()
+    {
+        var assembly = NwcAssembly.Create("Federation",
+            Model("A.nwc", 1, 0),
+            Model("B.nwc", 2, 10));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        Assert.Equal([1, 2], result.Document.Models.Select(m => m.Id));
+        Assert.Equal(["A.nwc", "B.nwc"], result.Document.Models.Select(m => m.Key));
+        Assert.Equal(2, result.Document.Geometries.Count);
+        Assert.Equal([1, 2], result.Document.Geometries.Select(g => g.Id));
+        Assert.Equal(2, result.Document.Instances.Count);
+        Assert.Equal([1, 2], result.Document.Materials.Select(m => m.Id));
+        Assert.Equal(result.Document.Elements.Count, result.Document.Elements.Select(e => e.Id).Distinct().Count());
+        Assert.Equal(2, result.ElementCount);
+        Assert.Equal(1, result.LengthUnit.GetMetresPerUnit());
+        Assert.Empty(result.Document.Validate());
+
+        static NwcDocument Model(string sourcePath, int meshId, double x)
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var child = new NwcNode { Id = 2, Name = "Child", Class = "Model" };
+            root.Children.Add(child);
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Material = new NwcMaterial { Id = meshId, Name = $"Material {meshId}" };
+            mesh.Node = child;
+            child.Mesh = mesh;
+            return NwcDocument.Create(
+                fileInfo: new NwcFileInfo { SourcePath = sourcePath },
+                meshes: [mesh],
+                rootNode: root);
+        }
+    }
+
+    [Fact]
+    public void Read_Assembly_DuplicateFileNamesGetUniqueKeysAndSkipsTheNwfDocument()
+    {
+        var assembly = NwcAssembly.Create("Federation",
+            Model("fed.nwf", 1, 0),
+            Model("model.nwc", 2, 10),
+            Model("model.nwc", 3, 20));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        Assert.Equal(["model.nwc", "model.nwc#2"], result.Document.Models.Select(m => m.Key));
+        Assert.DoesNotContain(result.Document.Models, m => m.Key == "fed.nwf");
+        Assert.Empty(result.Document.Validate());
+
+        static NwcDocument Model(string sourcePath, int meshId, double x)
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var child = new NwcNode { Id = 2, Name = "Child", Class = "Model" };
+            root.Children.Add(child);
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Material = new NwcMaterial { Id = meshId, Name = $"Material {meshId}" };
+            mesh.Node = child;
+            child.Mesh = mesh;
+            return NwcDocument.Create(
+                fileInfo: new NwcFileInfo { SourcePath = sourcePath },
+                meshes: [mesh],
+                rootNode: root);
+        }
+    }
+
+    [Fact]
+    public void Read_LinkedPlacement_BecomesItsOwnSceneModel()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var element = new NwcNode
+        {
+            Id = 1,
+            Name = "Element",
+            Class = "LcRevitData_Element",
+            IsElement = true,
+            ElementGuid = Guid.Parse("11111111-2222-4333-8444-555555555555"),
+        };
+        element.Element = element;
+        var link = new NwcNode
+        {
+            Id = 2,
+            Name = "Link A",
+            Class = "LcOpModelFile",
+            Element = element,
+            IsLinkPlacement = true,
+        };
+        root.Children.Add(element);
+        root.Children.Add(link);
+
+        var elementMesh = Mesh(1, 0, element);
+        var linkMesh = Mesh(2, 10, link);
+        var document = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "model.nwc" },
+            meshes: [elementMesh, linkMesh],
+            rootNode: root);
+
+        var result = NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        });
+
+        Assert.Equal(2, result.Document.Models.Count);
+        Assert.Equal(2, result.Document.Models[1].Id);
+        Assert.Equal("Link A", result.Document.Models[1].Key);
+        Assert.Equal(2, result.Document.Instances.Count);
+        Assert.Equal(2, result.Document.Elements.Select(e => e.ModelId).Distinct().Count());
+        Assert.All(result.Document.Elements.Where(e => e.ModelId == 2),
+            e => Assert.Equal("11111111-2222-4333-8444-555555555555", e.SourceId));
+        Assert.Empty(result.Document.Validate());
+
+        static NwcMesh Mesh(int id, double x, NwcNode node)
+        {
+            var mesh = new NwcMesh
+            {
+                Id = id,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Node = node;
+            node.Mesh = mesh;
+            return mesh;
+        }
+    }
+
+    [Fact]
+    public void Read_SharedLinkedSubtree_BecomesOneModel()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true };
+        first.Element = first;
+        var shared = new NwcNode { Id = 2, Name = "Shared model", Class = "LcOpModelFile", IsLinkRoot = true };
+        for (int i = 0; i < 3; i++)
+        {
+            shared.Children.Add(new NwcNode
+            {
+                Id = 10 + i,
+                Name = $"Part {i + 1}",
+                Class = "LcRevitData_Element",
+                Element = first,
+                IsLinkPlacement = true,
+            });
+        }
+
+        root.Children.Add(first);
+        root.Children.Add(shared);
+
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Equal(2, result.Document.Models.Count);
+        var linkModel = result.Document.Models[1];
+        Assert.Equal("Shared model", linkModel.Key);
+        Assert.All(result.Document.Elements.Where(element => element.Name.StartsWith("Part ", StringComparison.Ordinal)),
+            element => Assert.Equal(linkModel.Id, element.ModelId));
+    }
+
+    [Fact]
+    public void Read_GeometryUnderALinkedPlacement_CountsThePlacementNotItsElement()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true, Parent = root };
+        first.Element = first;
+        var link = new NwcNode { Id = 2, Name = "Link", Class = "LcOpModelFile", Element = first, IsLinkPlacement = true, IsLinkRoot = true, Parent = root };
+        var part = new NwcNode { Id = 3, Name = "Part", Class = "LcRevitData_Element", Element = first, Parent = link };
+        link.Children.Add(part);
+        root.Children.Add(first);
+        root.Children.Add(link);
+
+        var result = Valid(NwcSceneReader.Read(
+            NwcDocument.Create(meshes: [Mesh(1, 0, first), Mesh(2, 10, part)], rootNode: root),
+            new NwcSceneOptions { ModelKey = "model.nwc", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Equal(2, result.ElementCount);
+        Assert.Equal(2, result.ElementsWithGeometry);
+
+        static NwcMesh Mesh(int id, double x, NwcNode node)
+        {
+            var mesh = new NwcMesh
+            {
+                Id = id,
+                Vertices = [new NwcIO.Model.Vector3d(x, 0, 0), new NwcIO.Model.Vector3d(x + 1, 0, 0), new NwcIO.Model.Vector3d(x, 1, 0)],
+                Indices = [0, 1, 2],
+                BoundingBox = new NwcIO.Model.BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+            };
+            mesh.Node = node;
+            node.Mesh = mesh;
+            return mesh;
+        }
+    }
+
+    [Fact]
+    public void Read_MoreLinkedPlacementsThanTheModelLimit_Throws()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        var first = new NwcNode { Id = 1, Name = "First", Class = "LcRevitData_Element", IsElement = true, Parent = root };
+        first.Element = first;
+        root.Children.Add(first);
+        for (int i = 0; i < 100_000; i++)
+        {
+            root.Children.Add(new NwcNode { Id = i + 2, Name = "Link", Class = "LcOpModelFile", Element = first, IsLinkPlacement = true, IsLinkRoot = true, Parent = root });
+        }
+
+        var ex = Assert.Throws<InvalidDataException>(() => NwcSceneReader.Read(
+            NwcDocument.Create(rootNode: root),
+            new NwcSceneOptions { ModelKey = "model.nwc", LengthUnit = NwcLengthUnit.Meters }));
+        Assert.Contains("100000", ex.Message);
+    }
+
+    [Fact]
+    public void Read_LinkedSubtreesWithTheSameName_GetOneModelPerRoot()
+    {
+        var root = new NwcNode { Id = 0, Name = "Root", Class = "Model" };
+        for (int i = 1; i <= 2; i++)
+        {
+            var link = new NwcNode
+            {
+                Id = i,
+                Name = "Linked model",
+                Class = "LcOpModelFile",
+                IsLinkPlacement = true,
+            };
+            var child = new NwcNode
+            {
+                Id = 10 + i,
+                Name = $"Part {i}",
+                Class = "LcRevitData_Element",
+                IsElement = true,
+                Element = link,
+            };
+            link.Children.Add(child);
+            root.Children.Add(link);
+        }
+
+        var result = Valid(NwcSceneReader.Read(NwcDocument.Create(rootNode: root), new NwcSceneOptions
+        {
+            ModelKey = "model.nwc",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Equal(3, result.Document.Models.Count);
+        Assert.Equal(["model.nwc", "Linked model", "Linked model#2"],
+            result.Document.Models.Select(model => model.Key));
+        Assert.Equal(2, result.Document.Elements.Single(element => element.Name == "Part 1").ModelId);
+        Assert.Equal(3, result.Document.Elements.Single(element => element.Name == "Part 2").ModelId);
+    }
+
+    [Fact]
+    public void Read_AssemblyLoadedFromDirectory_UsesFileNamesForKeysAndPaths()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nwcscene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            var fileInfo = new NwcFileInfo { SourcePath = "Tower.rvt", LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" };
+            NwcDocument.Create(fileInfo, rootNode: root).Save(Path.Combine(directory, "Arch.nwc"));
+            NwcDocument.Create(fileInfo, rootNode: root).Save(Path.Combine(directory, "Struct.nwc"));
+
+            var assembly = NwcAssembly.LoadFromDirectory(directory);
+            var result = Valid(NwcSceneReader.Read(assembly));
+
+            Assert.Equal(["Arch.nwc", "Struct.nwc"],
+                result.Document.Models.Select(model => model.Key).OrderBy(key => key, StringComparer.Ordinal));
+            Assert.All(result.Document.Models, model =>
+            {
+                Assert.NotNull(model.Path);
+                Assert.Equal(model.Key, Path.GetFileName(model.Path));
+            });
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void Read_AssemblyOpenedFromNwf_SkipsTheShellAndReportsUnresolvedAndNotLoadedReferences()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nwcscene-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+            NwcDocument.Create(new NwcFileInfo { SourcePath = "Tower.rvt", LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root)
+                .Save(Path.Combine(directory, "Arch.nwc"));
+            File.WriteAllText(Path.Combine(directory, "tex.png"), "not a model");
+            string nwf = Path.Combine(directory, "fed.nwf");
+            File.WriteAllBytes(nwf, XRefFile("Arch.nwc", "gone/Missing.nwc", "tex.png"));
+
+            var assembly = NwcAssembly.OpenNwf(nwf);
+            var result = Valid(NwcSceneReader.Read(assembly));
+
+            Assert.Equal(["Arch.nwc"], result.Document.Models.Select(m => m.Key));   // the shell is not a model
+            Assert.DoesNotContain(result.Diagnostics, d => d.Code == "xrefs-skipped");
+            var unresolved = Assert.Single(result.Diagnostics, d => d.Code == "xrefs-unresolved");
+            Assert.Equal(SceneSeverity.Warning, unresolved.Severity);
+            Assert.StartsWith("1 external references were not found", unresolved.Message);
+            Assert.Contains("gone/Missing.nwc", unresolved.Message);
+            var notLoaded = Assert.Single(result.Diagnostics, d => d.Code == "xrefs-not-loaded");
+            Assert.Equal(SceneSeverity.Warning, notLoaded.Severity);
+            Assert.Contains("tex.png", notLoaded.Message);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public void Read_AssemblyWithoutNwfReferences_GetsNoXRefDiagnostics()
+    {
+        var assembly = NwcAssembly.Create("Federation", ElementWithEmptyMesh("A.nwc", Guid.NewGuid()));
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code.StartsWith("xrefs-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Read_Assembly_KeepsTheSourceIdOfAModelDiagnostic()
+    {
+        var guid = Guid.NewGuid();
+        var assembly = NwcAssembly.Create("Federation", ElementWithEmptyMesh("A.nwc", guid));
+
+        var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
+
+        var diagnostic = Assert.Single(result.Diagnostics, d => d.Code == "empty-mesh");
+        Assert.StartsWith("A.nwc: ", diagnostic.Message);
+        Assert.Equal(guid.ToString("D"), diagnostic.SourceId);
+    }
+
+    private static NwcDocument ElementWithEmptyMesh(string sourcePath, Guid guid)
+    {
+        var root = new NwcNode { Id = 1, Name = "Root", Class = "Model" };
+        var child = new NwcNode { Id = 2, Name = "Child", Class = "Model", IsElement = true, ElementGuid = guid };
+        child.Element = child;
+        root.Children.Add(child);
+        var mesh = new NwcMesh { Id = 1, Vertices = [], Indices = [], Node = child };
+        child.Mesh = mesh;
+        return NwcDocument.Create(new NwcFileInfo { SourcePath = sourcePath }, meshes: [mesh], rootNode: root);
+    }
+
+    // A .nwf-like file whose XRef table lists the given paths.
+    private static byte[] XRefFile(params string[] paths) => SyntheticNwcFile.Build(null, null, [], [], extraStreams:
+        [("LcOpXRefTable", System.Text.Encoding.UTF8.GetBytes(
+            "{\"Type\":\"XRefTable\",\"Version\":1,\"SavedFilename\":\"fed.nwf\",\"Table\":["
+            + string.Join(",", paths.Select(p => $"{{\"OriginalPath\":\"{p}\",\"RemappedPath\":\"\"}}")) + "]}"))]);
+
+    [Fact]
+    public void Read_SavedViewpointInFeet_ScalesPositionsAndKeepsUpUnitLength()
+    {
+        var viewpoint = new NwcSavedViewpoint
+        {
+            Id = Guid.NewGuid(),
+            Name = "Feet",
+            Camera = new NwcCamera
+            {
+                Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                Rotation = Quaterniond.Identity,
+                FocalDistance = 10,
+                FieldOfView = 90,
+                AspectRatio = 1.5,
+                NearDistance = 1,
+                FarDistance = 500,
+            },
+        };
+        var document = NwcDocument.Create(
+            savedViewpoints: [viewpoint],
+            rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "feet",
+            LengthUnit = NwcLengthUnit.Feet,
+        }));
+
+        var camera = Assert.Single(result.Document.Viewpoints).Camera;
+        Assert.Equal(0.3048, camera.Position.X, 6);
+        Assert.Equal(0.6096, camera.Position.Y, 6);
+        Assert.Equal(0.9144, camera.Position.Z, 6);
+        Assert.Equal(0.3048, camera.Target.X, 6);
+        Assert.Equal(0.6096, camera.Target.Y, 6);
+        Assert.Equal(-2.1336, camera.Target.Z, 6);
+        Assert.Equal(0, camera.Up.X, 6);
+        Assert.Equal(1, camera.Up.Y, 6);
+        Assert.Equal(0, camera.Up.Z, 6);
+        Assert.Equal(0.3048, camera.NearDistance, 6);
+        Assert.Equal(152.4, camera.FarDistance, 6);
+        Assert.Equal(Math.PI / 2, camera.FieldOfView, 6);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoint-camera-approximated");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoint-content-skipped");
+    }
+
+    [Fact]
+    public void Read_FileSavedViewpoint_ReportsAnApproximatedCamera()
+    {
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint
+            {
+                Id = null,
+                IsCameraApproximated = true,
+                Name = "From file",
+                Camera = new NwcCamera
+                {
+                    Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                    Rotation = Quaterniond.Identity,
+                },
+            },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "file",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Contains(result.Diagnostics,
+            d => d.Code == "viewpoint-camera-approximated" && d.Severity == SceneSeverity.Info);
+    }
+
+    [Fact]
+    public void Read_SavedViewpointWithoutIdAndWithDecodedCamera_IsNotReportedAsApproximated()
+    {
+        // An XML viewpoint without a guid has no Id but a real camera.
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint
+            {
+                Id = null,
+                Name = "No guid",
+                Camera = new NwcCamera { Position = new NwcIO.Model.Vector3d(1, 2, 3), Rotation = Quaterniond.Identity },
+            },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Single(result.Document.Viewpoints);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoint-camera-approximated");
+    }
+
+    private static NwcSavedViewpoint ViewpointWithFov(string name, double fov) => new()
+    {
+        Name = name,
+        Camera = new NwcCamera { Position = new NwcIO.Model.Vector3d(1, 2, 3), Rotation = Quaterniond.Identity, FieldOfView = fov },
+    };
+
+    [Fact]
+    public void Read_SavedViewpointWithUnconvertibleCamera_IsSkippedAndCounted()
+    {
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            ViewpointWithFov("Good", 60),
+            ViewpointWithFov("Bad", 180),
+            ViewpointWithFov("Nan", double.NaN),
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Equal("Good", Assert.Single(result.Document.Viewpoints).Name);
+        var diagnostic = Assert.Single(result.Diagnostics, d => d.Code == "viewpoints-skipped");
+        Assert.Equal(SceneSeverity.Warning, diagnostic.Severity);
+        Assert.Equal("2 saved viewpoints could not be converted.", diagnostic.Message);
+    }
+
+    [Fact]
+    public void Read_SavedViewpointsWithUnknownUnit_AreAllSkipped()
+    {
+        var document = NwcDocument.Create(savedViewpoints: [ViewpointWithFov("A", 60), ViewpointWithFov("B", 60)],
+            rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Unknown }));
+
+        Assert.Empty(result.Document.Viewpoints);
+        Assert.Contains(result.Diagnostics, d => d.Code == "viewpoints-skipped" && d.Message == "2 saved viewpoints could not be converted.");
+    }
+
+    [Fact]
+    public void Read_SavedViewpointsWithSectionPlanesOrBox_ReportSkippedContent()
+    {
+        var camera = new NwcCamera { Position = new NwcIO.Model.Vector3d(1, 2, 3), Rotation = Quaterniond.Identity };
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint { Name = "Planes", Camera = camera, SectionPlanes = [new NwcIO.Model.Sectioning.NwcSectionPlane { Normal = new NwcIO.Model.Vector3d(1, 0, 0) }] },
+            new NwcSavedViewpoint { Name = "Box", Camera = camera, SectionBox = new NwcIO.Model.Sectioning.NwcSectionBox { Bounds = new NwcIO.Model.BoundingBox3d(new NwcIO.Model.Vector3d(0, 0, 0), new NwcIO.Model.Vector3d(1, 1, 1)), IsEnabled = true } },
+            new NwcSavedViewpoint { Name = "Plain", Camera = camera },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions { ModelKey = "k", LengthUnit = NwcLengthUnit.Meters }));
+
+        Assert.Equal(3, result.Document.Viewpoints.Count);
+        Assert.Contains(result.Diagnostics, d => d.Code == "viewpoint-content-skipped" && d.Message.StartsWith("2 saved viewpoints", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Read_SavedViewpointWithComments_ReportsSkippedContent()
+    {
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint
+            {
+                Name = "Review",
+                Comments = ["Check the opening"],
+                Camera = new NwcCamera
+                {
+                    Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                    Rotation = Quaterniond.Identity,
+                },
+            },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "comments",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Contains(result.Diagnostics,
+            d => d.Code == "viewpoint-content-skipped" && d.Severity == SceneSeverity.Info);
     }
 
     [Fact]
@@ -625,7 +1272,8 @@ public sealed class NwcSceneReaderTests
 
     private static NwcPropertyTab Tab(params (string Name, int Type, string? Value)[] values) => new()
     {
-        Name = "T", InternalName = "LcRevitData_Element",
+        Name = "T",
+        InternalName = "LcRevitData_Element",
         Properties = [.. values.Select(v => new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = v.Name, Class = "T", ValueType = v.Type, Value = v.Value })],
     };
 

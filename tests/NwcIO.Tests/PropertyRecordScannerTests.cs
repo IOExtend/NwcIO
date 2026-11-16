@@ -120,8 +120,11 @@ public class PropertyRecordScannerTests
         Assert.Equal(1, records[0].ValueType);
         Assert.Equal("3.14159", records[0].Value);
 
+        Assert.Equal(3.14159, records[0].DoubleValue);
+
         Assert.Equal(5, records[1].ValueType);
         Assert.Equal("2026-04-01T12:00:00Z", records[1].Value);
+        Assert.Equal(1775044800L, records[1].IntValue);
 
         Assert.Equal(6, records[2].ValueType);
         Assert.Equal("2500", records[2].Value);
@@ -150,6 +153,7 @@ public class PropertyRecordScannerTests
             new() { FirstInt = 7, Tag = 52, Name = "IdProp", Class = "Tab", ValueType = 9, Value = "SYM_01" },
             new() { FirstInt = 8, Tag = 52, Name = "Point3Prop", Class = "Tab", ValueType = 12, Value = "(1, 2, 3)" },
             new() { FirstInt = 9, Tag = 52, Name = "Point2Prop", Class = "Tab", ValueType = 13, Value = "(4, 5)" },
+            new() { FirstInt = 10, Tag = 52, Name = "RefProp", Class = "Tab", ValueType = 8, Value = "Target", ReferenceId = 42, ReferenceTag = 7, ReferenceClass = "LcRevitData_Element" },
         };
 
         var streamBytes = Internal.Container.NwcStreamSerializer.BuildSceneTreeStream(inputRecords, null);
@@ -162,6 +166,78 @@ public class PropertyRecordScannerTests
             Assert.Equal(inputRecords[i].ValueType, scanned[i].ValueType);
             Assert.Equal(inputRecords[i].Value, scanned[i].Value);
         }
+
+        Assert.Equal(123.456, scanned.First(r => r.Name == "DoubleProp").DoubleValue);
+        Assert.Equal(42, scanned.First(r => r.Name == "IntProp").IntValue);
+        var reference = Assert.Single(scanned, r => r.Name == "RefProp");
+        Assert.Equal(42, reference.ReferenceId);
+        Assert.Equal(7, reference.ReferenceTag);
+        Assert.Equal("LcRevitData_Element", reference.ReferenceClass);
+    }
+
+    [Fact]
+    public void BuildSceneTreeStream_WritesTypedValuesInsteadOfValueText()
+    {
+        var records = new List<Model.NwcPropertyRecord>
+        {
+            new() { FirstInt = 1, Tag = 52, Name = "I", Class = "Tab", ValueType = 2, Value = "1", IntValue = 99 },
+            new() { FirstInt = 2, Tag = 52, Name = "D", Class = "Tab", ValueType = 1, Value = "1", DoubleValue = 2.5 },
+            new() { FirstInt = 3, Tag = 52, Name = "T", Class = "Tab", ValueType = 5, Value = "2026-04-01T12:00:00Z", IntValue = 86400L },
+        };
+
+        var scanned = new PropertyRecordScanner(Internal.Container.NwcStreamSerializer.BuildSceneTreeStream(records, null)).Scan();
+
+        Assert.Equal(99, scanned.Single(r => r.Name == "I").IntValue);
+        Assert.Equal(2.5, scanned.Single(r => r.Name == "D").DoubleValue);
+        Assert.Equal(86400L, scanned.Single(r => r.Name == "T").IntValue);
+    }
+
+    [Fact]
+    public void Save_NodePropertyReference_KeepsReferenceMetadata()
+    {
+        var root = new Model.NwcNode { Id = 1, Name = "Element 1", Class = "LcRevitElement" };
+        root.Properties.Add(new Model.NwcPropertyRecord
+        {
+            FirstInt = 1,
+            Tag = 52,
+            Name = "Phase",
+            Class = "Item",
+            ValueType = 8,
+            Value = "Existing",
+            ReferenceId = 42,
+            ReferenceTag = 7,
+            ReferenceClass = "LcRevitData_Element",
+        });
+
+        using var ms = new MemoryStream();
+        NwcDocument.Create(rootNode: root).Save(ms);
+        ms.Position = 0;
+
+        var prop = Assert.Single(NwcDocument.Open(ms).RootNode!.Properties, p => p.Name == "Phase");
+        Assert.Equal(42, prop.ReferenceId);
+        Assert.Equal(7, prop.ReferenceTag);
+        Assert.Equal("LcRevitData_Element", prop.ReferenceClass);
+    }
+
+    [Fact]
+    public void Save_UnsupportedValueType_ThrowsArgumentExceptionNamingTheProperty()
+    {
+        var record = new Model.NwcPropertyRecord { FirstInt = 5, Tag = 52, Name = "Odd", Class = "Tab", ValueType = 14 };
+        var doc = NwcDocument.Create(propertyRecords: [record]);
+
+        var ex = Assert.Throws<ArgumentException>(() => doc.Save(new MemoryStream()));
+        Assert.Contains("Odd", ex.Message);
+        Assert.Contains("14", ex.Message);
+    }
+
+    [Fact]
+    public void Save_IntValueOutsideInt32_ThrowsArgumentException()
+    {
+        var record = new Model.NwcPropertyRecord { FirstInt = 5, Tag = 52, Name = "Big", Class = "Tab", ValueType = 2, IntValue = (long)int.MaxValue + 1 };
+        var doc = NwcDocument.Create(propertyRecords: [record]);
+
+        var ex = Assert.Throws<ArgumentException>(() => doc.Save(new MemoryStream()));
+        Assert.Contains("Big", ex.Message);
     }
 
     private static void WriteDouble(MemoryStream ms, double value)

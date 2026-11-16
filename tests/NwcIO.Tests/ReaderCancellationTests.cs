@@ -70,43 +70,182 @@ public sealed class ReaderCancellationTests
     }
 
     [Fact]
-    public void OpenNwf_CanceledToken_ThrowsOperationCanceled()
+    public void Open_CanceledAfterReadContainer_StopsBeforeGeometry()
     {
-        string path = Path.Combine(Path.GetTempPath(), "nwcio-cancel-" + Guid.NewGuid().ToString("N") + ".nwf");
-        File.WriteAllBytes(path, []);
+        using var cancellation = new CancellationTokenSource();
+        var progress = new CollectingProgress { OnReport = p => { if (p.Phase == "read-container") cancellation.Cancel(); } };
+        using var stream = new MemoryStream(DocumentBytes());
+
+        Assert.Throws<OperationCanceledException>(() =>
+            NwcDocument.Open(stream, null, null, progress, cancellation.Token));
+
+        Assert.Equal(["read-container"], progress.Reports.Select(p => p.Phase));
+    }
+
+    [Fact]
+    public void LoadFromDirectory_CanceledBetweenModels_StopsAfterFirstModel()
+    {
+        string directory = TempDirectory();
         try
         {
+            foreach (var name in new[] { "a.nwc", "b.nwc", "c.nwc" })
+            {
+                NwcDocument.Create().Save(Path.Combine(directory, name));
+            }
             using var cancellation = new CancellationTokenSource();
-            cancellation.Cancel();
+            var progress = new CollectingProgress { OnReport = p => { if (p.Phase == "load-models") cancellation.Cancel(); } };
 
             Assert.Throws<OperationCanceledException>(() =>
-                NwcAssembly.OpenNwf(path, null, null, cancellation.Token));
+                NwcAssembly.LoadFromDirectory(directory, "*.nwc", null, progress, cancellation.Token));
+
+            Assert.Single(progress.Reports, p => p.Phase == "load-models");
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(directory, recursive: true);
         }
     }
 
     [Fact]
-    public async Task OpenAsyncAndSaveJsonAsync_Roundtrip()
+    public void OpenNwf_CanceledBetweenReferences_StopsBeforeNextReference()
+    {
+        string directory = TempDirectory();
+        try
+        {
+            string nwf = Path.Combine(directory, "fed.nwf");
+            WriteNwf(nwf, "missing.nwc", "a.nwc");
+            NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+            using var cancellation = new CancellationTokenSource();
+            var progress = new CollectingProgress { OnReport = _ => cancellation.Cancel() };
+
+            Assert.Throws<OperationCanceledException>(() =>
+                NwcAssembly.OpenNwf(nwf, null, progress, cancellation.Token));
+
+            // Only the primary document was reported: the unresolved reference was never visited.
+            Assert.Single(progress.Reports);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void OpenNwf_ProgressReachesTotalWhenReferencesAreNotLoaded()
+    {
+        string directory = TempDirectory();
+        try
+        {
+            string nwf = Path.Combine(directory, "fed.nwf");
+            WriteNwf(nwf, "a.nwc", "missing.nwc", "a.nwc", "tex.png");
+            NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+            File.WriteAllText(Path.Combine(directory, "tex.png"), "x");
+            var progress = new CollectingProgress();
+
+            var assembly = NwcAssembly.OpenNwf(nwf, null, progress, CancellationToken.None);
+
+            Assert.Equal(2, assembly.Models.Count);
+            Assert.Single(assembly.UnresolvedXRefs);
+            Assert.Single(assembly.SkippedXRefs);
+            Assert.Equal(
+                [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)],
+                progress.Reports.Where(p => p.Phase == "load-models").Select(p => (p.Completed, p.Total)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task OpenAsync_CanceledToken_ReturnsCanceledTask()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var task = NwcDocument.OpenAsync(new MemoryStream(DocumentBytes()), cancellationToken: cancellation.Token);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.True(task.IsCanceled);
+    }
+
+    [Fact]
+    public async Task OpenAsyncAndSaveAsync_Roundtrip()
     {
         string nwc = Path.Combine(Path.GetTempPath(), "nwcio-async-" + Guid.NewGuid().ToString("N") + ".nwc");
-        string json = Path.Combine(Path.GetTempPath(), "nwcio-async-" + Guid.NewGuid().ToString("N") + ".json");
+        string copy = Path.Combine(Path.GetTempPath(), "nwcio-async-" + Guid.NewGuid().ToString("N") + ".nwc");
         try
         {
             NwcDocument.Create().Save(nwc);
 
             var document = await NwcDocument.OpenAsync(nwc);
-            await document.SaveJsonAsync(json);
+            await document.SaveAsync(copy);
 
-            Assert.True(File.Exists(json));
+            Assert.Equal(document.Meshes.Count, NwcDocument.Open(copy).Meshes.Count);
         }
         finally
         {
             if (File.Exists(nwc)) File.Delete(nwc);
-            if (File.Exists(json)) File.Delete(json);
+            if (File.Exists(copy)) File.Delete(copy);
         }
+    }
+
+    [Fact]
+    public async Task LoadFromDirectoryAsync_LoadsModels()
+    {
+        string directory = TempDirectory();
+        try
+        {
+            NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+
+            var assembly = await NwcAssembly.LoadFromDirectoryAsync(directory);
+
+            Assert.Single(assembly.Models);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void OpenManifest_CanceledBetweenModels_StopsAfterFirstModel()
+    {
+        string directory = TempDirectory();
+        try
+        {
+            NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+            NwcDocument.Create().Save(Path.Combine(directory, "b.nwc"));
+            var manifest = new NwcIO.Model.Clash.NwcNwfManifest("Fed");
+            manifest.ModelPaths.Add("a.nwc");
+            manifest.ModelPaths.Add("b.nwc");
+            string path = Path.Combine(directory, "fed.nwf.xml");
+            manifest.Save(path);
+            using var cancellation = new CancellationTokenSource();
+            var progress = new CollectingProgress { OnReport = _ => cancellation.Cancel() };
+
+            Assert.Throws<OperationCanceledException>(() =>
+                NwcAssembly.OpenManifest(path, null, progress, cancellation.Token));
+
+            Assert.Single(progress.Reports);
+
+            var complete = new CollectingProgress();
+            Assert.Equal(2, NwcAssembly.OpenManifest(path, null, complete, CancellationToken.None).Models.Count);
+            Assert.Equal((2, 2), (complete.Reports[^1].Completed, complete.Reports[^1].Total));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static void WriteNwf(string path, params string[] references)
+    {
+        string table = string.Join(",", references.Select(r => "{\"OriginalPath\":\"" + r + "\",\"RemappedPath\":\"\"}"));
+        byte[] xrefStream = System.Text.Encoding.UTF8.GetBytes(
+            "{\"Type\":\"XRefTable\",\"Version\":1,\"SavedFilename\":\"fed.nwf\",\"Table\":[" + table + "]}");
+        using var stream = File.Create(path);
+        NwcIO.Internal.Container.NwcContainerWriter.Write(stream, [xrefStream]);
     }
 
     private static byte[] DocumentBytes()
@@ -127,6 +266,12 @@ public sealed class ReaderCancellationTests
     {
         public List<NwcProgress> Reports { get; } = [];
 
-        public void Report(NwcProgress value) => Reports.Add(value);
+        public Action<NwcProgress>? OnReport { get; init; }
+
+        public void Report(NwcProgress value)
+        {
+            Reports.Add(value);
+            OnReport?.Invoke(value);
+        }
     }
 }
