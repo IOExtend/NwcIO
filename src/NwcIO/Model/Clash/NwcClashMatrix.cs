@@ -56,7 +56,7 @@ public sealed class NwcClashMatrixCell
     public string DisciplineA { get; set; } = string.Empty;
     public string DisciplineB { get; set; } = string.Empty;
     public NwcClashTestType TestType { get; set; } = NwcClashTestType.Hard;
-    public double Tolerance { get; set; } = 0.001; // in meters
+    public double Tolerance { get; set; } = 0.001; // document length units
     public bool Enabled { get; set; } = true;
     public NwcClashTest? ExecutedTest { get; set; }
 
@@ -163,6 +163,12 @@ public sealed class NwcClashMatrix
     public void Run(NwcAssembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
+        var keyByDocument = new Dictionary<NwcDocument, string>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < assembly.Models.Count; i++)
+        {
+            keyByDocument[assembly.Models[i]] = modelKeys[i];
+        }
 
         foreach (var cell in Cells)
         {
@@ -204,23 +210,51 @@ public sealed class NwcClashMatrix
 
                     var boxB = mB.GetWorldBoundingBox();
                     var interBox = boxA.Intersect(boxB);
-                    if (interBox.IsEmpty) continue;
 
-                    double penetration = Math.Min(interBox.Size.X, Math.Min(interBox.Size.Y, interBox.Size.Z));
-                    if (penetration >= cell.Tolerance)
+                    double penetration;
+                    Vector3d clashPoint;
+                    if (cell.TestType == NwcClashTestType.Clearance)
+                    {
+                        double gap = interBox.IsEmpty ? BoxGap(boxA, boxB) : 0.0;
+                        if (gap > cell.Tolerance)
+                        {
+                            continue;
+                        }
+
+                        penetration = -gap;
+                        clashPoint = interBox.IsEmpty ? (boxA.Center + boxB.Center) * 0.5 : interBox.Center;
+                    }
+                    else
+                    {
+                        if (interBox.IsEmpty)
+                        {
+                            continue;
+                        }
+
+                        penetration = Math.Min(interBox.Size.X, Math.Min(interBox.Size.Y, interBox.Size.Z));
+                        if (penetration < cell.Tolerance)
+                        {
+                            continue;
+                        }
+
+                        clashPoint = interBox.Center;
+                    }
+
                     {
                         var c1 = new NwcClashObject(mA.Name ?? $"Mesh_{mA.Id}", mA.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docA.FileInfo.SourcePath ?? "ModelA"),
-                            Mesh = mA
+                            Mesh = mA,
+                            IfcGuid = NwcElementGuid.ForMesh(mA, keyByDocument[docA]),
                         };
                         var c2 = new NwcClashObject(mB.Name ?? $"Mesh_{mB.Id}", mB.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docB.FileInfo.SourcePath ?? "ModelB"),
-                            Mesh = mB
+                            Mesh = mB,
+                            IfcGuid = NwcElementGuid.ForMesh(mB, keyByDocument[docB]),
                         };
 
-                        var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, interBox.Center, -penetration);
+                        var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, clashPoint, -penetration);
 
                         // Evaluate ignore rules
                         bool ignore = false;
@@ -358,6 +392,15 @@ public sealed class NwcClashMatrix
 
         writer.WriteEndObject();
         writer.Flush();
+    }
+
+    /// <summary>Shortest distance between two axis-aligned boxes (zero when they intersect).</summary>
+    private static double BoxGap(BoundingBox3d a, BoundingBox3d b)
+    {
+        double dx = Math.Max(0.0, Math.Max(a.Min.X - b.Max.X, b.Min.X - a.Max.X));
+        double dy = Math.Max(0.0, Math.Max(a.Min.Y - b.Max.Y, b.Min.Y - a.Max.Y));
+        double dz = Math.Max(0.0, Math.Max(a.Min.Z - b.Max.Z, b.Min.Z - a.Max.Z));
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     /// <summary>

@@ -22,7 +22,7 @@ public static class NwcClashDetector
         var meshesA = ResolveSelection(document, test.SelectionA);
         var meshesB = ResolveSelection(document, test.SelectionB);
 
-        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model");
+        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model", document);
         return test;
     }
 
@@ -36,8 +36,9 @@ public static class NwcClashDetector
         ArgumentNullException.ThrowIfNull(test);
         ThrowIfSetIsMissing(assembly.Models, test);
 
-        var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
-        var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
+        var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
+        var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
 
         for (int m = 0; m < assembly.Models.Count; m++)
         {
@@ -47,13 +48,13 @@ public static class NwcClashDetector
             var selA = ResolveSelection(doc, test.SelectionA);
             for (int i = 0; i < selA.Count; i++)
             {
-                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name));
+                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name, modelKeys[m]));
             }
 
             var selB = ResolveSelection(doc, test.SelectionB);
             for (int i = 0; i < selB.Count; i++)
             {
-                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name));
+                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name, modelKeys[m]));
             }
         }
 
@@ -65,7 +66,8 @@ public static class NwcClashDetector
         IReadOnlyList<NwcMesh> meshesA,
         IReadOnlyList<NwcMesh> meshesB,
         NwcClashTest test,
-        string modelName)
+        string modelName,
+        NwcDocument document)
     {
         bool sameSelection = ReferenceEquals(meshesA, meshesB) ||
             meshesA.SequenceEqual(meshesB, ReferenceEqualityComparer.Instance);
@@ -122,8 +124,8 @@ public static class NwcClashDetector
 
                 if (!expandedA.Intersects(boxB)) continue;
 
-                // Narrow phase: mesh triangle intersection
-                if (CheckMeshIntersection(meshA, meshB, out var clashPoint, out double penetration))
+                // Narrow phase: triangle intersection (Hard) or mesh distance (Clearance)
+                if (TryGetClash(test, meshA, meshB, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -137,7 +139,7 @@ public static class NwcClashDetector
                         Layer = meshA.Node?.Parent?.Name ?? "Default",
                         Node = meshA.Node,
                         Mesh = meshA,
-                        IfcGuid = IfcGuid.FromElementId(meshA.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(meshA, document),
                     };
 
                     var obj2 = new NwcClashObject(item2Name, meshB.Id, meshB.Node?.Name ?? item2Name)
@@ -146,15 +148,17 @@ public static class NwcClashDetector
                         Layer = meshB.Node?.Parent?.Name ?? "Default",
                         Node = meshB.Node,
                         Mesh = meshB,
-                        IfcGuid = IfcGuid.FromElementId(meshB.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(meshB, document),
                     };
 
                     var unionBox = boxA.Union(boxB);
                     var vp = NwcSavedViewpoint.CreateDefault(unionBox, $"{clashName} View");
 
-                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, -penetration, NwcClashStatus.New)
+                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
-                        Description = $"Hard clash between {item1Name} and {item2Name}",
+                        Description = test.TestType == NwcClashTestType.Clearance
+                            ? $"Clearance between {item1Name} and {item2Name}"
+                            : $"Hard clash between {item1Name} and {item2Name}",
                         Viewpoint = vp,
                     };
 
@@ -165,8 +169,8 @@ public static class NwcClashDetector
     }
 
     private static void RunCoreMultiModel(
-        List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsA,
-        List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsB,
+        List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsA,
+        List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsB,
         NwcClashTest test)
     {
         bool sameSelection = itemsA.Select(item => item.Mesh)
@@ -222,7 +226,7 @@ public static class NwcClashDetector
 
                 if (!expandedA.Intersects(boxB)) continue;
 
-                if (CheckMeshIntersection(itemA.Mesh, itemB.Mesh, out var clashPoint, out double penetration))
+                if (TryGetClash(test, itemA.Mesh, itemB.Mesh, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -236,7 +240,7 @@ public static class NwcClashDetector
                         Layer = itemA.Layer,
                         Node = itemA.Mesh.Node,
                         Mesh = itemA.Mesh,
-                        IfcGuid = IfcGuid.FromElementId(itemA.Mesh.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(itemA.Mesh, itemA.ModelKey),
                     };
 
                     var obj2 = new NwcClashObject(name2, itemB.Mesh.Id, $"{itemB.ModelName}/{name2}")
@@ -245,15 +249,17 @@ public static class NwcClashDetector
                         Layer = itemB.Layer,
                         Node = itemB.Mesh.Node,
                         Mesh = itemB.Mesh,
-                        IfcGuid = IfcGuid.FromElementId(itemB.Mesh.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(itemB.Mesh, itemB.ModelKey),
                     };
 
                     var unionBox = boxA.Union(boxB);
                     var vp = NwcSavedViewpoint.CreateDefault(unionBox, $"{clashName} View");
 
-                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, -penetration, NwcClashStatus.New)
+                    var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
-                        Description = $"Clash between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
+                        Description = test.TestType == NwcClashTestType.Clearance
+                            ? $"Clearance between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})"
+                            : $"Clash between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
                         Viewpoint = vp,
                     };
 
@@ -261,6 +267,52 @@ public static class NwcClashDetector
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Applies the test's tolerance after the narrow phase. Hard tests keep intersections with penetration at
+    /// or above the tolerance, plus zero-depth (coplanar) overlaps; Clearance tests
+    /// report meshes whose shortest distance is at or below the tolerance.
+    /// </summary>
+    private static bool TryGetClash(
+        NwcClashTest test,
+        NwcMesh meshA,
+        NwcMesh meshB,
+        out Vector3d clashPoint,
+        out double distance)
+    {
+        if (test.TestType == NwcClashTestType.Clearance)
+        {
+            // MeasureMeshToMesh reports zero distance at the origin for meshes without triangles.
+            if (meshA.Indices.Count < 3 || meshB.Indices.Count < 3)
+            {
+                clashPoint = default;
+                distance = 0;
+                return false;
+            }
+
+            var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
+            clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
+            distance = measurement.Distance; // positive for clearance, per NwcClashResult.Distance
+            return measurement.Distance <= Math.Max(0.0, test.Tolerance);
+        }
+
+        if (CheckMeshIntersection(meshA, meshB, out clashPoint, out double penetration))
+        {
+            // A zero-depth AABB overlap is a coplanar or touching surface; it is kept rather than
+            // classified as a below-tolerance penetration.
+            if (penetration > 0 && penetration < Math.Max(0.0, test.Tolerance))
+            {
+                distance = 0;
+                return false;
+            }
+
+            distance = -penetration;
+            return true;
+        }
+
+        distance = 0;
+        return false;
     }
 
     private static bool CheckMeshIntersection(
