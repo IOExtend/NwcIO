@@ -765,7 +765,7 @@ internal static class Program
                 EnsureParentDirectory(explicitClashXmlPath);
                 var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                 doc.RunClashDetection(test);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, doc.LengthUnit);
                 doc.ExportClashReportXml(explicitClashXmlPath);
                 if (printReport)
                 {
@@ -780,7 +780,7 @@ internal static class Program
                 {
                     var test = new Model.Clash.NwcClashTest("Clash Test", Model.Clash.NwcClashTestType.Hard, clashTolerance);
                     doc.RunClashDetection(test);
-                    ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
+                    ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, doc.LengthUnit);
                 }
                 doc.ExportClashBcf(explicitClashBcfPath);
                 if (printReport)
@@ -1198,7 +1198,7 @@ internal static class Program
         {
             EnsureParentDirectory(explicitClashXmlPath);
             var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -1207,7 +1207,7 @@ internal static class Program
             if (assembly.ClashTests.Count == 0)
             {
                 var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
         }
@@ -1497,7 +1497,7 @@ internal static class Program
         {
             EnsureParentDirectory(explicitClashXmlPath);
             var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
+            ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
             assembly.ExportClashReportXml(explicitClashXmlPath);
         }
         if (!string.IsNullOrEmpty(explicitClashBcfPath))
@@ -1506,7 +1506,7 @@ internal static class Program
             if (assembly.ClashTests.Count == 0)
             {
                 var test = assembly.RunClashDetection("Federated Clash Test", clashTolerance);
-                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err);
+                ApplyClashGrouping(test, clashGroupMode, clashRadius, printReport, @err, FirstKnownLengthUnit(assembly));
             }
             assembly.ExportClashBcf(explicitClashBcfPath);
         }
@@ -1651,26 +1651,29 @@ internal static class Program
         }
     }
 
-    private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport, TextWriter? errWriter = null)
+    private static NwcLengthUnit FirstKnownLengthUnit(NwcAssembly assembly) =>
+        assembly.Models.Select(model => model.LengthUnit).FirstOrDefault(unit => unit != NwcLengthUnit.Unknown);
+
+    private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport, TextWriter? errWriter = null, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
     {
         var @err = errWriter ?? Console.Error;
         if (string.IsNullOrEmpty(mode)) return;
         int grps = 0;
         if (mode.Equals("proximity", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByProximity(test, radius);
+            grps = Model.Clash.NwcClashGrouper.GroupByProximity(test, radius, lengthUnit: lengthUnit);
         }
         else if (mode.Equals("element", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByPrimaryElement(test);
+            grps = Model.Clash.NwcClashGrouper.GroupByPrimaryElement(test, lengthUnit: lengthUnit);
         }
         else if (mode.Equals("grid", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByGrid(test);
+            grps = Model.Clash.NwcClashGrouper.GroupByGrid(test, lengthUnit: lengthUnit);
         }
         else if (mode.Equals("layer", StringComparison.OrdinalIgnoreCase))
         {
-            grps = Model.Clash.NwcClashGrouper.GroupByLayer(test);
+            grps = Model.Clash.NwcClashGrouper.GroupByLayer(test, lengthUnit: lengthUnit);
         }
         if (printReport && grps > 0)
         {

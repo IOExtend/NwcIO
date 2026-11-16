@@ -69,8 +69,11 @@ public static class NwcDiffEngine
     private static NwcLengthUnit UnitOf(NwcAssembly revision, NwcAssembly baseline) =>
         FirstKnownUnit(revision) is var unit && unit != NwcLengthUnit.Unknown ? unit : FirstKnownUnit(baseline);
 
+    // Models of different units are not rescaled, so no single unit describes the coordinates: report Unknown.
     private static NwcLengthUnit FirstKnownUnit(NwcAssembly assembly) =>
-        assembly.Models.Select(model => model.LengthUnit).FirstOrDefault(unit => unit != NwcLengthUnit.Unknown);
+        assembly.HasMixedLengthUnits
+            ? NwcLengthUnit.Unknown
+            : assembly.Models.Select(model => model.LengthUnit).FirstOrDefault(unit => unit != NwcLengthUnit.Unknown);
 
     private static void PerformDiff(
         NwcDiffReport report,

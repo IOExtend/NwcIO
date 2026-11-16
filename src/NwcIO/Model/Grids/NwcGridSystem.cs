@@ -379,7 +379,7 @@ public sealed class NwcGridSystem
         string sysName = sysElem?.Attribute("name")?.Value ?? "Grids";
 
         var system = new NwcGridSystem(sysName);
-        if (Enum.TryParse(sysElem?.Attribute("units")?.Value, ignoreCase: true, out NwcLengthUnit units))
+        if (Enum.TryParse(sysElem?.Attribute("units")?.Value, ignoreCase: true, out NwcLengthUnit units) && Enum.IsDefined(units))
         {
             system.LengthUnit = units;
         }
