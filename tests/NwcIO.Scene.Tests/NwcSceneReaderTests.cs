@@ -587,6 +587,105 @@ public sealed class NwcSceneReaderTests
     }
 
     [Fact]
+    public void Read_SavedViewpointInFeet_ScalesPositionsAndKeepsUpUnitLength()
+    {
+        var viewpoint = new NwcSavedViewpoint
+        {
+            Id = Guid.NewGuid(),
+            Name = "Feet",
+            Camera = new NwcCamera
+            {
+                Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                Rotation = Quaterniond.Identity,
+                FocalDistance = 10,
+                FieldOfView = 90,
+                AspectRatio = 1.5,
+                NearDistance = 1,
+                FarDistance = 500,
+            },
+        };
+        var document = NwcDocument.Create(
+            savedViewpoints: [viewpoint],
+            rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "feet",
+            LengthUnit = NwcLengthUnit.Feet,
+        }));
+
+        var camera = Assert.Single(result.Document.Viewpoints).Camera;
+        Assert.Equal(0.3048, camera.Position.X, 6);
+        Assert.Equal(0.6096, camera.Position.Y, 6);
+        Assert.Equal(0.9144, camera.Position.Z, 6);
+        Assert.Equal(0.3048, camera.Target.X, 6);
+        Assert.Equal(0.6096, camera.Target.Y, 6);
+        Assert.Equal(-2.1336, camera.Target.Z, 6);
+        Assert.Equal(0, camera.Up.X, 6);
+        Assert.Equal(1, camera.Up.Y, 6);
+        Assert.Equal(0, camera.Up.Z, 6);
+        Assert.Equal(0.3048, camera.NearDistance, 6);
+        Assert.Equal(152.4, camera.FarDistance, 6);
+        Assert.Equal(Math.PI / 2, camera.FieldOfView, 6);
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoint-camera-approximated");
+        Assert.DoesNotContain(result.Diagnostics, d => d.Code == "viewpoint-content-skipped");
+    }
+
+    [Fact]
+    public void Read_FileSavedViewpoint_ReportsAnApproximatedCamera()
+    {
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint
+            {
+                Id = null,
+                Name = "From file",
+                Camera = new NwcCamera
+                {
+                    Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                    Rotation = Quaterniond.Identity,
+                },
+            },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "file",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Contains(result.Diagnostics,
+            d => d.Code == "viewpoint-camera-approximated" && d.Severity == SceneSeverity.Info);
+    }
+
+    [Fact]
+    public void Read_SavedViewpointWithComments_ReportsSkippedContent()
+    {
+        var document = NwcDocument.Create(savedViewpoints:
+        [
+            new NwcSavedViewpoint
+            {
+                Name = "Review",
+                Comments = ["Check the opening"],
+                Camera = new NwcCamera
+                {
+                    Position = new NwcIO.Model.Vector3d(1, 2, 3),
+                    Rotation = Quaterniond.Identity,
+                },
+            },
+        ], rootNode: new NwcNode { Id = 1, Name = "Root", Class = "Model" });
+
+        var result = Valid(NwcSceneReader.Read(document, new NwcSceneOptions
+        {
+            ModelKey = "comments",
+            LengthUnit = NwcLengthUnit.Meters,
+        }));
+
+        Assert.Contains(result.Diagnostics,
+            d => d.Code == "viewpoint-content-skipped" && d.Severity == SceneSeverity.Info);
+    }
+
+    [Fact]
     public void Read_FileWithSavedViews_SkipsThemWithAWarning()
     {
         var result = Scene(RevitSample.Build(extraStreams: [("LcOpSavedViewsElement", new byte[8])]));

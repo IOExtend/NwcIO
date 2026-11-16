@@ -75,6 +75,8 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 | `line-colour-mixed` | Warning | Per geometry record: line segments join vertices of different colours and are drawn with the material colour. |
 | `line-colours-capped` | Warning | Per geometry record: the record has more than 64 line colours; segments of the further colours are drawn with the material colour. |
 | `viewpoints-skipped` | Warning | Saved viewpoints could not be converted: the document unit is unknown, a camera value is not finite, or a saved-views entry could not be read. Converted views are written as `SceneViewpoint`s. |
+| `viewpoint-camera-approximated` | Info | Saved viewpoints read from a file carry an approximated projection, field of view and far distance: the file's stored values are not decoded yet (one aggregated entry with the count). |
+| `viewpoint-content-skipped` | Info | Saved viewpoints carry section planes, a section box, redlines or comments; only their camera is converted (one aggregated entry with the count). |
 | `xrefs-skipped` | Warning | The document lists external references (the models a `.nwf` file refers to): they are not loaded, so the scene holds none of their content (one entry with the count). |
 | `selection-sets-skipped` | Warning | The document has selection sets or search sets; they are not converted. |
 | `timeliner-skipped` | Warning | The document has a TimeLiner schedule; it is not converted. |
@@ -87,7 +89,7 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 
 - `.nwd` partition trees and linked Revit models are not supported: `Read` throws `NotSupportedException`.
 - A `.nwf` file is read like a `.nwc`: the models it refers to are not loaded, so the scene holds only the content of the file itself (`xrefs-skipped`), and its `SourceFormat` is still `nwc`.
-- Level elevations are written in metres when the file holds them. Saved viewpoints are written when their camera is finite and the document unit is known; otherwise they are reported with `viewpoints-skipped`.
+- Level elevations are written in metres when the file holds them. Saved viewpoints are written when their camera is finite and the document unit is known; otherwise they are reported with `viewpoints-skipped`. File viewpoints use approximated projection, field of view and far distance (`viewpoint-camera-approximated`), and their section planes, section box, redlines and comments are not part of the scene (`viewpoint-content-skipped`).
 - Selection sets and search sets, the TimeLiner schedule and clash tests are not converted (`selection-sets-skipped`, `timeliner-skipped`, `clash-tests-skipped`).
 - A Revit file is one read by Navisworks from a `.rvt` (loader `LcNwcLoaderPlugin:lcldrevit`) or written by the Revit NWC exporter (loader `nwexportrevit`); the loader plugin is compared exactly, so any other loader is a non-Revit file. Files from a non-Revit loader name no unit: geometry, grid lines and dimensioned values are left out with a `unit-unknown` warning, and there are no categories or levels. Set `NwcSceneOptions.LengthUnit` to bring the geometry back in metres; the option always wins over the unit of the document.
 - A document not read through the file's DbCache directory has no geometry and no properties in the scene; both are reported (`unplaced-mesh`, `properties-outside-tabs`).
