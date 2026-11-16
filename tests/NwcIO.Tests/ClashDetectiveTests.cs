@@ -854,6 +854,21 @@ public sealed class ClashDetectiveTests
         doc.RunClashDetection(test);
 
         Assert.Equal(expected, test.Results.Count);
+        if (expected == 1)
+        {
+            Assert.Equal(gap, test.Results[0].Distance, 9); // positive for clearance
+        }
+    }
+
+    [Fact]
+    public void ClearanceTolerance_LineMesh_ReportsNoClash()
+    {
+        var box = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var line = new NwcMesh { Id = 2, Vertices = [new(-1, 0.5, 0.5), new(2, 0.5, 0.5)], Indices = [], LineIndices = [0, 1] };
+        var doc = new NwcDocumentBuilder().AddMesh(box).AddMesh(line).Build();
+        var test = new NwcClashTest("Lines", NwcClashTestType.Clearance, tolerance: 0.05);
+        doc.RunClashDetection(test);
+        Assert.Empty(test.Results);
     }
 
     [Fact]
@@ -921,10 +936,32 @@ public sealed class ClashDetectiveTests
     [Fact]
     public void ClashMatrix_CellTestType_IsHonoured()
     {
+        // b duplicates a; c only overlaps a. Hard reports both pairs, Duplicates only a-b.
         var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
         var b = CreateBoxMesh(2, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var c = CreateBoxMesh(3, new Vector3d(0.5, 0, 0), new Vector3d(1.5, 1, 1));
         var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.nwc" }, meshes: [a]);
-        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [b]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [b, c]);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        var matrix = new NwcClashMatrix("Matrix");
+        matrix.AddDiscipline("A", "first");
+        matrix.AddDiscipline("B", "second");
+        matrix.PopulateStandardMatrix(defaultTolerance: 0.001);
+
+        matrix.Run(assembly);
+        Assert.Equal(2, matrix.Cells[0].ClashCount);
+
+        matrix.Cells[0].TestType = NwcClashTestType.Duplicates;
+        matrix.Run(assembly);
+        Assert.Equal(1, matrix.Cells[0].ClashCount);
+    }
+
+    [Fact]
+    public void ClashMatrix_Duplicates_SkipsEmptyMeshes()
+    {
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.nwc" }, meshes: [new NwcMesh { Id = 1, Vertices = [], Indices = [] }]);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.nwc" }, meshes: [new NwcMesh { Id = 2, Vertices = [], Indices = [] }]);
         var assembly = NwcAssembly.Create("Federation", first, second);
 
         var matrix = new NwcClashMatrix("Matrix");
@@ -935,7 +972,37 @@ public sealed class ClashDetectiveTests
 
         matrix.Run(assembly);
 
-        Assert.Equal(1, matrix.Cells[0].ClashCount);
+        Assert.Equal(0, matrix.Cells[0].ClashCount);
+    }
+
+    [Theory]
+    [InlineData(0.0005, 0.001, true)]
+    [InlineData(0.002, 0.001, false)]
+    [InlineData(0.0005, double.NaN, false)]
+    public void IsDuplicate_HonoursVertexTolerance(double shift, double tolerance, bool expected)
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var b = CreateBoxMesh(2, new Vector3d(shift, 0, 0), new Vector3d(1 + shift, 1, 1));
+
+        Assert.Equal(expected, NwcClashDetector.IsDuplicate(a, b, tolerance));
+    }
+
+    [Fact]
+    public void IsDuplicate_RejectsDifferentTopologyAndAppliesTransform()
+    {
+        var a = CreateBoxMesh(1, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        var reordered = new NwcMesh { Id = 2, Vertices = a.Vertices, Indices = a.Indices.Reverse().ToArray() };
+        Assert.False(NwcClashDetector.IsDuplicate(a, reordered, 0.001));
+
+        // Same local vertices, but b is moved by its transform, so the world geometry differs.
+        var moved = CreateBoxMesh(3, new Vector3d(0, 0, 0), new Vector3d(1, 1, 1));
+        moved.Transform = new NwcTransform { Id = 1, Translation = new Vector3d(5, 0, 0) };
+        Assert.False(NwcClashDetector.IsDuplicate(a, moved, 0.001));
+
+        // Local vertices shifted by -5 and transform +5 give the same world geometry.
+        var shifted = CreateBoxMesh(4, new Vector3d(-5, 0, 0), new Vector3d(-4, 1, 1));
+        shifted.Transform = new NwcTransform { Id = 1, Translation = new Vector3d(5, 0, 0) };
+        Assert.True(NwcClashDetector.IsDuplicate(a, shifted, 0.001));
     }
 
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)

@@ -56,7 +56,7 @@ public sealed class NwcClashMatrixCell
     public string DisciplineA { get; set; } = string.Empty;
     public string DisciplineB { get; set; } = string.Empty;
     public NwcClashTestType TestType { get; set; } = NwcClashTestType.Hard;
-    public double Tolerance { get; set; } = 0.001; // in meters
+    public double Tolerance { get; set; } = 0.001; // document length units
     public bool Enabled { get; set; } = true;
     public NwcClashTest? ExecutedTest { get; set; }
 
@@ -163,6 +163,12 @@ public sealed class NwcClashMatrix
     public void Run(NwcAssembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
+        var keyByDocument = new Dictionary<NwcDocument, string>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < assembly.Models.Count; i++)
+        {
+            keyByDocument[assembly.Models[i]] = modelKeys[i];
+        }
 
         foreach (var cell in Cells)
         {
@@ -220,7 +226,15 @@ public sealed class NwcClashMatrix
                     }
                     else if (cell.TestType == NwcClashTestType.Duplicates)
                     {
-                        if (!NwcClashDetector.IsDuplicate(mA, mB, cell.Tolerance))
+                        // Same broad phase as NwcClashDetector: empty meshes are never duplicates.
+                        if (boxA.IsEmpty || boxB.IsEmpty)
+                        {
+                            continue;
+                        }
+
+                        double dupTol = Math.Max(0.0, cell.Tolerance);
+                        var expandedA = new BoundingBox3d(boxA.Min - new Vector3d(dupTol, dupTol, dupTol), boxA.Max + new Vector3d(dupTol, dupTol, dupTol));
+                        if (!expandedA.Intersects(boxB) || !NwcClashDetector.IsDuplicate(mA, mB, dupTol))
                         {
                             continue;
                         }
@@ -246,7 +260,7 @@ public sealed class NwcClashMatrix
                         }
 
                         penetration = Math.Min(interBox.Size.X, Math.Min(interBox.Size.Y, interBox.Size.Z));
-                        if (penetration > 0 && penetration < cell.Tolerance)
+                        if (penetration < cell.Tolerance)
                         {
                             continue;
                         }
@@ -258,12 +272,14 @@ public sealed class NwcClashMatrix
                         var c1 = new NwcClashObject(mA.Name ?? $"Mesh_{mA.Id}", mA.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docA.FileInfo.SourcePath ?? "ModelA"),
-                            Mesh = mA
+                            Mesh = mA,
+                            IfcGuid = NwcElementGuid.ForMesh(mA, keyByDocument[docA]),
                         };
                         var c2 = new NwcClashObject(mB.Name ?? $"Mesh_{mB.Id}", mB.Id)
                         {
                             ModelName = Path.GetFileNameWithoutExtension(docB.FileInfo.SourcePath ?? "ModelB"),
-                            Mesh = mB
+                            Mesh = mB,
+                            IfcGuid = NwcElementGuid.ForMesh(mB, keyByDocument[docB]),
                         };
 
                         var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, clashPoint, -penetration);

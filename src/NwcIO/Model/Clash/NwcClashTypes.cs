@@ -297,12 +297,12 @@ public sealed class NwcClashTest
     public NwcClashTestType TestType { get; set; } = NwcClashTestType.Hard;
     public string Status { get; set; } = "active";
     /// <summary>
-    /// Test tolerance in metres (default 1 mm). For <see cref="NwcClashTestType.Hard"/>, intersections whose
-    /// penetration is below the tolerance (including faces that only touch) are not reported. For
+    /// Test tolerance in document length units (default 0.001). For <see cref="NwcClashTestType.Hard"/>,
+    /// intersections whose penetration is below the tolerance are not reported. For
     /// <see cref="NwcClashTestType.Clearance"/>, pairs whose shortest mesh distance is at or below the tolerance
     /// are reported.
     /// </summary>
-    public double Tolerance { get; set; } = 0.001; // in meters (default: 1 mm)
+    public double Tolerance { get; set; } = 0.001; // document length units
     public NwcClashSelection SelectionA { get; set; } = NwcClashSelection.All();
     public NwcClashSelection SelectionB { get; set; } = NwcClashSelection.All();
     public List<NwcClashRule> Rules { get; } = [];

@@ -26,7 +26,7 @@ internal static class Program
                              Default for .nwf: <input-without-ext>.glb (or standard output if '-').
 
         Options:
-          --nwc <file.nwc>   Save or convert to Autodesk Navisworks format (.nwc)
+          --nwc <file.nwc>   Save or convert to a .nwc file (NwcIO layout)
           --sets-xml <file.xml> Export selection sets and search sets to Navisworks XML format (.xml)
           --timeliner-csv <file.csv> Export 4D TimeLiner schedule to CSV format (.csv)
           --timeliner-xml <file.xml> Export or import 4D TimeLiner schedule exchange XML (.xml)
@@ -446,7 +446,7 @@ internal static class Program
         // Handle multi-model directory assembly and NWF assembly files with the same
         // exit-code mapping as the single-file path: a missing folder or a folder with
         // no models is a level-2 error, anything thrown while reading model data is a
-        // data format error (3) вЂ” never an unhandled exception with a stack trace.
+        // data format error (3) — never an unhandled exception with a stack trace.
         try
         {
             if (isDirectory)
@@ -1612,7 +1612,7 @@ internal static class Program
             var vp = viewpoints[i];
             var cam = vp.Camera;
             @out.WriteLine(FormattableString.Invariant(
-                $"[{i + 1}] \"{vp.Name}\" ({cam.Projection}) Pos: {cam.Position} Dir: {cam.Direction} Up: {cam.Up} Target: {cam.Target} FOV: {cam.FieldOfView:F1}В° FocalDist: {cam.FocalDistance:F2}"));
+                $"[{i + 1}] \"{vp.Name}\" ({cam.Projection}) Pos: {cam.Position} Dir: {cam.Direction} Up: {cam.Up} Target: {cam.Target} FOV: {cam.FieldOfView:F1}° FocalDist: {cam.FocalDistance:F2}"));
             if (vp.Comments.Count > 0)
             {
                 @out.WriteLine($"     Comments: {string.Join("; ", vp.Comments)}");

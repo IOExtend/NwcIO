@@ -22,7 +22,7 @@ public static class NwcClashDetector
         var meshesA = ResolveSelection(document, test.SelectionA);
         var meshesB = ResolveSelection(document, test.SelectionB);
 
-        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model");
+        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model", document);
         return test;
     }
 
@@ -36,8 +36,9 @@ public static class NwcClashDetector
         ArgumentNullException.ThrowIfNull(test);
         ThrowIfSetIsMissing(assembly.Models, test);
 
-        var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
-        var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer)>();
+        var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
+        var itemsB = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
+        var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
 
         for (int m = 0; m < assembly.Models.Count; m++)
         {
@@ -47,13 +48,13 @@ public static class NwcClashDetector
             var selA = ResolveSelection(doc, test.SelectionA);
             for (int i = 0; i < selA.Count; i++)
             {
-                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name));
+                itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name, modelKeys[m]));
             }
 
             var selB = ResolveSelection(doc, test.SelectionB);
             for (int i = 0; i < selB.Count; i++)
             {
-                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name));
+                itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name, modelKeys[m]));
             }
         }
 
@@ -65,7 +66,8 @@ public static class NwcClashDetector
         IReadOnlyList<NwcMesh> meshesA,
         IReadOnlyList<NwcMesh> meshesB,
         NwcClashTest test,
-        string modelName)
+        string modelName,
+        NwcDocument document)
     {
         bool sameSelection = ReferenceEquals(meshesA, meshesB) ||
             meshesA.SequenceEqual(meshesB, ReferenceEqualityComparer.Instance);
@@ -137,7 +139,7 @@ public static class NwcClashDetector
                         Layer = meshA.Node?.Parent?.Name ?? "Default",
                         Node = meshA.Node,
                         Mesh = meshA,
-                        IfcGuid = IfcGuid.FromElementId(meshA.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(meshA, document),
                     };
 
                     var obj2 = new NwcClashObject(item2Name, meshB.Id, meshB.Node?.Name ?? item2Name)
@@ -146,7 +148,7 @@ public static class NwcClashDetector
                         Layer = meshB.Node?.Parent?.Name ?? "Default",
                         Node = meshB.Node,
                         Mesh = meshB,
-                        IfcGuid = IfcGuid.FromElementId(meshB.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(meshB, document),
                     };
 
                     var unionBox = boxA.Union(boxB);
@@ -171,8 +173,8 @@ public static class NwcClashDetector
     }
 
     private static void RunCoreMultiModel(
-        List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsA,
-        List<(NwcMesh Mesh, string ModelName, string? Layer)> itemsB,
+        List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsA,
+        List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsB,
         NwcClashTest test)
     {
         bool sameSelection = itemsA.Select(item => item.Mesh)
@@ -242,7 +244,7 @@ public static class NwcClashDetector
                         Layer = itemA.Layer,
                         Node = itemA.Mesh.Node,
                         Mesh = itemA.Mesh,
-                        IfcGuid = IfcGuid.FromElementId(itemA.Mesh.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(itemA.Mesh, itemA.ModelKey),
                     };
 
                     var obj2 = new NwcClashObject(name2, itemB.Mesh.Id, $"{itemB.ModelName}/{name2}")
@@ -251,7 +253,7 @@ public static class NwcClashDetector
                         Layer = itemB.Layer,
                         Node = itemB.Mesh.Node,
                         Mesh = itemB.Mesh,
-                        IfcGuid = IfcGuid.FromElementId(itemB.Mesh.Id, "NwcMesh"),
+                        IfcGuid = NwcElementGuid.ForMesh(itemB.Mesh, itemB.ModelKey),
                     };
 
                     var unionBox = boxA.Union(boxB);
@@ -277,7 +279,7 @@ public static class NwcClashDetector
 
     /// <summary>
     /// Applies the test's tolerance after the narrow phase. Hard tests keep intersections with penetration at
-    /// or above the tolerance (touching faces are not a clash when the tolerance is positive); Clearance tests
+    /// or above the tolerance, plus zero-depth (coplanar) overlaps; Clearance tests
     /// report meshes whose shortest distance is at or below the tolerance.
     /// </summary>
     private static bool TryGetClash(
@@ -294,6 +296,12 @@ public static class NwcClashDetector
         {
             case NwcClashTestType.Clearance:
             {
+                // MeasureMeshToMesh reports zero distance at the origin for meshes without triangles.
+                if (meshA.Indices.Count < 3 || meshB.Indices.Count < 3)
+                {
+                    return false;
+                }
+
                 var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
                 clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
                 distance = measurement.Distance;
@@ -373,7 +381,8 @@ public static class NwcClashDetector
         for (int i = 0; i < verticesA.Count; i++)
         {
             Vector3d delta = verticesA[i] - verticesB[i];
-            if (Vector3d.Dot(delta, delta) > toleranceSquared)
+            // Negated form so a NaN tolerance fails closed.
+            if (!(Vector3d.Dot(delta, delta) <= toleranceSquared))
             {
                 return false;
             }
