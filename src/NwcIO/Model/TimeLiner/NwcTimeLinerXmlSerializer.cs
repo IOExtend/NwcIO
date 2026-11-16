@@ -158,18 +158,25 @@ public static class NwcTimeLinerXmlSerializer
         var tasksElem = root.Element("tasks") ?? (root.Name.LocalName == "tasks" ? root : null);
         if (tasksElem is not null)
         {
+            int taskIndex = 0;
             foreach (var taskElem in tasksElem.Elements("task"))
             {
-                schedule.Tasks.Add(ParseTask(taskElem));
+                schedule.Tasks.Add(ParseTask(taskElem, schedule, ref taskIndex));
             }
         }
 
         return schedule;
     }
 
-    private static NwcTimeLinerTask ParseTask(XElement elem)
+    private static NwcTimeLinerTask ParseTask(XElement elem, NwcTimeLinerSchedule schedule, ref int taskIndex)
     {
-        string id = elem.Attribute("id")?.Value ?? Guid.NewGuid().ToString("N");
+        int index = ++taskIndex;
+        string id = elem.Attribute("id")?.Value ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            id = $"task-{index}";
+            schedule.Warnings.Add($"Task {index}: id is missing; using '{id}'.");
+        }
         string name = elem.Attribute("name")?.Value ?? "Unnamed Task";
 
         string typeStr = elem.Attribute("type")?.Value ?? "Construct";
@@ -184,30 +191,32 @@ public static class NwcTimeLinerXmlSerializer
             progress = p > 1.0 ? p / 100.0 : p;
         }
 
-        DateTimeOffset plannedStart = DateTimeOffset.UtcNow;
-        DateTimeOffset plannedEnd = plannedStart.AddDays(7);
-        decimal? plannedCost = null;
-
         var plannedElem = elem.Element("planned");
-        if (plannedElem is not null)
+        string? startStr = plannedElem?.Attribute("start")?.Value;
+        DateTimeOffset plannedStart;
+        if (string.IsNullOrEmpty(startStr) ||
+            !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out plannedStart))
         {
-            string? startStr = plannedElem.Attribute("start")?.Value;
-            if (!string.IsNullOrEmpty(startStr) && DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var ps))
-            {
-                plannedStart = ps;
-            }
+            plannedStart = DateTimeOffset.UnixEpoch;
+            schedule.Warnings.Add(
+                $"Task '{id}': planned start '{startStr}' is missing or invalid; using {plannedStart:o}.");
+        }
 
-            string? endStr = plannedElem.Attribute("end")?.Value;
-            if (!string.IsNullOrEmpty(endStr) && DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var pe))
-            {
-                plannedEnd = pe;
-            }
+        string? endStr = plannedElem?.Attribute("end")?.Value;
+        DateTimeOffset plannedEnd;
+        if (string.IsNullOrEmpty(endStr) ||
+            !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out plannedEnd))
+        {
+            plannedEnd = plannedStart.AddDays(7);
+            schedule.Warnings.Add(
+                $"Task '{id}': planned end '{endStr}' is missing or invalid; using {plannedEnd:o}.");
+        }
 
-            string? costStr = plannedElem.Attribute("cost")?.Value;
-            if (!string.IsNullOrEmpty(costStr) && decimal.TryParse(costStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var pc))
-            {
-                plannedCost = pc;
-            }
+        decimal? plannedCost = null;
+        string? costStr = plannedElem?.Attribute("cost")?.Value;
+        if (!string.IsNullOrEmpty(costStr) && decimal.TryParse(costStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var pc))
+        {
+            plannedCost = pc;
         }
 
         var task = new NwcTimeLinerTask(id, name, plannedStart, plannedEnd, taskType)
@@ -219,20 +228,34 @@ public static class NwcTimeLinerXmlSerializer
         var actualElem = elem.Element("actual");
         if (actualElem is not null)
         {
-            string? startStr = actualElem.Attribute("start")?.Value;
-            if (!string.IsNullOrEmpty(startStr) && DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var actStart))
+            string? actualStartStr = actualElem.Attribute("start")?.Value;
+            if (!string.IsNullOrEmpty(actualStartStr))
             {
-                task.ActualStart = actStart;
+                if (DateTimeOffset.TryParse(actualStartStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var actStart))
+                {
+                    task.ActualStart = actStart;
+                }
+                else
+                {
+                    schedule.Warnings.Add($"Task '{id}': actual start '{actualStartStr}' is invalid; ignored.");
+                }
             }
 
-            string? endStr = actualElem.Attribute("end")?.Value;
-            if (!string.IsNullOrEmpty(endStr) && DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var actEnd))
+            string? actualEndStr = actualElem.Attribute("end")?.Value;
+            if (!string.IsNullOrEmpty(actualEndStr))
             {
-                task.ActualEnd = actEnd;
+                if (DateTimeOffset.TryParse(actualEndStr, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var actEnd))
+                {
+                    task.ActualEnd = actEnd;
+                }
+                else
+                {
+                    schedule.Warnings.Add($"Task '{id}': actual end '{actualEndStr}' is invalid; ignored.");
+                }
             }
 
-            string? costStr = actualElem.Attribute("cost")?.Value;
-            if (!string.IsNullOrEmpty(costStr) && decimal.TryParse(costStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var actCost))
+            string? actualCostStr = actualElem.Attribute("cost")?.Value;
+            if (!string.IsNullOrEmpty(actualCostStr) && decimal.TryParse(actualCostStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var actCost))
             {
                 task.ActualCost = actCost;
             }
@@ -257,7 +280,7 @@ public static class NwcTimeLinerXmlSerializer
         {
             foreach (var childElem in subtasksElem.Elements("task"))
             {
-                task.Children.Add(ParseTask(childElem));
+                task.Children.Add(ParseTask(childElem, schedule, ref taskIndex));
             }
         }
 

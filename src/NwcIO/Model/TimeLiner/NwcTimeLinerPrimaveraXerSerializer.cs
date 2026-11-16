@@ -101,9 +101,11 @@ public static class NwcTimeLinerPrimaveraXerSerializer
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
         string scheduleName = "Primavera P6 Schedule";
         var tasks = new List<NwcTimeLinerTask>();
+        var warnings = new List<string>();
 
         string? currentTable = null;
         string[]? fieldNames = null;
+        int taskRow = 0;
 
         string? line;
         while ((line = reader.ReadLine()) is not null)
@@ -142,25 +144,31 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                 }
                 else if (currentTable == "TASK")
                 {
-                    string id = rowMap.GetValueOrDefault("task_code") ?? rowMap.GetValueOrDefault("task_id") ?? Guid.NewGuid().ToString("N");
+                    taskRow++;
+                    string id = rowMap.GetValueOrDefault("task_code") ?? rowMap.GetValueOrDefault("task_id") ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(id))
+                    {
+                        id = $"task-{taskRow}";
+                        warnings.Add($"Task {taskRow}: id is missing; using '{id}'.");
+                    }
                     string name = rowMap.GetValueOrDefault("task_name") ?? "Task";
 
-                    DateTimeOffset start = DateTimeOffset.UtcNow;
-                    if (rowMap.TryGetValue("target_start_date", out var startStr) && !string.IsNullOrWhiteSpace(startStr))
+                    DateTimeOffset start;
+                    if (!rowMap.TryGetValue("target_start_date", out var startStr) ||
+                        string.IsNullOrWhiteSpace(startStr) ||
+                        !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out start))
                     {
-                        if (DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pStart))
-                        {
-                            start = pStart;
-                        }
+                        start = DateTimeOffset.UnixEpoch;
+                        warnings.Add($"Task '{id}': target start '{startStr}' is missing or invalid; using {start:o}.");
                     }
 
-                    DateTimeOffset end = start.AddDays(1);
-                    if (rowMap.TryGetValue("target_end_date", out var endStr) && !string.IsNullOrWhiteSpace(endStr))
+                    DateTimeOffset end;
+                    if (!rowMap.TryGetValue("target_end_date", out var endStr) ||
+                        string.IsNullOrWhiteSpace(endStr) ||
+                        !DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out end))
                     {
-                        if (DateTimeOffset.TryParse(endStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd))
-                        {
-                            end = pEnd;
-                        }
+                        end = start.AddDays(1);
+                        warnings.Add($"Task '{id}': target end '{endStr}' is missing or invalid; using {end:o}.");
                     }
 
                     var task = new NwcTimeLinerTask(id, name, start, end);
@@ -186,6 +194,10 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                         {
                             task.ActualStart = pActStart;
                         }
+                        else
+                        {
+                            warnings.Add($"Task '{id}': actual start '{actStartStr}' is invalid; ignored.");
+                        }
                     }
 
                     if (rowMap.TryGetValue("act_end_date", out var actEndStr) && !string.IsNullOrWhiteSpace(actEndStr))
@@ -194,6 +206,10 @@ public static class NwcTimeLinerPrimaveraXerSerializer
                         {
                             task.ActualEnd = pActEnd;
                         }
+                        else
+                        {
+                            warnings.Add($"Task '{id}': actual end '{actEndStr}' is invalid; ignored.");
+                        }
                     }
 
                     tasks.Add(task);
@@ -201,7 +217,9 @@ public static class NwcTimeLinerPrimaveraXerSerializer
             }
         }
 
-        return new NwcTimeLinerSchedule(scheduleName, tasks);
+        var schedule = new NwcTimeLinerSchedule(scheduleName, tasks);
+        schedule.Warnings.AddRange(warnings);
+        return schedule;
     }
 
     private static string CleanField(string? field)

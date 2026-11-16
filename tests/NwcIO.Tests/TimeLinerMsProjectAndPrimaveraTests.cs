@@ -378,4 +378,44 @@ public class TimeLinerMsProjectAndPrimaveraTests
         Assert.Contains("--timeliner-msproject", output);
         Assert.Contains("--timeliner-primavera", output);
     }
+
+    [Fact]
+    public void MsProjectXml_MissingDatesAndId_UseDeterministicFallbacks()
+    {
+        const string xml = """
+            <Project xmlns="http://schemas.microsoft.com/project">
+              <Tasks>
+                <Task><Name>A</Name></Task>
+              </Tasks>
+            </Project>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
+
+        var read = NwcTimeLinerMsProjectXmlSerializer.Read(stream);
+
+        var task = Assert.Single(read.Tasks);
+        Assert.Equal("task-1", task.Id);
+        Assert.Equal(DateTimeOffset.UnixEpoch, task.PlannedStart);
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddDays(1), task.PlannedEnd);
+        Assert.Contains(read.Warnings, w => w.Contains("id is missing", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(read.Warnings, w => w.Contains("start", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(read.Warnings, w => w.Contains("finish", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PrimaveraXer_MissingDatesAndId_UseDeterministicFallbacks()
+    {
+        const string xer = "%T\tTASK\n%F\ttask_code\ttask_name\ttarget_start_date\ttarget_end_date\n%R\t\tA\t\t\n";
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xer));
+
+        var read = NwcTimeLinerPrimaveraXerSerializer.Read(stream);
+
+        var task = Assert.Single(read.Tasks);
+        Assert.Equal("task-1", task.Id);
+        Assert.Equal(DateTimeOffset.UnixEpoch, task.PlannedStart);
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddDays(1), task.PlannedEnd);
+        Assert.Contains(read.Warnings, w => w.Contains("id is missing", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(read.Warnings, w => w.Contains("target start", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(read.Warnings, w => w.Contains("target end", StringComparison.OrdinalIgnoreCase));
+    }
 }

@@ -157,9 +157,11 @@ public static class NwcTimeLinerMsProjectXmlSerializer
         if (tasksElem is null) return schedule;
 
         var parsedTasks = new List<(NwcTimeLinerTask task, int outlineLevel)>();
+        int taskIndex = 0;
 
         foreach (var taskElem in tasksElem.Elements(ns + "Task"))
         {
+            taskIndex++;
             string? isNull = taskElem.Element(ns + "IsNull")?.Value;
             if (isNull == "1" || isNull?.Equals("true", StringComparison.OrdinalIgnoreCase) == true)
             {
@@ -167,20 +169,33 @@ public static class NwcTimeLinerMsProjectXmlSerializer
             }
 
             string name = taskElem.Element(ns + "Name")?.Value ?? "Task";
-            string id = taskElem.Element(ns + "WBS")?.Value ?? taskElem.Element(ns + "UID")?.Value ?? Guid.NewGuid().ToString("N");
-
-            DateTimeOffset start = DateTimeOffset.UtcNow;
-            string? startStr = taskElem.Element(ns + "Start")?.Value;
-            if (!string.IsNullOrEmpty(startStr) && DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedStart))
+            string? wbs = taskElem.Element(ns + "WBS")?.Value;
+            string? uid = taskElem.Element(ns + "UID")?.Value;
+            string id = !string.IsNullOrWhiteSpace(wbs) ? wbs : uid ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(id))
             {
-                start = parsedStart;
+                id = $"task-{taskIndex}";
+                schedule.Warnings.Add($"Task {taskIndex}: id is missing; using '{id}'.");
             }
 
-            DateTimeOffset finish = start.AddDays(1);
-            string? finishStr = taskElem.Element(ns + "Finish")?.Value;
-            if (!string.IsNullOrEmpty(finishStr) && DateTimeOffset.TryParse(finishStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedFinish))
+            string? startStr = taskElem.Element(ns + "Start")?.Value;
+            DateTimeOffset start;
+            if (string.IsNullOrEmpty(startStr) ||
+                !DateTimeOffset.TryParse(startStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out start))
             {
-                finish = parsedFinish;
+                start = DateTimeOffset.UnixEpoch;
+                schedule.Warnings.Add(
+                    $"Task '{id}': start '{startStr}' is missing or invalid; using {start:o}.");
+            }
+
+            string? finishStr = taskElem.Element(ns + "Finish")?.Value;
+            DateTimeOffset finish;
+            if (string.IsNullOrEmpty(finishStr) ||
+                !DateTimeOffset.TryParse(finishStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out finish))
+            {
+                finish = start.AddDays(1);
+                schedule.Warnings.Add(
+                    $"Task '{id}': finish '{finishStr}' is missing or invalid; using {finish:o}.");
             }
 
             int outlineLevel = 1;
@@ -205,15 +220,29 @@ public static class NwcTimeLinerMsProjectXmlSerializer
             }
 
             string? actStartStr = taskElem.Element(ns + "ActualStart")?.Value;
-            if (!string.IsNullOrEmpty(actStartStr) && DateTimeOffset.TryParse(actStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var actStart))
+            if (!string.IsNullOrEmpty(actStartStr))
             {
-                task.ActualStart = actStart;
+                if (DateTimeOffset.TryParse(actStartStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var actStart))
+                {
+                    task.ActualStart = actStart;
+                }
+                else
+                {
+                    schedule.Warnings.Add($"Task '{id}': actual start '{actStartStr}' is invalid; ignored.");
+                }
             }
 
             string? actFinishStr = taskElem.Element(ns + "ActualFinish")?.Value;
-            if (!string.IsNullOrEmpty(actFinishStr) && DateTimeOffset.TryParse(actFinishStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var actFinish))
+            if (!string.IsNullOrEmpty(actFinishStr))
             {
-                task.ActualEnd = actFinish;
+                if (DateTimeOffset.TryParse(actFinishStr, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var actFinish))
+                {
+                    task.ActualEnd = actFinish;
+                }
+                else
+                {
+                    schedule.Warnings.Add($"Task '{id}': actual finish '{actFinishStr}' is invalid; ignored.");
+                }
             }
 
             string? actCostStr = taskElem.Element(ns + "ActualCost")?.Value;

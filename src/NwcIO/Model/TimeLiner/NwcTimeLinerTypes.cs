@@ -84,6 +84,12 @@ public sealed class NwcTimeLinerSchedule
     public string Name { get; set; } = "TimeLiner Schedule";
     public List<NwcTimeLinerTask> Tasks { get; } = [];
 
+    /// <summary>
+    /// Diagnostics emitted while reading a schedule, such as missing or invalid
+    /// dates and synthesised task ids. Schedules created in code start empty.
+    /// </summary>
+    public List<string> Warnings { get; } = [];
+
     public NwcTimeLinerSchedule() { }
 
     public NwcTimeLinerSchedule(string name)
