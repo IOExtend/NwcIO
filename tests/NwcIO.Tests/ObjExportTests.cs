@@ -19,6 +19,28 @@ public class ObjExportTests
         Assert.Equal([0, 1, 2, 2, 1, 3], mesh.Indices);
     }
 
+    [Theory]
+    [InlineData("A\nB", "o A_B")]
+    [InlineData("A\u2028B", "o A_B")]
+    [InlineData("A\u2029B", "o A_B")]
+    [InlineData("   ", "o Mesh_4")]
+    [InlineData("", "o Mesh_4")]
+    public void Write_MeshName_IsSanitizedOrFallsBackToId(string name, string expected)
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 4,
+            Name = name,
+            Vertices = [new Vector3d(0, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        using var sw = new StringWriter();
+        ObjExporter.Write([mesh], sw, worldCoordinates: false);
+
+        Assert.Contains(expected + Environment.NewLine, sw.ToString());
+    }
+
     [Fact]
     public void Write_SingleMesh_ProducesValidWavefrontObj()
     {
