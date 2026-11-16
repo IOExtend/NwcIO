@@ -68,6 +68,51 @@ public class IfcExportTests
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveIfc_MeshInsideCompositeElement_UsesOwnerIdentity(bool assembly)
+    {
+        var element = new NwcNode
+        {
+            Id = 1,
+            Name = "Wall A",
+            Class = "LcRevitComposite",
+            IfcGlobalId = "2O2Fr$t4X7Zf8NOew3FL9r",
+            ElementGuid = Guid.NewGuid(),
+        };
+
+        NwcMesh Mesh(int id, NwcNode leaf, double x) => new()
+        {
+            Id = id,
+            Name = $"Mesh {id}",
+            Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = leaf,
+        };
+
+        var firstLeaf = new NwcNode { Id = 2, Name = "Solid", Class = "LcRevitSolid", Element = element };
+        var secondLeaf = new NwcNode { Id = 3, Name = "Panel", Class = "LcRevitSolid", Element = element };
+        var doc = NwcDocument.Create(meshes: [Mesh(10, firstLeaf, 0), Mesh(11, secondLeaf, 2)]);
+        string ifc;
+        if (assembly)
+        {
+            using var sw = new StringWriter();
+            NwcAssembly.Create("Composite", doc).SaveIfc(sw);
+            ifc = sw.ToString();
+        }
+        else
+        {
+            ifc = doc.ToIfcString(new NwcIfcExportOptions());
+        }
+
+        Assert.Contains("IFCWALL(", ifc);
+        var guids = System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCWALL\('([^']+)'")
+            .Select(m => m.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(2, guids.Distinct().Count());
+    }
+
     private static NwcDocument CreateSyntheticDocument(string meshName = "Cube", string? materialName = "Concrete")
     {
         var vertices = new[]
@@ -566,5 +611,288 @@ public class IfcExportTests
 
         // The rejected assignment must not have changed the selected schema.
         Assert.Equal(NwcIfcSchemaVersion.Ifc2x3, options.SchemaVersion);
+    }
+
+    [Theory]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, false, false)]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, true, false)]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, false, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc2x3, true, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, false, false)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, true, false)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, false, true)]
+    [InlineData(NwcIfcSchemaVersion.Ifc4, true, true)]
+    public void SaveIfc_EveryEmittedEntity_HasTheSchemaAttributeCount(
+        NwcIfcSchemaVersion schema, bool useTessellation, bool assembly)
+    {
+        var doc = CreateFullClassificationDocument();
+        var options = new NwcIfcExportOptions
+        {
+            SchemaVersion = schema,
+            UseTessellationInIfc4 = useTessellation,
+        };
+
+        using var sw = new StringWriter();
+        if (assembly)
+        {
+            NwcAssembly.Create("Attribute counts", doc, CreateFullClassificationDocument()).SaveIfc(sw, options);
+        }
+        else
+        {
+            doc.SaveIfc(sw, options);
+        }
+
+        var expected = schema == NwcIfcSchemaVersion.Ifc2x3 ? Ifc2x3AttributeCounts : Ifc4AttributeCounts;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var instances = ParseStepInstances(sw.ToString()).ToList();
+        var entityById = instances.ToDictionary(i => i.Id, i => i.Entity);
+        foreach (var (_, entity, args) in instances)
+        {
+            seen.Add(entity);
+            Assert.True(expected.TryGetValue(entity, out int count),
+                $"{entity} is not part of the {schema} export table (schema-invalid or unclassified entity)");
+            Assert.True(count == CountStepArguments(args),
+                $"{entity} has {CountStepArguments(args)} arguments, expected {count} in {schema}");
+        }
+
+        // IfcStyledItem.Styles: IFC2x3 only accepts IfcPresentationStyleAssignment, IFC4 takes the IfcSurfaceStyle directly.
+        string expectedStyleTarget = schema == NwcIfcSchemaVersion.Ifc2x3 ? "IFCPRESENTATIONSTYLEASSIGNMENT" : "IFCSURFACESTYLE";
+        var styledItems = instances.Where(i => i.Entity == "IFCSTYLEDITEM").ToList();
+        Assert.NotEmpty(styledItems);
+        foreach (var item in styledItems)
+        {
+            var styleRef = System.Text.RegularExpressions.Regex.Match(item.Args, @"^#\d+,\(#(\d+)\),");
+            Assert.True(styleRef.Success, $"Unexpected IFCSTYLEDITEM arguments: {item.Args}");
+            Assert.Equal(expectedStyleTarget, entityById[int.Parse(styleRef.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)]);
+        }
+
+        if (schema == NwcIfcSchemaVersion.Ifc2x3)
+        {
+            // NominalDiameter and CrossSectionArea are mandatory in IFC2x3, so a rebar must never carry '$' there.
+            var rebars = instances.Where(i => i.Entity == "IFCREINFORCINGBAR").ToList();
+            Assert.NotEmpty(rebars);
+            Assert.All(rebars, r => Assert.EndsWith(",$,1.,0.,$,.NOTDEFINED.,$", r.Args));
+        }
+        else
+        {
+            Assert.DoesNotContain("IFCPRESENTATIONSTYLEASSIGNMENT", seen);
+        }
+
+        // The document exercises every entity family the exporter writes for classified products.
+        string[] typeEntities = schema == NwcIfcSchemaVersion.Ifc2x3
+            ? ["IFCDOORSTYLE", "IFCWINDOWSTYLE"]
+            : ["IFCDOORTYPE", "IFCWINDOWTYPE", "IFCREINFORCINGBARTYPE"];
+        foreach (string typeEntity in typeEntities)
+        {
+            Assert.Contains(typeEntity, seen);
+        }
+
+        Assert.Contains("IFCSURFACESTYLESHADING", seen);
+        Assert.Contains(schema == NwcIfcSchemaVersion.Ifc2x3 ? "IFCFLOWSEGMENT" : "IFCPIPESEGMENT", seen);
+        Assert.Contains("IFCBUILDING", seen);
+        Assert.Contains("IFCBUILDINGSTOREY", seen);
+        Assert.Contains("IFCWALL", seen);
+        Assert.Contains("IFCREINFORCINGBAR", seen);
+        Assert.Contains("IFCDOOR", seen);
+        Assert.Contains("IFCWINDOW", seen);
+        Assert.Contains(schema == NwcIfcSchemaVersion.Ifc4 && useTessellation ? "IFCTRIANGULATEDFACESET" : "IFCFACETEDBREP", seen);
+    }
+
+    private static readonly Dictionary<string, int> Ifc2x3AttributeCounts = new(StringComparer.Ordinal)
+    {
+        ["IFCPERSON"] = 8, ["IFCORGANIZATION"] = 5, ["IFCPERSONANDORGANIZATION"] = 3,
+        ["IFCAPPLICATION"] = 4, ["IFCOWNERHISTORY"] = 8, ["IFCSIUNIT"] = 4,
+        ["IFCDIMENSIONALEXPONENTS"] = 7, ["IFCMEASUREWITHUNIT"] = 2, ["IFCCONVERSIONBASEDUNIT"] = 4,
+        ["IFCUNITASSIGNMENT"] = 1, ["IFCCARTESIANPOINT"] = 1, ["IFCDIRECTION"] = 1,
+        ["IFCAXIS2PLACEMENT3D"] = 3, ["IFCGEOMETRICREPRESENTATIONCONTEXT"] = 6,
+        ["IFCGEOMETRICREPRESENTATIONSUBCONTEXT"] = 10, ["IFCPROJECT"] = 9, ["IFCLOCALPLACEMENT"] = 2,
+        ["IFCSITE"] = 14, ["IFCBUILDING"] = 12, ["IFCBUILDINGSTOREY"] = 10, ["IFCRELAGGREGATES"] = 6,
+        ["IFCCOLOURRGB"] = 4, ["IFCSURFACESTYLESHADING"] = 1, ["IFCSURFACESTYLE"] = 3,
+        ["IFCPRESENTATIONSTYLEASSIGNMENT"] = 1, ["IFCSTYLEDITEM"] = 3,
+        ["IFCCLOSEDSHELL"] = 1, ["IFCFACE"] = 1, ["IFCFACEOUTERBOUND"] = 2, ["IFCPOLYLOOP"] = 1,
+        ["IFCFACETEDBREP"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
+        ["IFCPROPERTYSINGLEVALUE"] = 4, ["IFCPROPERTYSET"] = 5, ["IFCRELDEFINESBYPROPERTIES"] = 6,
+        ["IFCRELDEFINESBYTYPE"] = 6, ["IFCRELCONTAINEDINSPATIALSTRUCTURE"] = 6,
+        ["IFCDOCUMENTREFERENCE"] = 3, ["IFCRELASSOCIATESDOCUMENT"] = 6,
+        ["IFCWALL"] = 8, ["IFCSLAB"] = 9, ["IFCCOLUMN"] = 8, ["IFCBEAM"] = 8,
+        ["IFCREINFORCINGBAR"] = 14, ["IFCWINDOW"] = 10, ["IFCDOOR"] = 10, ["IFCFOOTING"] = 9,
+        ["IFCSTAIR"] = 9, ["IFCRAILING"] = 9, ["IFCROOF"] = 9, ["IFCFLOWSEGMENT"] = 8,
+        ["IFCBUILDINGELEMENTPROXY"] = 9,
+        ["IFCWALLTYPE"] = 10, ["IFCSLABTYPE"] = 10, ["IFCCOLUMNTYPE"] = 10, ["IFCBEAMTYPE"] = 10,
+        ["IFCRAILINGTYPE"] = 10, ["IFCSTAIRFLIGHTTYPE"] = 10, ["IFCPIPESEGMENTTYPE"] = 10,
+        ["IFCDUCTSEGMENTTYPE"] = 10, ["IFCBUILDINGELEMENTPROXYTYPE"] = 10,
+        ["IFCDOORSTYLE"] = 12, ["IFCWINDOWSTYLE"] = 12,
+    };
+
+    private static readonly Dictionary<string, int> Ifc4AttributeCounts = new(StringComparer.Ordinal)
+    {
+        ["IFCPERSON"] = 8, ["IFCORGANIZATION"] = 5, ["IFCPERSONANDORGANIZATION"] = 3,
+        ["IFCAPPLICATION"] = 4, ["IFCOWNERHISTORY"] = 8, ["IFCSIUNIT"] = 4,
+        ["IFCDIMENSIONALEXPONENTS"] = 7, ["IFCMEASUREWITHUNIT"] = 2, ["IFCCONVERSIONBASEDUNIT"] = 4,
+        ["IFCUNITASSIGNMENT"] = 1, ["IFCCARTESIANPOINT"] = 1, ["IFCDIRECTION"] = 1,
+        ["IFCAXIS2PLACEMENT3D"] = 3, ["IFCGEOMETRICREPRESENTATIONCONTEXT"] = 6,
+        ["IFCGEOMETRICREPRESENTATIONSUBCONTEXT"] = 10, ["IFCPROJECT"] = 9, ["IFCLOCALPLACEMENT"] = 2,
+        ["IFCSITE"] = 14, ["IFCBUILDING"] = 12, ["IFCBUILDINGSTOREY"] = 10, ["IFCRELAGGREGATES"] = 6,
+        ["IFCCOLOURRGB"] = 4, ["IFCSURFACESTYLESHADING"] = 2, ["IFCSURFACESTYLE"] = 3,
+        ["IFCPRESENTATIONSTYLEASSIGNMENT"] = 1, ["IFCSTYLEDITEM"] = 3,
+        ["IFCCLOSEDSHELL"] = 1, ["IFCFACE"] = 1, ["IFCFACEOUTERBOUND"] = 2, ["IFCPOLYLOOP"] = 1,
+        ["IFCFACETEDBREP"] = 1, ["IFCSHAPEREPRESENTATION"] = 4, ["IFCPRODUCTDEFINITIONSHAPE"] = 3,
+        ["IFCCARTESIANPOINTLIST3D"] = 1, ["IFCTRIANGULATEDFACESET"] = 5,
+        ["IFCPROPERTYSINGLEVALUE"] = 4, ["IFCPROPERTYSET"] = 5, ["IFCRELDEFINESBYPROPERTIES"] = 6,
+        ["IFCRELDEFINESBYTYPE"] = 6, ["IFCRELCONTAINEDINSPATIALSTRUCTURE"] = 6,
+        ["IFCDOCUMENTREFERENCE"] = 5, ["IFCRELASSOCIATESDOCUMENT"] = 6,
+        ["IFCWALL"] = 9, ["IFCSLAB"] = 9, ["IFCCOLUMN"] = 9, ["IFCBEAM"] = 9,
+        ["IFCREINFORCINGBAR"] = 14, ["IFCWINDOW"] = 13, ["IFCDOOR"] = 13, ["IFCFOOTING"] = 9,
+        ["IFCSTAIR"] = 9, ["IFCRAILING"] = 9, ["IFCROOF"] = 9, ["IFCPIPESEGMENT"] = 9,
+        ["IFCDUCTSEGMENT"] = 9, ["IFCBUILDINGELEMENTPROXY"] = 9,
+        ["IFCWALLTYPE"] = 10, ["IFCSLABTYPE"] = 10, ["IFCCOLUMNTYPE"] = 10, ["IFCBEAMTYPE"] = 10,
+        ["IFCFOOTINGTYPE"] = 10, ["IFCRAILINGTYPE"] = 10, ["IFCROOFTYPE"] = 10, ["IFCSTAIRFLIGHTTYPE"] = 10,
+        ["IFCPIPESEGMENTTYPE"] = 10, ["IFCDUCTSEGMENTTYPE"] = 10, ["IFCREINFORCINGBARTYPE"] = 16,
+        ["IFCBUILDINGELEMENTPROXYTYPE"] = 10, ["IFCDOORTYPE"] = 13, ["IFCWINDOWTYPE"] = 13,
+    };
+
+    private static IEnumerable<(int Id, string Entity, string Args)> ParseStepInstances(string ifc)
+    {
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+            ifc, @"^#(\d+)=([A-Z0-9]+)\((.*)\);\r?$", System.Text.RegularExpressions.RegexOptions.Multiline))
+        {
+            yield return (int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+                match.Groups[2].Value, match.Groups[3].Value);
+        }
+    }
+
+    private static int CountStepArguments(string args)
+    {
+        if (args.Length == 0)
+        {
+            return 0;
+        }
+
+        int count = 1;
+        int depth = 0;
+        bool inString = false;
+        for (int i = 0; i < args.Length; i++)
+        {
+            char c = args[i];
+            if (inString)
+            {
+                if (c == '\'')
+                {
+                    if (i + 1 < args.Length && args[i + 1] == '\'')
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        inString = false;
+                    }
+                }
+
+                continue;
+            }
+
+            switch (c)
+            {
+                case '\'':
+                    inString = true;
+                    break;
+                case '(':
+                    depth++;
+                    break;
+                case ')':
+                    depth--;
+                    break;
+                case ',' when depth == 0:
+                    count++;
+                    break;
+            }
+        }
+
+        return count;
+    }
+
+    private static NwcDocument CreateFullClassificationDocument()
+    {
+        var names = new[]
+        {
+            "Wall", "Slab", "Column", "Beam", "Rebar", "Window", "Door",
+            "Footing", "Stair", "Railing", "Roof", "Pipe", "Duct", "Unknown",
+        };
+
+        var meshes = new List<NwcMesh>(names.Length);
+        var materials = new List<NwcMaterial>(names.Length);
+        for (int i = 0; i < names.Length; i++)
+        {
+            var material = new NwcMaterial
+            {
+                Id = i + 1,
+                Name = names[i] + " material",
+                Color = new RgbaColor(0.5f, 0.4f, 0.3f, 1.0f),
+            };
+            materials.Add(material);
+            var mesh = new NwcMesh
+            {
+                Id = i + 1,
+                Name = names[i],
+                Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)],
+                Indices = [0, 1, 2, 0, 1, 3],
+                Material = material,
+            };
+            if (i == 0)
+            {
+                var node = new NwcNode { Id = 1, Name = names[i], Class = "LcRevitData_Element" };
+                node.Hyperlinks.Add(new NwcHyperlink { Name = "Datasheet", Url = "https://example.com/item" });
+                mesh.Node = node;
+            }
+
+            meshes.Add(mesh);
+        }
+
+        return NwcDocument.Create(meshes: meshes, materials: materials);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveIfc_LinkedNode_SuppliesElementNameAndGuid(bool assembly)
+    {
+        var guid = Guid.Parse("00112233-4455-6677-8899-aabbccddeeff");
+        string globalId = NwcIO.Internal.Export.IfcGuid.ToIfcGuid(guid);
+        var node = new NwcNode
+        {
+            Id = 7,
+            Name = "Concrete Wall 200",
+            Class = "LcRevitData_Element",
+            ElementGuid = guid,
+            IfcGlobalId = globalId,
+        };
+
+        var mesh = new NwcMesh
+        {
+            Id = 42,
+            Name = "Mesh_42",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+            Node = node,
+        };
+        node.Meshes.Add(mesh);
+        node.Mesh = mesh;
+
+        var doc = NwcDocument.Create(meshes: [mesh]);
+        using var sw = new StringWriter();
+        if (assembly)
+        {
+            NwcAssembly.Create("Linked node", doc).SaveIfc(sw);
+        }
+        else
+        {
+            doc.SaveIfc(sw);
+        }
+
+        string ifc = sw.ToString();
+        string expectedGuid = NwcIO.Internal.Export.IfcGuid.FromKey($"ifc:element:{globalId}:mesh:42:model:0");
+        Assert.Contains($"IFCWALL('{expectedGuid}',", ifc);
+        Assert.Contains("'Concrete Wall 200'", ifc);
+        Assert.DoesNotContain("Mesh_42", ifc);
     }
 }
