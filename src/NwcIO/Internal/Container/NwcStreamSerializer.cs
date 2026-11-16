@@ -154,6 +154,10 @@ internal static class NwcStreamSerializer
             if (record.Tag is 52 or 53)
             {
                 ValidateRecord(record.FirstInt, record.Name, record.Class, record.Tag == 52);
+                if (record.Tag == 52)
+                {
+                    ValidatePropertyValue(record, record.ValueType);
+                }
             }
         }
 
@@ -193,12 +197,26 @@ internal static class NwcStreamSerializer
         }
     }
 
+    private static void ValidatePropertyValue(NwcPropertyRecord record, int valueType)
+    {
+        if (valueType is < 0 or > 13)
+        {
+            throw new ArgumentException($"Property '{record.Name}' (record {record.FirstInt}) has unsupported value type {valueType}; the .nwc writer stores types 0..13.");
+        }
+
+        if (valueType is 0 or 2 or 3 && record.IntValue is < int.MinValue or > int.MaxValue)
+        {
+            throw new ArgumentException($"Property '{record.Name}' (record {record.FirstInt}) has IntValue {record.IntValue}, outside the 32-bit range of value type {valueType}.");
+        }
+    }
+
     private static void ValidateNode(NwcNode node)
     {
         ValidateRecord(node.Id, node.Name, node.Class, true);
         foreach (var property in node.Properties)
         {
             ValidateRecord(property.FirstInt, property.Name, property.Class, true);
+            ValidatePropertyValue(property, property.ValueType != 0 ? property.ValueType : 4);
         }
 
         foreach (var child in node.Children)
@@ -453,7 +471,7 @@ internal static class NwcStreamSerializer
             WritePaddedString(w, prop.Class);
             int vType = prop.ValueType != 0 ? prop.ValueType : 4;
             w.Write(vType);
-            WritePropertyValue(w, vType, prop.Value);
+            WritePropertyValue(w, vType, prop.Value, prop.IntValue, prop.DoubleValue, prop.ReferenceId, prop.ReferenceTag, prop.ReferenceClass);
         }
 
         foreach (var child in rootNode.Children)
@@ -492,7 +510,7 @@ internal static class NwcStreamSerializer
             WritePaddedString(w, prop.Class);
             int vType = prop.ValueType != 0 ? prop.ValueType : 4;
             w.Write(vType);
-            WritePropertyValue(w, vType, prop.Value);
+            WritePropertyValue(w, vType, prop.Value, prop.IntValue, prop.DoubleValue, prop.ReferenceId, prop.ReferenceTag, prop.ReferenceClass);
         }
 
         foreach (var child in node.Children)
