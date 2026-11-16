@@ -501,20 +501,44 @@ public sealed class NwcAssembly
 
     /// <summary>Exports the entire federated assembly to a binary glTF 2.0 file (.glb).</summary>
     public void SaveGlb(string path, bool worldCoordinates = true)
+        => SaveGlb(path, worldCoordinates, null, default);
+
+    /// <summary>Exports the assembly GLB with cancellation and progress.</summary>
+    public void SaveGlb(string path, bool worldCoordinates, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-glb", 0, 1));
         GlbExporter.WriteFile(AllMeshes, AllMaterials, path, worldCoordinates, "NwcIO Assembly", SavedViewpoints);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-glb", 1, 1));
     }
 
     /// <summary>Exports the entire federated assembly to a Wavefront OBJ file.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
+        => SaveObj(path, worldCoordinates, null, default);
+
+    /// <summary>Exports the assembly OBJ with cancellation and progress.</summary>
+    public void SaveObj(string path, bool worldCoordinates, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-obj", 0, 1));
         ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-obj", 1, 1));
     }
 
     /// <summary>Exports the entire federated assembly with geometry, materials, and spatial hierarchy to an IFC2x3 STEP file (.ifc).</summary>
     public void SaveIfc(string path, NwcIfcExportOptions? options = null)
+        => SaveIfc(path, options, null, default);
+
+    /// <summary>Exports the assembly IFC with cancellation and progress.</summary>
+    public void SaveIfc(string path, NwcIfcExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-ifc", 0, 1));
         IfcExporter.WriteAssembly(this, path, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-ifc", 1, 1));
     }
 
     /// <summary>Exports the entire federated assembly with geometry, materials, and spatial hierarchy to a <see cref="TextWriter"/> in IFC2x3 format.</summary>
@@ -529,18 +553,34 @@ public sealed class NwcAssembly
     /// <param name="path">Destination .bcf or .bcfzip file path.</param>
     /// <param name="clashes">Optional pre-computed clash list; if null, <see cref="FindClashes"/> is evaluated.</param>
     public void SaveBcf(string path, IReadOnlyList<NwcClash>? clashes = null)
+        => SaveBcf(path, clashes, null, default);
+
+    /// <summary>Exports clashes to BCF with cancellation and progress.</summary>
+    public void SaveBcf(string path, IReadOnlyList<NwcClash>? clashes, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 0, 1));
         clashes ??= FindClashes();
         BcfExporter.WriteFile(clashes, path, Name);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 1, 1));
     }
 
     /// <summary>
     /// Exports detected clashes across models in the assembly to a standard buildingSMART BCF 2.1 zip stream.
     /// </summary>
     public void SaveBcf(Stream stream, IReadOnlyList<NwcClash>? clashes = null)
+        => SaveBcf(stream, clashes, null, default);
+
+    /// <summary>Exports clashes to a BCF stream with cancellation and progress.</summary>
+    public void SaveBcf(Stream stream, IReadOnlyList<NwcClash>? clashes, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 0, 1));
         clashes ??= FindClashes();
         BcfExporter.Write(clashes, stream, Name);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 1, 1));
     }
 
     /// <summary>
@@ -549,27 +589,51 @@ public sealed class NwcAssembly
     /// <param name="path">Destination .bcf or .bcfzip file path.</param>
     /// <param name="viewpoints">Optional pre-computed viewpoints list; if null, <see cref="SavedViewpoints"/> is used.</param>
     public void SaveViewpointsBcf(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
+        => SaveViewpointsBcf(path, viewpoints, null, default);
+
+    /// <summary>Exports assembly viewpoints to BCF with cancellation and progress.</summary>
+    public void SaveViewpointsBcf(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 0, 1));
         viewpoints ??= SavedViewpoints;
         BcfExporter.WriteViewpointsFile(viewpoints, path, Name);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 1, 1));
     }
 
     /// <summary>
     /// Exports saved viewpoints of the assembly to a buildingSMART BCF 2.1 zip stream.
     /// </summary>
     public void SaveViewpointsBcf(Stream stream, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
+        => SaveViewpointsBcf(stream, viewpoints, null, default);
+
+    /// <summary>Exports assembly viewpoints to a BCF stream with cancellation and progress.</summary>
+    public void SaveViewpointsBcf(Stream stream, IReadOnlyList<NwcSavedViewpoint>? viewpoints, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 0, 1));
         viewpoints ??= SavedViewpoints;
         BcfExporter.WriteViewpoints(viewpoints, stream, Name);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-bcf", 1, 1));
     }
 
     /// <summary>
     /// Exports saved viewpoints of the assembly to an Autodesk Navisworks XML viewpoints file.
     /// </summary>
     public void SaveViewpointsXml(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null, string units = "m")
+        => SaveViewpointsXml(path, viewpoints, units, null, default);
+
+    /// <summary>Exports assembly viewpoints XML with cancellation and progress.</summary>
+    public void SaveViewpointsXml(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints, string units, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-viewpoints-xml", 0, 1));
         viewpoints ??= SavedViewpoints;
         Sectioning.NwcXmlViewpointSerializer.Save(path, viewpoints, units);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-viewpoints-xml", 1, 1));
     }
 
     /// <summary>
@@ -587,9 +651,17 @@ public sealed class NwcAssembly
     /// <param name="path">Destination .html file path.</param>
     /// <param name="clashes">Optional pre-computed clash list; if null, <see cref="FindClashes"/> is evaluated.</param>
     public void SaveClashReportHtml(string path, IReadOnlyList<NwcClash>? clashes = null)
+        => SaveClashReportHtml(path, clashes, null, default);
+
+    /// <summary>Exports the clash report HTML with cancellation and progress.</summary>
+    public void SaveClashReportHtml(string path, IReadOnlyList<NwcClash>? clashes, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-html", 0, 1));
         clashes ??= FindClashes();
         HtmlClashReportExporter.WriteFile(clashes, path, Name, Models.Count, AllMeshes.Count);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-html", 1, 1));
     }
 
     /// <summary>
@@ -605,8 +677,16 @@ public sealed class NwcAssembly
     /// Exports the federated assembly to a standalone interactive 3D WebGL HTML viewer (.html) with zero external dependencies.
     /// </summary>
     public void SaveHtmlViewer(string path, Viewer.NwcHtmlViewerOptions? options = null)
+        => SaveHtmlViewer(path, options, null, default);
+
+    /// <summary>Exports the assembly HTML viewer with cancellation and progress.</summary>
+    public void SaveHtmlViewer(string path, Viewer.NwcHtmlViewerOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-html", 0, 1));
         Viewer.NwcHtmlViewerExporter.Save(path, this, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-html", 1, 1));
     }
 
     /// <summary>
@@ -650,6 +730,19 @@ public sealed class NwcAssembly
 
     /// <summary>Exports a structured summary of the federated assembly to a stream in JSON format.</summary>
     public void SaveJson(Stream stream, NwcJsonExportOptions? options = null)
+        => SaveJson(stream, options, null, default);
+
+    /// <summary>Exports the assembly JSON to a stream with cancellation and progress.</summary>
+    public void SaveJson(Stream stream, NwcJsonExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 0, 1));
+        SaveJsonCore(stream, options);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 1, 1));
+    }
+
+    private void SaveJsonCore(Stream stream, NwcJsonExportOptions? options)
     {
         ArgumentNullException.ThrowIfNull(stream);
         options ??= NwcJsonExportOptions.Default;
@@ -706,9 +799,13 @@ public sealed class NwcAssembly
 
     /// <summary>Exports a structured summary of the federated assembly to a JSON file.</summary>
     public void SaveJson(string path, NwcJsonExportOptions? options = null)
+        => SaveJson(path, options, null, default);
+
+    /// <summary>Exports the assembly JSON to a file with cancellation and progress.</summary>
+    public void SaveJson(string path, NwcJsonExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         using var fs = File.Create(path);
-        SaveJson(fs, options);
+        SaveJson(fs, options, progress, cancellationToken);
     }
 }
