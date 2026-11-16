@@ -1,4 +1,6 @@
+using System.IO.Compression;
 using System.Text.Json;
+using NwcIO.Model;
 using Xunit;
 
 namespace NwcIO.Tests;
@@ -19,65 +21,272 @@ internal sealed class RealFixtureFactAttribute : FactAttribute
     }
 }
 
+/// <summary>Marks a theory whose cases come from the discovered fixtures (.nwc, .nwd and .nwf).</summary>
+internal sealed class RealFixtureTheoryAttribute : TheoryAttribute
+{
+    public RealFixtureTheoryAttribute()
+    {
+        string? skipReason = TestFiles.DescribeModelSkipReason();
+        if (skipReason is not null)
+        {
+            Skip = skipReason;
+        }
+    }
+}
+
+/// <summary>Marks a federated test that needs at least two .nwc/.nwd fixtures.</summary>
+internal sealed class RealMultiFixtureFactAttribute : FactAttribute
+{
+    public RealMultiFixtureFactAttribute()
+    {
+        string? skipReason = TestFiles.DescribeSkipReason();
+        if (skipReason is null && TestFiles.EnumerateAll().Count < 2)
+        {
+            skipReason = "At least two .nwc/.nwd fixtures are needed for the multi-model test.";
+        }
+
+        Skip = skipReason;
+    }
+}
+
+/// <summary>
+/// Optional sidecar expectations for one fixture, stored next to it as <c>&lt;name&gt;.expect.json</c>.
+/// Absent values are not asserted, so any valid model passes without a sidecar.
+/// </summary>
+internal sealed class FixtureExpectations
+{
+    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    {
+        // A misspelled key must fail loudly instead of silently disabling an expectation.
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+    };
+
+    public string? SourceContains { get; set; }
+    public string? LoaderPlugin { get; set; }
+    public int? MinGuids { get; set; }
+    public int? MinPropertyRecords { get; set; }
+    public int? MinTransforms { get; set; }
+    public int? MinMeshes { get; set; }
+    public int? MinViewpoints { get; set; }
+    public long? MinGlbBytes { get; set; }
+    public long? MinIfc2x3Bytes { get; set; }
+    public long? MinIfc4Bytes { get; set; }
+
+    public static FixtureExpectations? Load(string fixturePath)
+    {
+        string sidecar = Path.ChangeExtension(fixturePath, ".expect.json");
+        return File.Exists(sidecar) ? Parse(File.ReadAllText(sidecar)) : null;
+    }
+
+    public static FixtureExpectations Parse(string json) =>
+        JsonSerializer.Deserialize<FixtureExpectations>(json, Options)
+            ?? throw new JsonException("The expectations file must hold a JSON object.");
+}
+
+/// <summary>Fixture-independent checks of the sidecar format documented in docs/test-fixtures.md.</summary>
+public class FixtureExpectationsTests
+{
+    [Fact]
+    public void Parse_DocumentedExample_BindsEveryField()
+    {
+        const string json = """
+            {
+              "sourceContains": ".rvt",
+              "loaderPlugin": "LcNwcLoaderPlugin:lcldrevit",
+              "minGuids": 1000,
+              "minPropertyRecords": 500,
+              "minTransforms": 1000,
+              "minMeshes": 500,
+              "minViewpoints": 10,
+              "minGlbBytes": 100000,
+              "minIfc2x3Bytes": 100000,
+              "minIfc4Bytes": 50000
+            }
+            """;
+
+        var expectations = FixtureExpectations.Parse(json);
+
+        Assert.Equal(".rvt", expectations.SourceContains);
+        Assert.Equal("LcNwcLoaderPlugin:lcldrevit", expectations.LoaderPlugin);
+        Assert.Equal(1000, expectations.MinGuids);
+        Assert.Equal(500, expectations.MinPropertyRecords);
+        Assert.Equal(1000, expectations.MinTransforms);
+        Assert.Equal(500, expectations.MinMeshes);
+        Assert.Equal(10, expectations.MinViewpoints);
+        Assert.Equal(100000L, expectations.MinGlbBytes);
+        Assert.Equal(100000L, expectations.MinIfc2x3Bytes);
+        Assert.Equal(50000L, expectations.MinIfc4Bytes);
+    }
+
+    [Fact]
+    public void Parse_UnknownKey_Throws() =>
+        Assert.Throws<JsonException>(() => FixtureExpectations.Parse("""{ "minMeshs": 5 }"""));
+
+    [Fact]
+    public void Parse_NullDocument_Throws() =>
+        Assert.Throws<JsonException>(() => FixtureExpectations.Parse("null"));
+
+    [Fact]
+    public void Load_ReadsSidecarNextToFixture_AndIgnoresMissingOne()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"fixture_expect_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string fixture = Path.Combine(dir, "Sample1.nwc");
+            Assert.Null(FixtureExpectations.Load(fixture));
+
+            File.WriteAllText(Path.Combine(dir, "Sample1.expect.json"), """{ "minMeshes": 7 }""");
+            Assert.Equal(7, FixtureExpectations.Load(fixture)?.MinMeshes);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+}
+
+/// <summary>
+/// Runs every discovered fixture through model-independent invariants. Privacy: a case is identified
+/// by its position in the fixture list, and no path or model content reaches an assertion message.
+/// </summary>
 public class RealFixtureTests
 {
-    private static readonly string? FixturePath = TestFiles.TryResolvePrimary();
+    public static IEnumerable<object[]> Fixtures() =>
+        TestFiles.EnumerateAll(includeFederations: true).Select((_, index) => new object[] { index });
 
-    [RealFixtureFact]
-    public void Open_RealNwcFixture_ParsesHeaderAndRecords()
+    public static IEnumerable<object[]> NwcFixtures() =>
+        TestFiles.EnumerateAll(includeFederations: true)
+            .Select((path, index) => (path, index))
+            .Where(f => IsNwc(f.path))
+            .Select(f => new object[] { f.index });
+
+    private static bool IsNwc(string path) => path.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase);
+
+    private static string PathOf(int index) => TestFiles.EnumerateAll(includeFederations: true)[index];
+
+    // A .nwd holds partition nodes the scene-tree builder rejects, so only .nwc is opened with a tree.
+    private static NwcDocument Open(string path) =>
+        NwcDocument.Open(path, new NwcReaderOptions { BuildSceneTree = IsNwc(path) });
+
+    private static NwcDocument OpenFixture(string path, FixtureExpectations? expectations = null)
     {
-        var doc = NwcDocument.Open(FixturePath!);
+        var doc = Open(path);
+        if (expectations?.SourceContains is { } source)
+        {
+            Assert.True(
+                doc.FileInfo.SourcePath?.Contains(source, StringComparison.OrdinalIgnoreCase) == true,
+                "sourceContains expectation not met");
+        }
+
+        if (expectations?.LoaderPlugin is { } loader)
+        {
+            Assert.True(loader == doc.FileInfo.LoaderPlugin, "loaderPlugin expectation not met");
+        }
+
+        return doc;
+    }
+
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void Open_Fixture_ParsesModelInvariants(int index)
+    {
+        string path = PathOf(index);
+        var expectations = FixtureExpectations.Load(path);
+        var doc = OpenFixture(path, expectations);
 
         Assert.NotNull(doc.FileInfo);
-        Assert.NotNull(doc.FileInfo.SourcePath);
-        Assert.Contains(".rvt", doc.FileInfo.SourcePath, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("LcNwcLoaderPlugin:lcldrevit", doc.FileInfo.LoaderPlugin);
-        Assert.NotNull(doc.FileInfo.SourceTimestampUtc);
+        if (IsNwc(path))
+        {
+            Assert.NotNull(doc.RootNode);
+        }
 
-        Assert.NotEmpty(doc.Guids);
-        Assert.True(doc.Guids.Count > 1000);
+        if (expectations?.MinGuids is { } minGuids)
+        {
+            Assert.True(doc.Guids.Count >= minGuids, $"Expected at least {minGuids} GUIDs, got {doc.Guids.Count}");
+        }
 
-        Assert.NotEmpty(doc.PropertyRecords);
-        Assert.True(doc.PropertyRecords.Count > 500);
+        if (expectations?.MinPropertyRecords is { } minRecords)
+        {
+            Assert.True(doc.PropertyRecords.Count >= minRecords, $"Expected at least {minRecords} property records, got {doc.PropertyRecords.Count}");
+        }
 
-        Assert.NotEmpty(doc.Transforms);
-        Assert.True(doc.Transforms.Count > 1000);
-        var firstTransform = doc.Transforms[0];
-        Assert.True(firstTransform.Rotation.IsNormalized());
-        Assert.Equal(16, firstTransform.ToMatrix4x4().Length);
+        if (expectations?.MinTransforms is { } minTransforms)
+        {
+            Assert.True(doc.Transforms.Count >= minTransforms, $"Expected at least {minTransforms} transforms, got {doc.Transforms.Count}");
+        }
 
-        Assert.NotNull(doc.RootNode);
-        Assert.NotEmpty(doc.RootNode.Children);
+        if (expectations?.MinMeshes is { } minMeshes)
+        {
+            Assert.True(doc.Meshes.Count >= minMeshes, $"Expected at least {minMeshes} meshes, got {doc.Meshes.Count}");
+        }
 
-        Assert.NotEmpty(doc.Meshes);
-        Assert.True(doc.Meshes.Count > 500);
-        var firstMesh = doc.Meshes.First(m => m.TriangleCount > 0);
-        Assert.True(firstMesh.Vertices.Count >= 3);
-        Assert.True(firstMesh.TriangleCount >= 1);
-        Assert.NotNull(firstMesh.BoundingBox);
+        Assert.All(doc.Transforms, transform => Assert.True(transform.Rotation.IsNormalized(), "transform rotation is not normalized"));
 
-        Assert.NotEmpty(doc.Materials);
-        Assert.Contains(doc.Materials, m => m.Color != default);
+        foreach (var mesh in doc.Meshes)
+        {
+            Assert.True(mesh.Vertices.Count >= 2, "mesh with fewer than two vertices");
+            Assert.NotNull(mesh.BoundingBox);
+            if (mesh.TriangleCount > 0)
+            {
+                Assert.True(mesh.Vertices.Count >= 3, "triangle mesh with fewer than three vertices");
+                Assert.All(mesh.Indices, i => Assert.InRange(i, 0, mesh.Vertices.Count - 1));
+            }
+        }
+    }
 
-        // Verify OBJ export
-        using var sw = new StringWriter();
-        doc.SaveObj(sw, worldCoordinates: true);
-        string obj = sw.ToString();
-        Assert.NotEmpty(obj);
-        Assert.Contains($"o {firstMesh.Name}", obj);
-        Assert.Contains("v ", obj);
-        Assert.Contains("f ", obj);
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void Export_Obj_WritesVerticesAndFacesOfEveryTriangleMesh(int index)
+    {
+        var doc = OpenFixture(PathOf(index));
+        using var writer = new StringWriter();
 
-        // Verify GLB export
-        using var glbMs = new MemoryStream();
-        doc.SaveGlb(glbMs, worldCoordinates: true);
-        byte[] glbBytes = glbMs.ToArray();
-        Assert.True(glbBytes.Length > 100_000);
-        Assert.Equal(0x46546C67u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glbBytes.AsSpan(0)));
-        Assert.Equal(2u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glbBytes.AsSpan(4)));
+        doc.SaveObj(writer, worldCoordinates: true);
 
-        // Verify JSON export
-        string json = doc.ToJson(new NwcJsonExportOptions
+        string obj = writer.ToString();
+        Assert.Contains("# Wavefront OBJ", obj);
+        var named = doc.Meshes.FirstOrDefault(m => m.TriangleCount > 0 && m.Name.Length > 0);
+        if (doc.Meshes.Any(m => m.TriangleCount > 0))
+        {
+            Assert.Contains("\nv ", obj);
+            Assert.Contains("\nf ", obj);
+        }
+
+        if (named is not null)
+        {
+            Assert.True(obj.Contains($"\no {named.Name}{Environment.NewLine}", StringComparison.Ordinal), "named mesh missing from OBJ");
+        }
+    }
+
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void Export_Glb_HasContainerHeader(int index)
+    {
+        var expectations = FixtureExpectations.Load(PathOf(index));
+        var doc = OpenFixture(PathOf(index));
+        using var stream = new MemoryStream();
+
+        doc.SaveGlb(stream, worldCoordinates: true);
+
+        byte[] glb = stream.ToArray();
+        Assert.Equal(0x46546C67u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(0)));
+        Assert.Equal(2u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(4)));
+        Assert.Equal((uint)glb.Length, System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(8)));
+        if (expectations?.MinGlbBytes is { } minGlb)
+        {
+            Assert.True(glb.Length >= minGlb, $"Expected GLB of at least {minGlb} bytes, got {glb.Length}");
+        }
+    }
+
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void Export_Json_MatchesDocumentCounts(int index)
+    {
+        var doc = OpenFixture(PathOf(index));
+        using var stream = new MemoryStream();
+
+        doc.SaveJson(stream, new NwcJsonExportOptions
         {
             Indented = false,
             IncludeTransforms = true,
@@ -86,215 +295,243 @@ public class RealFixtureTests
             IncludeMaterials = true,
             IncludeStreamCatalog = true,
         });
-        Assert.NotEmpty(json);
 
-        using var jsonDoc = JsonDocument.Parse(json);
-        var root = jsonDoc.RootElement;
-        Assert.True(root.TryGetProperty("file", out var fileEl));
-        Assert.True(fileEl.TryGetProperty("sourcePath", out _));
-        Assert.True(root.TryGetProperty("propertyRecordCount", out var countEl));
-        Assert.Equal(doc.PropertyRecords.Count, countEl.GetInt32());
-        Assert.True(root.TryGetProperty("guids", out var guidsEl));
-        Assert.Equal(doc.Guids.Count, guidsEl.GetArrayLength());
-        Assert.True(root.TryGetProperty("transforms", out var transformsEl));
-        Assert.Equal(doc.Transforms.Count, transformsEl.GetArrayLength());
-        Assert.True(root.TryGetProperty("meshCount", out var meshCountEl));
-        Assert.Equal(doc.Meshes.Count, meshCountEl.GetInt32());
-        Assert.True(root.TryGetProperty("materialCount", out var matCountEl));
-        Assert.Equal(doc.Materials.Count, matCountEl.GetInt32());
-        Assert.True(root.TryGetProperty("materials", out var matsEl));
-        Assert.Equal(doc.Materials.Count, matsEl.GetArrayLength());
-        Assert.True(root.TryGetProperty("meshes", out var meshesEl));
-        Assert.Equal(doc.Meshes.Count, meshesEl.GetArrayLength());
-        Assert.True(root.TryGetProperty("sceneTree", out var sceneTreeEl));
-        Assert.True(sceneTreeEl.TryGetProperty("children", out _));
-        Assert.True(root.TryGetProperty("container", out var containerEl));
-        Assert.True(containerEl.TryGetProperty("streams", out _));
+        using var json = JsonDocument.Parse(stream.ToArray());
+        var root = json.RootElement;
+        Assert.Equal(doc.Meshes.Count, root.GetProperty("meshCount").GetInt32());
+        Assert.Equal(doc.Materials.Count, root.GetProperty("materialCount").GetInt32());
+        Assert.Equal(doc.Guids.Count, root.GetProperty("guids").GetArrayLength());
+        Assert.True(root.GetProperty("container").TryGetProperty("streams", out _));
 
-        // Milestone 5: Verify XRefTable and DbCache
-        Assert.NotNull(doc.XRefs);
-        Assert.Equal("XRefTable", doc.XRefs.Type);
-        Assert.Equal(1, doc.XRefs.Version);
-
-        Assert.NotNull(doc.DbCache);
-        Assert.Equal("LcOpDBCache", doc.DbCache.DatabaseName);
-        Assert.NotEmpty(doc.DbCache.Entries);
-        Assert.NotNull(doc.DbCache.Find("LcOpNwdGeometry"));
-
-        // Section 2.13: Verify Saved Viewpoints and Cameras
-        Assert.NotEmpty(doc.SavedViewpoints);
-        Assert.True(doc.SavedViewpoints.Count >= 10, $"Expected >= 10 viewpoints, got {doc.SavedViewpoints.Count}");
-        Assert.NotNull(doc.DefaultViewpoint);
-        Assert.Contains(doc.SavedViewpoints, vp => !string.IsNullOrWhiteSpace(vp.Name));
-        Assert.All(doc.SavedViewpoints, vp =>
+        // The exporter leaves these sections out when the document has no such data (a .nwf holds no geometry).
+        Assert.Equal(doc.Transforms.Count > 0, root.TryGetProperty("transforms", out var transforms));
+        if (doc.Transforms.Count > 0)
         {
-            Assert.True(vp.Camera.Rotation.IsNormalized());
-            Assert.True(vp.Camera.FocalDistance > 0);
-            Assert.True(vp.Camera.AspectRatio > 0);
-        });
-
-        // Verify Saved Viewpoints BCF export
-        string tempVpBcf = Path.Combine(Path.GetTempPath(), $"viewpoints_{Guid.NewGuid():N}.bcfzip");
-        try
-        {
-            doc.SaveViewpointsBcf(tempVpBcf);
-            Assert.True(File.Exists(tempVpBcf));
-            var vpBcfInfo = new FileInfo(tempVpBcf);
-            Assert.True(vpBcfInfo.Length > 500, $"Expected viewpoints BCF > 500 bytes, got {vpBcfInfo.Length}");
-        }
-        finally
-        {
-            if (File.Exists(tempVpBcf)) File.Delete(tempVpBcf);
+            Assert.Equal(doc.Transforms.Count, transforms.GetArrayLength());
         }
 
-        // Milestone 5: Verify Spatial Acceleration Index (BVH)
+        Assert.Equal(doc.RootNode is not null, root.TryGetProperty("sceneTree", out var sceneTree));
+        if (doc.RootNode is not null)
+        {
+            Assert.Equal(doc.RootNode.Children.Count > 0, sceneTree.TryGetProperty("children", out _));
+        }
+    }
+
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void Viewpoints_ExportToBcf_OneTopicPerViewpoint(int index)
+    {
+        string path = PathOf(index);
+        var expectations = FixtureExpectations.Load(path);
+        var doc = OpenFixture(path);
+
+        if (expectations?.MinViewpoints is { } minViewpoints)
+        {
+            Assert.True(doc.SavedViewpoints.Count >= minViewpoints, $"Expected at least {minViewpoints} viewpoints, got {doc.SavedViewpoints.Count}");
+        }
+
+        foreach (var viewpoint in doc.SavedViewpoints)
+        {
+            Assert.NotNull(viewpoint.Camera);
+            Assert.True(viewpoint.Camera.Rotation.IsNormalized(), "viewpoint rotation is not normalized");
+            Assert.True(viewpoint.Camera.FocalDistance > 0, "viewpoint focal distance is not positive");
+            Assert.True(viewpoint.Camera.AspectRatio > 0, "viewpoint aspect ratio is not positive");
+        }
+
+        using var stream = new MemoryStream();
+        doc.SaveViewpointsBcf(stream);
+
+        using var archive = new ZipArchive(new MemoryStream(stream.ToArray()), ZipArchiveMode.Read);
+        Assert.NotNull(archive.GetEntry("bcf.version"));
+        Assert.Equal(
+            doc.SavedViewpoints.Count,
+            archive.Entries.Count(e => e.FullName.EndsWith("/markup.bcf", StringComparison.Ordinal)));
+    }
+
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void SpatialIndex_FindsAndHitsMeshes(int index)
+    {
+        var doc = OpenFixture(PathOf(index));
         var spatial = doc.SpatialIndex;
-        Assert.NotNull(spatial);
+
         Assert.Equal(doc.Meshes.Count, spatial.MeshCount);
+        if (doc.Meshes.Count == 0)
+        {
+            Assert.Equal(0, spatial.NodeCount);
+            Assert.True(spatial.Bounds.IsEmpty);
+            return;
+        }
+
         Assert.True(spatial.NodeCount > 0);
         Assert.True(spatial.LeafCount > 0);
-        Assert.True(spatial.MaxDepth > 0);
         Assert.False(spatial.Bounds.IsEmpty);
 
-        // Query around the first mesh's world bounding box
-        var firstMeshBox = firstMesh.GetWorldBoundingBox();
-        var queryHits = spatial.QueryBox(firstMeshBox);
-        Assert.NotEmpty(queryHits);
-        Assert.Contains(queryHits, m => m.Id == firstMesh.Id);
-
-        // Raycast down towards the first mesh from 10 meters above its center
-        var targetPoint = firstMeshBox.Center;
-        var rayOrigin = new Model.Vector3d(targetPoint.X, targetPoint.Y, spatial.Bounds.Max.Z + 10.0);
-        var rayDir = new Model.Vector3d(0, 0, -1);
-        bool rayHit = spatial.Raycast(rayOrigin, rayDir, out var hit);
-        Assert.True(rayHit);
-        Assert.True(hit.Distance > 0);
-        Assert.NotNull(hit.Mesh);
-
-        // Step 1: Verify IFC export on real fixture
-        string tempIfc = Path.Combine(Path.GetTempPath(), $"fixture_ifc_{Guid.NewGuid():N}.ifc");
-        try
+        var target = doc.Meshes.FirstOrDefault(m => m.TriangleCount > 0);
+        if (target is null)
         {
-            doc.SaveIfc(tempIfc);
-            Assert.True(File.Exists(tempIfc));
-            var ifcInfo = new FileInfo(tempIfc);
-            Assert.True(ifcInfo.Length > 100_000, $"Expected IFC file > 100KB, got {ifcInfo.Length} bytes");
-
-            string ifcHeader = File.ReadLines(tempIfc).Take(30).Aggregate((a, b) => a + "\n" + b);
-            Assert.Contains("ISO-10303-21;", ifcHeader);
-            Assert.Contains("FILE_SCHEMA(('IFC2X3'));", ifcHeader);
-            Assert.Contains("IFCPROJECT(", ifcHeader);
-
-            string ifcTail = File.ReadLines(tempIfc).TakeLast(5).Aggregate((a, b) => a + "\n" + b);
-            Assert.Contains("END-ISO-10303-21;", ifcTail);
-        }
-        finally
-        {
-            if (File.Exists(tempIfc)) File.Delete(tempIfc);
+            return;
         }
 
-        // Step 4: Verify IFC4 export with modern IfcTriangulatedFaceSet and Types
-        string tempIfc4 = Path.Combine(Path.GetTempPath(), $"fixture_ifc4_{Guid.NewGuid():N}.ifc");
-        try
+        Assert.Contains(spatial.QueryBox(target.GetWorldBoundingBox()), m => m.Id == target.Id);
+
+        // Shoot at the first non-degenerate triangle along its normal, from either side (winding is not assumed).
+        var world = target.GetWorldVertices();
+        for (int i = 0; i + 2 < target.Indices.Count; i += 3)
         {
-            doc.SaveIfc(tempIfc4, new NwcIfcExportOptions
+            var a = world[target.Indices[i]];
+            var b = world[target.Indices[i + 1]];
+            var c = world[target.Indices[i + 2]];
+            var cross = Vector3d.Cross(b - a, c - a);
+            if (cross.Length < 1e-9)
             {
-                SchemaVersion = NwcIfcSchemaVersion.Ifc4,
-                ExportTypeObjects = true,
-                UseTessellationInIfc4 = true,
-            });
-            Assert.True(File.Exists(tempIfc4));
-            var ifc4Info = new FileInfo(tempIfc4);
-            Assert.True(ifc4Info.Length > 50_000, $"Expected IFC4 file > 50KB, got {ifc4Info.Length} bytes");
+                continue;
+            }
 
-            string ifc4Header = File.ReadLines(tempIfc4).Take(30).Aggregate((a, b) => a + "\n" + b);
-            Assert.Contains("FILE_SCHEMA(('IFC4'));", ifc4Header);
-            Assert.Contains("DesignTransferView", ifc4Header);
-
-            string sample = File.ReadLines(tempIfc4).Skip(30).Take(200).Aggregate((a, b) => a + "\n" + b);
-            Assert.Contains("IFCCARTESIANPOINTLIST3D(", sample);
-            Assert.Contains("IFCTRIANGULATEDFACESET(", sample);
+            var normal = cross.Normalize();
+            var centroid = (a + b + c) / 3.0;
+            bool hit = spatial.Raycast(centroid + normal, -normal, out var front)
+                || spatial.Raycast(centroid - normal, normal, out front);
+            Assert.True(hit, "ray aimed at a triangle missed");
+            Assert.True(front.Distance > 0);
+            Assert.NotNull(front.Mesh);
+            return;
         }
-        finally
+    }
+
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void Ifc2x3_Export_HasHeaderProjectAndFooter(int index)
+    {
+        var expectations = FixtureExpectations.Load(PathOf(index));
+        var doc = OpenFixture(PathOf(index));
+        using var writer = new StringWriter();
+
+        doc.SaveIfc(writer, new NwcIfcExportOptions { SchemaVersion = NwcIfcSchemaVersion.Ifc2x3 });
+
+        string ifc = writer.ToString();
+        Assert.Contains("ISO-10303-21;", ifc);
+        Assert.Contains("FILE_SCHEMA(('IFC2X3'));", ifc);
+        Assert.Contains("IFCPROJECT(", ifc);
+        Assert.Contains("END-ISO-10303-21;", ifc);
+        if (expectations?.MinIfc2x3Bytes is { } minBytes)
         {
-            if (File.Exists(tempIfc4)) File.Delete(tempIfc4);
+            long bytes = System.Text.Encoding.UTF8.GetByteCount(ifc);
+            Assert.True(bytes >= minBytes, $"Expected IFC2x3 of at least {minBytes} bytes, got {bytes}");
+        }
+    }
+
+    [RealFixtureTheory]
+    [MemberData(nameof(Fixtures))]
+    public void Ifc4_Export_HasHeaderTessellationAndFooter(int index)
+    {
+        var expectations = FixtureExpectations.Load(PathOf(index));
+        var doc = OpenFixture(PathOf(index));
+        using var writer = new StringWriter();
+
+        doc.SaveIfc(writer, new NwcIfcExportOptions
+        {
+            SchemaVersion = NwcIfcSchemaVersion.Ifc4,
+            ExportTypeObjects = true,
+            UseTessellationInIfc4 = true,
+        });
+
+        string ifc = writer.ToString();
+        Assert.Contains("FILE_SCHEMA(('IFC4'));", ifc);
+        Assert.Contains("DesignTransferView", ifc);
+        Assert.Contains("IFCPROJECT(", ifc);
+        if (doc.Meshes.Any(m => m.Vertices.Count >= 3 && m.Indices.Count >= 3))
+        {
+            Assert.Contains("IFCCARTESIANPOINTLIST3D(", ifc);
+            Assert.Contains("IFCTRIANGULATEDFACESET(", ifc);
         }
 
-        // Milestone 5: Verify Multi-Model Assembly
-        var fixture2 = TestFiles.TryResolveSecondary(FixturePath);
-        if (fixture2 is not null && File.Exists(fixture2))
+        Assert.Contains("END-ISO-10303-21;", ifc);
+        if (expectations?.MinIfc4Bytes is { } minBytes)
         {
-            var doc2 = NwcDocument.Open(fixture2);
-            var assembly = Model.NwcAssembly.Create("Campus_Coordination", doc, doc2);
-            Assert.Equal(2, assembly.Models.Count);
-            Assert.True(assembly.AllMeshes.Count > doc.Meshes.Count);
-            Assert.True(assembly.SpatialIndex.NodeCount > 0);
+            long bytes = System.Text.Encoding.UTF8.GetByteCount(ifc);
+            Assert.True(bytes >= minBytes, $"Expected IFC4 of at least {minBytes} bytes, got {bytes}");
+        }
+    }
 
-            string tempGlb = Path.Combine(Path.GetTempPath(), $"assembly_{Guid.NewGuid():N}.glb");
-            string tempBcf = Path.Combine(Path.GetTempPath(), $"assembly_{Guid.NewGuid():N}.bcfzip");
-            string tempHtml = Path.Combine(Path.GetTempPath(), $"assembly_{Guid.NewGuid():N}.html");
+    [RealFixtureTheory]
+    [MemberData(nameof(NwcFixtures))]
+    public void Save_NwcFixture_RoundtripsOrIsRejectedBeforeWriting(int index)
+    {
+        var original = NwcDocument.Open(PathOf(index));
+        string tempNwc = Path.Combine(Path.GetTempPath(), $"roundtrip_{Guid.NewGuid():N}.nwc");
+
+        try
+        {
             try
             {
-                assembly.SaveGlb(tempGlb);
-                Assert.True(File.Exists(tempGlb));
-                var info = new FileInfo(tempGlb);
-                Assert.True(info.Length > 200_000);
-
-                var clashes = assembly.FindClashes();
-                assembly.SaveBcf(tempBcf, clashes);
-                Assert.True(File.Exists(tempBcf));
-                var bcfInfo = new FileInfo(tempBcf);
-                Assert.True(bcfInfo.Length > 50);
-
-                assembly.SaveClashReportHtml(tempHtml, clashes);
-                Assert.True(File.Exists(tempHtml));
-                var htmlInfo = new FileInfo(tempHtml);
-                Assert.True(htmlInfo.Length > 1000);
+                original.Save(tempNwc);
             }
-            finally
+            catch (ArgumentException)
             {
-                if (File.Exists(tempGlb)) File.Delete(tempGlb);
-                if (File.Exists(tempBcf)) File.Delete(tempBcf);
-                if (File.Exists(tempHtml)) File.Delete(tempHtml);
+                // The writer rejects what it cannot store (scaled poses, lines) before writing a byte.
+                Assert.False(File.Exists(tempNwc));
+                return;
+            }
+
+            Assert.True(new FileInfo(tempNwc).Length > 0);
+
+            var reloaded = NwcDocument.Open(tempNwc);
+            Assert.True(original.FileInfo.SourcePath == reloaded.FileInfo.SourcePath, "source path changed by the round trip");
+            Assert.Equal(original.Meshes.Count, reloaded.Meshes.Count);
+            Assert.Equal(original.Transforms.Count, reloaded.Transforms.Count);
+            Assert.Equal(original.Guids.Count, reloaded.Guids.Count);
+            Assert.Equal(original.SavedViewpoints.Count, reloaded.SavedViewpoints.Count);
+        }
+        finally
+        {
+            if (File.Exists(tempNwc))
+            {
+                File.Delete(tempNwc);
             }
         }
     }
 
-    [RealFixtureFact]
-    public void Save_RealNwcFixture_RoundtripsSuccessfully()
+    [RealMultiFixtureFact]
+    public void MultiModelAssembly_FederatesTwoFixtures()
+    {
+        var files = TestFiles.EnumerateAll();
+        var first = Open(files[0]);
+        var second = Open(files[1]);
+
+        var assembly = NwcAssembly.Create("Fixture federation", first, second);
+
+        Assert.Equal(first.Meshes.Count + second.Meshes.Count, assembly.AllMeshes.Count);
+        Assert.Equal(assembly.AllMeshes.Count, assembly.SpatialIndex.MeshCount);
+
+        string tempGlb = Path.Combine(Path.GetTempPath(), $"assembly_{Guid.NewGuid():N}.glb");
+        string tempBcf = Path.Combine(Path.GetTempPath(), $"assembly_{Guid.NewGuid():N}.bcfzip");
+        string tempHtml = Path.Combine(Path.GetTempPath(), $"assembly_{Guid.NewGuid():N}.html");
+        try
         {
-            var original = NwcDocument.Open(FixturePath!);
-            string tempNwc = Path.Combine(Path.GetTempPath(), $"roundtrip_{Guid.NewGuid():N}.nwc");
+            assembly.SaveGlb(tempGlb);
+            Assert.True(new FileInfo(tempGlb).Length > 12);
 
-            try
+            var clashes = assembly.FindClashes();
+            assembly.SaveBcf(tempBcf, clashes);
+            using (var archive = ZipFile.OpenRead(tempBcf))
             {
-                try
-                {
-                    original.Save(tempNwc);
-                }
-                catch (ArgumentException)
-                {
-                    // The writer rejects what it cannot store (scaled poses, lines) before writing a byte.
-                    Assert.False(File.Exists(tempNwc));
-                    return;
-                }
-
-                Assert.True(File.Exists(tempNwc));
-                Assert.True(new FileInfo(tempNwc).Length > 1000);
-
-                var reloaded = NwcDocument.Open(tempNwc);
-                Assert.Equal(original.FileInfo.SourcePath, reloaded.FileInfo.SourcePath);
-                Assert.Equal(original.Meshes.Count, reloaded.Meshes.Count);
-                Assert.Equal(original.Transforms.Count, reloaded.Transforms.Count);
-                Assert.Equal(original.Guids.Count, reloaded.Guids.Count);
-                Assert.Equal(original.SavedViewpoints.Count, reloaded.SavedViewpoints.Count);
+                Assert.NotNull(archive.GetEntry("bcf.version"));
+                Assert.Equal(clashes.Count, archive.Entries.Count(e => e.FullName.EndsWith("/markup.bcf", StringComparison.Ordinal)));
             }
-            finally
+
+            assembly.SaveClashReportHtml(tempHtml, clashes);
+            Assert.True(new FileInfo(tempHtml).Length > 0);
+        }
+        finally
+        {
+            foreach (string temp in new[] { tempGlb, tempBcf, tempHtml })
             {
-                if (File.Exists(tempNwc))
+                if (File.Exists(temp))
                 {
-                    File.Delete(tempNwc);
+                    File.Delete(temp);
                 }
             }
         }
     }
+}
