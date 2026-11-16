@@ -15,7 +15,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - The release workflow runs on tag pushes only and fails before anything is built or pushed unless the tag equals `v<Version>`. It can no longer be started by hand from a branch, and its release step runs `gh release create --verify-tag`, so it never creates a tag and the release tag is always the commit the packages were built from.
 
 ### Documentation
-- The README "Scope and frozen features" section states that JSON export of the data the reader parses is core and grows with the reader, and that the spatial index with raycast, section planes and boxes, and the redline types are frozen: bug fixes only. The README and the docs landing page lead with reading, writing `.nwc` and `NwcIO.Scene`; the README, the landing page, the getting started page and the public API page mark the frozen features, and the last three link the scene adapter page.
+- The README "Scope and frozen features" section states that JSON export is core and grows with the reader, and that the spatial index with raycast, section planes and boxes, and the redline types are frozen: bug fixes only. The README and the docs landing page lead with reading, writing `.nwc`, JSON export and `NwcIO.Scene`; the README, the landing page, the getting started page and the public API page mark the frozen features, and the last three link the scene adapter page.
 
 ## [0.12.1] - 2026-11-15
 
