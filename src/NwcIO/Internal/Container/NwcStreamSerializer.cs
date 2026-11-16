@@ -501,10 +501,12 @@ internal static class NwcStreamSerializer
             int vCount = verts.Count;
             var nameBytes = Encoding.UTF8.GetBytes(mesh.Name ?? string.Empty);
             int namePad = (4 - (nameBytes.Length & 3)) & 3;
-            int rLen = 24 + vCount * 12 + 8 + mesh.Indices.Count * 4 + 4 + nameBytes.Length + namePad;
+            int rLen = 24 + vCount * 12 + 16 + mesh.Indices.Count * 4 + nameBytes.Length + namePad;
             recordLengths[r] = rLen;
 
-            geomWriter.Write(mesh.Id != 0 ? mesh.Id : r); // recId
+            // The record id stays a unique parse index; the mesh id is stored in the trailer, so Id 0
+            // is preserved instead of being replaced by the record position.
+            geomWriter.Write(r); // recId
             geomWriter.Write(94);                         // recTag (94)
             geomWriter.Write(0);                          // flags
             geomWriter.Write(60);                         // subTag (60)
@@ -526,6 +528,7 @@ internal static class NwcStreamSerializer
                 geomWriter.Write(mesh.Indices[i]);
             }
 
+            geomWriter.Write(mesh.Id);
             geomWriter.Write(nameBytes.Length);
             geomWriter.Write(nameBytes);
             for (int p = 0; p < namePad; p++)

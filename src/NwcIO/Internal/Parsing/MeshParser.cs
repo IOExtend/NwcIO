@@ -107,6 +107,7 @@ public static class MeshParser
         }
 
         int curPos = 0;
+        var usedIds = new HashSet<int>();
         for (int r = 0; r < recordCount; r++)
         {
             int rLen = recordLengths[r];
@@ -142,7 +143,7 @@ public static class MeshParser
                     if (vCount >= MinMeshVertices && vCount <= MaxPlausibleVertices)
                     {
                         int recId = BinaryPrimitives.ReadInt32LittleEndian(combined.AsSpan(curPos));
-                        var mesh = TryBuildMesh(combined, curPos, curPos + 24, vCount, recId, rLen, meshes.Count);
+                        var mesh = TryBuildMesh(combined, curPos, curPos + 24, vCount, recId, rLen, meshes.Count, usedIds);
                         if (mesh is not null)
                         {
                             if (transforms is not null && meshes.Count < transforms.Count)
@@ -215,7 +216,8 @@ public static class MeshParser
         int vertexCount,
         int storedId,
         int recordLength,
-        int meshId)
+        int meshId,
+        HashSet<int>? usedIds = null)
     {
         var vertices = new Vector3d[vertexCount];
         double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
@@ -256,8 +258,19 @@ public static class MeshParser
             TryReadMeshTrailer(buffer, recordOffset, recordLength, vertexCount, storedId, out var trailerId, out var trailerIndices, out var trailerName))
         {
             id = trailerId;
-            name = string.IsNullOrEmpty(trailerName) ? $"Mesh_{id}" : trailerName;
+            name = SanitizeMeshName(trailerName, id);
             indices = trailerIndices;
+        }
+
+        // A merged document can repeat ids. Keep the first occurrence exact and give later duplicates a
+        // unique fallback, so clash detection and IFC export do not silently pair unrelated meshes.
+        if (usedIds is not null && !usedIds.Add(id))
+        {
+            id = meshId;
+            while (!usedIds.Add(id))
+            {
+                id++;
+            }
         }
 
         return new NwcMesh
@@ -287,7 +300,8 @@ public static class MeshParser
         int baseLength = 24 + vertexCount * 12;
         long trailerOffset = (long)recordOffset + baseLength;
         long recordEnd = (long)recordOffset + recordLength;
-        if (recordLength < baseLength + 12 || trailerOffset + 12 > buffer.Length || recordEnd > buffer.Length)
+        // magic, index count, mesh id and name length are all required before the optional indices.
+        if (recordLength < baseLength + 16 || trailerOffset + 16 > buffer.Length || recordEnd > buffer.Length)
         {
             return false;
         }
@@ -304,7 +318,7 @@ public static class MeshParser
         }
 
         long indicesEnd = trailerOffset + 8 + 4L * indexCount;
-        if (indicesEnd + 4 > recordEnd)
+        if (indicesEnd + 8 > recordEnd)
         {
             return false;
         }
@@ -321,16 +335,31 @@ public static class MeshParser
             parsedIndices[i] = index;
         }
 
-        int nameLength = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)indicesEnd));
-        long nameEnd = indicesEnd + 4 + nameLength;
+        int trailerId = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)indicesEnd));
+        long nameLengthAt = indicesEnd + 4;
+        int nameLength = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan((int)nameLengthAt));
+        long nameEnd = nameLengthAt + 4 + nameLength;
         if (nameLength < 0 || nameEnd > recordEnd)
         {
             return false;
         }
 
+        id = trailerId;
         indices = parsedIndices;
-        name = nameLength == 0 ? null : Encoding.UTF8.GetString(buffer, (int)indicesEnd + 4, nameLength);
+        name = nameLength == 0 ? null : Encoding.UTF8.GetString(buffer, (int)nameLengthAt + 4, nameLength);
         return true;
+    }
+
+    private static string SanitizeMeshName(string? name, int id)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return $"Mesh_{id}";
+        }
+
+        var characters = name.Where(c => !char.IsControl(c)).ToArray();
+        string trimmed = new string(characters).Trim();
+        return trimmed.Length == 0 ? $"Mesh_{id}" : trimmed;
     }
 
     /// <summary>
