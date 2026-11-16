@@ -37,4 +37,28 @@ public class StreamClassifierTests
 
         Assert.Equal(NwcStreamKind.Toc, StreamClassifier.Classify(stream));
     }
+
+    [Theory]
+    [InlineData("LcOaNode")]
+    [InlineData("LcOaGroup")]
+    [InlineData("LcOaScene")]
+    public void Classify_NonRevitNodeClass_ReturnsSceneTree(string marker)
+    {
+        var data = new byte[64];
+        BinaryPrimitives.WriteInt32LittleEndian(data, 1);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), 2);
+        System.Text.Encoding.ASCII.GetBytes(marker).CopyTo(data, 8);
+
+        var stream = new LcRawStream
+        {
+            Index = 0,
+            SectionIndex = 0,
+            FileOffset = 0,
+            CompressedLength = 0,
+            GapBefore = 0,
+            Data = data,
+        };
+
+        Assert.Equal(NwcStreamKind.SceneTree, StreamClassifier.Classify(stream));
+    }
 }
