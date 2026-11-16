@@ -239,8 +239,8 @@ public static class NwcContainerReader
 
     /// <summary>
     /// Serves the underlying buffer in blocks so the inflater runs at native speed, while recording the
-    /// last block it handed out. The exact compressed length is then found from the Adler-32 trailer inside
-    /// that block instead of limiting every read to one byte.
+    /// last block it handed out. <see cref="ExactTailFeed"/> uses that block start to measure the exact
+    /// compressed length without limiting every read to one byte.
     /// </summary>
     private sealed class BlockFeed : Stream
     {

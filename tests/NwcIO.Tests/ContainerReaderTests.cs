@@ -205,7 +205,8 @@ public class ContainerReaderTests
     {
         var compressed = CompressZlib(System.Text.Encoding.UTF8.GetBytes("payload"));
         var file = FileBytes(compressed);
-        using var stream = new MemoryStream(file);
+        // publiclyVisible: true makes TryGetBuffer succeed, so only the Position guard keeps it off the fast path.
+        using var stream = new MemoryStream(file, 0, file.Length, false, true);
         stream.Position = stream.Length;
 
         Assert.Throws<InvalidDataException>(() => NwcContainerReader.Read(stream));
