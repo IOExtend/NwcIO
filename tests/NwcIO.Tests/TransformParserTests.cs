@@ -101,6 +101,27 @@ public class TransformParserTests
         Assert.Equal(1.0, matrix[15]);
     }
 
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(2, 1)]
+    public void Parse_WriterStreamWithWrongRecordCount_Throws(int declared, int written)
+    {
+        var transforms = Enumerable.Range(0, written).Select(i => new NwcTransform { Id = i }).ToList();
+        var data = NwcIO.Internal.Container.NwcStreamSerializer.BuildTransformsStream(transforms);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), declared);
+
+        Assert.Throws<InvalidDataException>(() => TransformParser.Parse(data));
+    }
+
+    [Fact]
+    public void Parse_WriterStreamWithMatchingCount_ReadsAllRecords()
+    {
+        var data = NwcIO.Internal.Container.NwcStreamSerializer.BuildTransformsStream(
+            [new NwcTransform { Id = 5 }, new NwcTransform { Id = 5 }]);
+
+        Assert.Equal(2, TransformParser.Parse(data).Count);
+    }
+
     private static void WriteInt32(MemoryStream ms, int value)
     {
         Span<byte> buf = stackalloc byte[4];
