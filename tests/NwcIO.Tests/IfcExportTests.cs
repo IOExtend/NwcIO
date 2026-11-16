@@ -1,4 +1,4 @@
-using NwcIO.Model;
+﻿using NwcIO.Model;
 using NwcIO.Model.Sectioning;
 using Xunit;
 
@@ -6,6 +6,65 @@ namespace NwcIO.Tests;
 
 public class IfcExportTests
 {
+    [Fact]
+    public void SaveIfc_SameInputTwice_ProducesIdenticalOutput()
+    {
+        var doc = CreateSyntheticDocument("Стена монолитная", "Бетон В25");
+        var options = new NwcIfcExportOptions { SchemaVersion = NwcIfcSchemaVersion.Ifc4, UseTessellationInIfc4 = true };
+
+        Assert.Equal(doc.ToIfcString(options), doc.ToIfcString(options));
+    }
+
+    [Fact]
+    public void SaveIfc_Assembly_EqualMeshIdsInDifferentModels_GetDistinctGlobalIds()
+    {
+        NwcDocument Model(string sourcePath, int meshId)
+        {
+            var mesh = new NwcMesh
+            {
+                Id = meshId,
+                Name = "Element",
+                Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+                Indices = [0, 1, 2],
+            };
+            return NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = sourcePath }, meshes: [mesh]);
+        }
+
+        var first = Model("first.rvt", 5);
+        var second = Model("second.rvt", 5);
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        using var writer = new StringWriter();
+        assembly.SaveIfc(writer);
+        string ifc = writer.ToString();
+
+        string firstGuid = NwcIO.Internal.Export.NwcElementGuid.ForMesh(first.Meshes[0], first);
+        string secondGuid = NwcIO.Internal.Export.NwcElementGuid.ForMesh(second.Meshes[0], second);
+        Assert.NotEqual(firstGuid, secondGuid);
+        Assert.Contains($"'{firstGuid}'", ifc);
+        Assert.Contains($"'{secondGuid}'", ifc);
+    }
+
+    [Fact]
+    public void SaveIfc_ClashGlobalIds_MatchTheAssemblyExport()
+    {
+        var firstSource = CreateSyntheticDocument("Wall A", null);
+        var secondSource = CreateSyntheticDocument("Wall B", null);
+        var first = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "first.rvt" }, meshes: firstSource.Meshes);
+        var second = NwcDocument.Create(fileInfo: new NwcFileInfo { SourcePath = "second.rvt" }, meshes: secondSource.Meshes);
+        var clash = new NwcClash(first, first.Meshes[0], second, second.Meshes[0],
+            new BoundingBox3d(new Vector3d(0, 0, 0), new Vector3d(1, 1, 1)));
+        var assembly = NwcAssembly.Create("Federation", first, second);
+
+        using var writer = new StringWriter();
+        assembly.SaveIfc(writer);
+        string ifc = writer.ToString();
+
+        Assert.Contains($"'{clash.IfcGuidA}'", ifc);
+        Assert.Contains($"'{clash.IfcGuidB}'", ifc);
+        Assert.NotEqual(clash.IfcGuidA, clash.IfcGuidB);
+    }
+
     [Theory]
     [InlineData(NwcIfcSchemaVersion.Ifc2x3)]
     [InlineData(NwcIfcSchemaVersion.Ifc4)]
@@ -262,6 +321,88 @@ public class IfcExportTests
         });
         Assert.Contains("IFCDOCUMENTREFERENCE('https://example.com/pump.pdf','Manual','Datasheet',$,$);", ifc4);
         Assert.Contains("IFCRELASSOCIATESDOCUMENT", ifc4);
+    }
+
+    [Fact]
+    public void SaveIfc_AssemblyWithEqualSourcePaths_GetsDistinctProductGlobalIds()
+    {
+        static NwcDocument Model(double x) => NwcDocument.Create(
+            fileInfo: new NwcFileInfo { SourcePath = "tower.rvt" },
+            meshes:
+            [
+                new NwcMesh
+                {
+                    Id = 1,
+                    Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+                    Indices = [0, 1, 2],
+                },
+            ]);
+
+        using var writer = new StringWriter();
+        NwcAssembly.Create("fed", Model(0), Model(2)).SaveIfc(writer);
+        string ifc = writer.ToString();
+
+        var guids = System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCBUILDINGELEMENTPROXY\('([^']+)'")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        Assert.Equal(2, guids.Length);
+        Assert.Equal(2, guids.Distinct().Count());
+    }
+
+    [Fact]
+    public void SaveIfc_PropertySetIdsFollowTheElementNotTheStepNumber()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        var other = new NwcMesh
+        {
+            Id = 2,
+            Vertices = [new(10, 0, 0), new(11, 0, 0), new(10, 1, 0)],
+            Indices = [0, 1, 2],
+            // A material adds STEP entities, so no property set of `two` lands on the STEP number of `one`'s.
+            Material = new NwcMaterial { Id = 1, Name = "Steel", Color = new RgbaColor(0.5f, 0.5f, 0.5f, 1.0f) },
+        };
+
+        string one = NwcDocument.Create(meshes: [mesh]).ToIfcString(new NwcIfcExportOptions());
+        // The extra mesh comes first, so the shared mesh's property set gets a different STEP number.
+        string two = NwcDocument.Create(meshes: [other, mesh]).ToIfcString(new NwcIfcExportOptions());
+
+        static string[] PropertySetIds(string ifc) =>
+            System.Text.RegularExpressions.Regex.Matches(ifc, @"IFCPROPERTYSET\('([^']+)'")
+                .Select(match => match.Groups[1].Value)
+                .ToArray();
+
+        var idsOne = PropertySetIds(one);
+        var idsTwo = PropertySetIds(two);
+        Assert.Single(idsOne);
+        Assert.Equal(2, idsTwo.Length);
+        Assert.Contains(idsOne[0], idsTwo);
+    }
+
+    [Fact]
+    public void SaveIfc_AllEntityGlobalIdsAreUnique()
+    {
+        NwcMesh Mesh(int id) => new()
+        {
+            Id = id,
+            Vertices = [new(id, 0, 0), new(id + 1, 0, 0), new(id, 1, 0)],
+            Indices = [0, 1, 2],
+            Material = new NwcMaterial { Id = id, Name = $"Mat{id}", Color = new RgbaColor(0.5f, 0.5f, 0.5f, 1.0f) },
+        };
+
+        // Several elements, so a property set, its relationship or a product id shared between them is detected.
+        string ifc = NwcDocument.Create(meshes: [Mesh(1), Mesh(2), Mesh(3)]).ToIfcString(new NwcIfcExportOptions());
+
+        var guids = System.Text.RegularExpressions.Regex.Matches(
+                ifc, @"^#\d+=IFC[A-Z]+\('([0-9A-Za-z_$]{22})'", System.Text.RegularExpressions.RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        Assert.True(guids.Length >= 20, $"expected at least 20 rooted entities, got {guids.Length}");
+        Assert.Equal(guids.Length, guids.Distinct().Count());
     }
 
     [Theory]
@@ -1117,7 +1258,7 @@ public class IfcExportTests
         }
 
         string ifc = sw.ToString();
-        string expectedGuid = NwcIO.Internal.Export.IfcGuid.FromKey($"ifc:element:{globalId}:mesh:42:model:0");
+        string expectedGuid = NwcIO.Internal.Export.IfcGuid.FromKey($"{NwcIO.Internal.Export.NwcElementGuid.ModelKey(doc)}:element:{globalId}:mesh:42");
         Assert.Contains($"IFCWALL('{expectedGuid}',", ifc);
         Assert.Contains("'Concrete Wall 200'", ifc);
         Assert.DoesNotContain("Mesh_42", ifc);
