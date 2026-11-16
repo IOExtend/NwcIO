@@ -48,9 +48,9 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 |---|---|
 | `NwcTimeLinerSchedule` & `NwcTimeLinerTask` | WBS task hierarchy, planned/actual dates, costs, progress, and simulation queries. Frozen: bug fixes only. |
 | `NwcTimeLinerXmlSerializer` | Full roundtrip serialization of Navisworks TimeLiner Exchange XML. Frozen: bug fixes only. |
-| `NwcTimeLinerMsProjectXmlSerializer` | Microsoft Project XML schedule import/export. Frozen: bug fixes only. |
-| `NwcTimeLinerPrimaveraXerSerializer` | Primavera P6 XER schedule import/export. Frozen: bug fixes only. |
-| `NwcTimeLinerCsvSerializer` | CSV schedule export. Frozen: bug fixes only. |
+| `NwcTimeLinerMsProjectXmlSerializer` | Microsoft Project XML schedule import/export. Project XML has no UTC offset field, so dates are written as UTC and read back as UTC. Frozen: bug fixes only. |
+| `NwcTimeLinerPrimaveraXerSerializer` | Primavera P6 XER schedule import/export. XER has no UTC offset field, so dates are written as UTC and read back as UTC. Frozen: bug fixes only. |
+| `NwcTimeLinerCsvSerializer` | CSV schedule export. CSV has no UTC offset field, so dates are written as UTC and read back as UTC. Frozen: bug fixes only. |
 | `NwcTimeLinerLinker` | Rule-based automated linking of schedule tasks to geometry. Frozen: bug fixes only. |
 | `NwcSelectionSet`, `NwcSearchSet`, `NwcSelectionSetFolder`, `NwcSetItem` | Manual selection sets, dynamic query search sets, and set folders. Frozen: bug fixes only. |
 | `NwcSearchCondition` & `NwcSearchOperator` | Search criteria over node built-ins and property records (equals, contains, wildcard, comparisons). |

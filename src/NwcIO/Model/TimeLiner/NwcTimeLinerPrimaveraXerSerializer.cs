@@ -6,6 +6,7 @@ namespace NwcIO.Model.TimeLiner;
 /// <summary>
 /// Serializes and deserializes Navisworks 4D TimeLiner construction simulation schedules
 /// to and from Primavera P6 XER format (.xer).
+/// XER has no UTC offset field: dates are written as UTC and read back as UTC, so instants round-trip to the format precision (whole minutes in XER, whole seconds in CSV and Project XML).
 /// </summary>
 public static class NwcTimeLinerPrimaveraXerSerializer
 {
@@ -49,7 +50,7 @@ public static class NwcTimeLinerPrimaveraXerSerializer
 
         writer.WriteLine("%T\tPROJECT");
         writer.WriteLine("%F\tproj_id\tproj_short_name\tplan_start_date\tplan_end_date\tstatus_code");
-        writer.WriteLine($"%R\t1\t{CleanField(schedule.Name)}\t{overallStart.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{overallEnd.ToString(DateFormat, CultureInfo.InvariantCulture)}\tActive");
+        writer.WriteLine($"%R\t1\t{CleanField(schedule.Name)}\t{overallStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{overallEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\tActive");
 
         // 3. PROJWBS Table
         writer.WriteLine("%T\tPROJWBS");
@@ -65,15 +66,15 @@ public static class NwcTimeLinerPrimaveraXerSerializer
         {
             taskId++;
             string status = task.Progress >= 1.0 ? "TK_Complete" : (task.Progress > 0.0 ? "TK_Active" : "TK_NotStart");
-            string actStart = task.ActualStart?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
-            string actEnd = task.ActualEnd?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
+            string actStart = task.ActualStart?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
+            string actEnd = task.ActualEnd?.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture) ?? "";
             string durationHours = Math.Max(0.0, task.PlannedDuration.TotalHours).ToString("F1", CultureInfo.InvariantCulture);
             string pct = (Math.Clamp(task.Progress, 0.0, 1.0) * 100.0).ToString("F1", CultureInfo.InvariantCulture);
             string cost = task.PlannedCost?.ToString("F2", CultureInfo.InvariantCulture) ?? "";
             string actCost = task.ActualCost?.ToString("F2", CultureInfo.InvariantCulture) ?? "";
             string code = string.IsNullOrEmpty(task.Id) ? $"T{taskId}" : task.Id;
 
-            writer.WriteLine($"%R\t{taskId}\t1\t100\t{CleanField(code)}\t{CleanField(task.Name)}\tTT_Task\t{status}\t{task.PlannedStart.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{task.PlannedEnd.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{actStart}\t{actEnd}\t{durationHours}\t{pct}\t{cost}\t{actCost}");
+            writer.WriteLine($"%R\t{taskId}\t1\t100\t{CleanField(code)}\t{CleanField(task.Name)}\tTT_Task\t{status}\t{task.PlannedStart.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{task.PlannedEnd.UtcDateTime.ToString(DateFormat, CultureInfo.InvariantCulture)}\t{actStart}\t{actEnd}\t{durationHours}\t{pct}\t{cost}\t{actCost}");
         }
 
         writer.Flush();
