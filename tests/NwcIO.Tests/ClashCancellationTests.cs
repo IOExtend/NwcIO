@@ -56,10 +56,59 @@ public sealed class ClashCancellationTests
         Assert.Equal(2, progress.Reports[^1].Total);
     }
 
+    [Fact]
+    public void Run_ProgressCanCancelAfterTheFirstMesh()
+    {
+        var document = new NwcDocumentBuilder()
+            .AddMesh(Triangle(1, 0))
+            .AddMesh(Triangle(2, 2))
+            .AddMesh(Triangle(3, 4))
+            .Build();
+        var test = new NwcClashTest("Cancel mid-run");
+        using var cancellation = new CancellationTokenSource();
+        var progress = new CancellingProgress(cancellation);
+
+        Assert.Throws<OperationCanceledException>(() =>
+            NwcClashDetector.Run(document, test, progress, cancellation.Token));
+        Assert.Single(progress.Reports);
+    }
+
+    [Fact]
+    public void DocumentAndAssemblyRunClashDetection_AcceptCancellation()
+    {
+        var document = NwcDocument.Create(meshes: [Triangle(1, 0), Triangle(2, 2)]);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            document.RunClashDetection(null, null, cancellation.Token));
+        Assert.Throws<OperationCanceledException>(() =>
+            NwcAssembly.Create("fed", document).RunClashDetection("t", 0.001, null, cancellation.Token));
+    }
+
+    private static NwcMesh Triangle(int id, double x) => new()
+    {
+        Id = id,
+        Vertices = [new(x, 0, 0), new(x + 1, 0, 0), new(x, 1, 0)],
+        Indices = [0, 1, 2],
+        BoundingBox = new BoundingBox3d(new(x, 0, 0), new(x + 1, 1, 0)),
+    };
+
     private sealed class CollectingProgress : IProgress<NwcProgress>
     {
         public List<NwcProgress> Reports { get; } = [];
 
         public void Report(NwcProgress value) => Reports.Add(value);
+    }
+
+    private sealed class CancellingProgress(CancellationTokenSource cancellation) : IProgress<NwcProgress>
+    {
+        public List<NwcProgress> Reports { get; } = [];
+
+        public void Report(NwcProgress value)
+        {
+            Reports.Add(value);
+            cancellation.Cancel();
+        }
     }
 }

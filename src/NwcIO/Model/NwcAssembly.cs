@@ -339,6 +339,19 @@ public sealed class NwcAssembly
         return test;
     }
 
+    /// <summary>Runs clash detection over the assembled models with cancellation and progress.</summary>
+    public Clash.NwcClashTest RunClashDetection(
+        string testName,
+        double tolerance,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var test = new Clash.NwcClashTest(testName, Clash.NwcClashTestType.Hard, tolerance);
+        Clash.NwcClashDetector.Run(this, test, progress, cancellationToken);
+        ClashTests.Add(test);
+        return test;
+    }
+
     /// <summary>Exports detected clash results to Autodesk Navisworks Clash Report XML format.</summary>
     public void ExportClashReportXml(string path)
     {

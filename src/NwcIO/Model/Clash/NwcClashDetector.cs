@@ -114,7 +114,6 @@ public static class NwcClashDetector
         for (int i = 0; i < meshesA.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(new NwcProgress("clash", i + 1, meshesA.Count));
             var meshA = meshesA[i];
             var boxA = meshA.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
@@ -153,7 +152,7 @@ public static class NwcClashDetector
                 if (!expandedA.Intersects(boxB)) continue;
 
                 // Narrow phase: mesh triangle intersection
-                if (CheckMeshIntersection(meshA, meshB, out var clashPoint, out double penetration))
+                if (CheckMeshIntersection(meshA, meshB, cancellationToken, out var clashPoint, out double penetration))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -191,6 +190,8 @@ public static class NwcClashDetector
                     test.AddResult(result);
                 }
             }
+
+            progress?.Report(new NwcProgress("clash", i + 1, meshesA.Count));
         }
     }
 
@@ -220,7 +221,6 @@ public static class NwcClashDetector
         for (int i = 0; i < itemsA.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(new NwcProgress("clash", i + 1, itemsA.Count));
             var itemA = itemsA[i];
             var boxA = itemA.Mesh.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
@@ -257,7 +257,7 @@ public static class NwcClashDetector
 
                 if (!expandedA.Intersects(boxB)) continue;
 
-                if (CheckMeshIntersection(itemA.Mesh, itemB.Mesh, out var clashPoint, out double penetration))
+                if (CheckMeshIntersection(itemA.Mesh, itemB.Mesh, cancellationToken, out var clashPoint, out double penetration))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -295,12 +295,15 @@ public static class NwcClashDetector
                     test.AddResult(result);
                 }
             }
+
+            progress?.Report(new NwcProgress("clash", i + 1, itemsA.Count));
         }
     }
 
     private static bool CheckMeshIntersection(
         NwcMesh a,
         NwcMesh b,
+        CancellationToken cancellationToken,
         out Vector3d clashPoint,
         out double penetrationDepth)
     {
@@ -340,6 +343,11 @@ public static class NwcClashDetector
 
         for (int i = 0; i + 2 < indicesA.Count; i += 3)
         {
+            if ((i & 0x3F) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             int ia0 = indicesA[i];
             int ia1 = indicesA[i + 1];
             int ia2 = indicesA[i + 2];
