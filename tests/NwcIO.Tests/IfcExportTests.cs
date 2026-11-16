@@ -114,6 +114,9 @@ public class IfcExportTests
     [InlineData("Балконное ограждение", "IFCRAILING")]
     [InlineData("Крышка люка", "IFCBUILDINGELEMENTPROXY")]
     [InlineData("Плитка", "IFCBUILDINGELEMENTPROXY")]
+    [InlineData("Балконная дверь", "IFCDOOR")]
+    [InlineData("Балконная плита", "IFCSLAB")]
+    [InlineData("Крышка стены", "IFCWALL")]
     public void SaveIfc_RussianStems_DoNotCreateFalsePositives(string name, string expected)
     {
         var mesh = new NwcMesh

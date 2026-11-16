@@ -186,15 +186,12 @@ internal static class IfcExporter
                 $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
             var owner = mesh.Node?.Element ?? mesh.Node;
-            string elemName = !string.IsNullOrEmpty(owner?.Name)
-                ? owner.Name
-                : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+            string elemName = ElementName(mesh, owner);
             string elemGuid = IfcGuid.FromElementId(mesh.Id, "NwcMesh");
             string ifcType = ClassifyElement(elemName, owner);
 
             int elemId = AddIfcProduct(w, ifcType, elemGuid, ownerHistoryId, elemName, elemPlacementId, prodShapeId, mesh.Id.ToString(CultureInfo.InvariantCulture), isIfc4);
             elementIds.Add(elemId);
-            // Type name uses the same owner as classification below.
 
             // Type assignment
             if (options.ExportTypeObjects)
@@ -418,9 +415,7 @@ internal static class IfcExporter
                     $"{StepWriter.Ref(storeyPlacementId)},{StepWriter.Ref(worldPlacement3dId)}");
 
                 var owner = mesh.Node?.Element ?? mesh.Node;
-                string elemName = !string.IsNullOrEmpty(owner?.Name)
-                    ? owner.Name
-                    : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+                string elemName = ElementName(mesh, owner);
                 string elemGuid = IfcGuid.FromElementId(mesh.Id + modelIdx * 1_000_000, "NwcAssemblyMesh");
                 string ifcType = ClassifyElement(elemName, owner);
 
@@ -709,16 +704,6 @@ internal static class IfcExporter
             return ClassifyText(text[3..]);
         }
 
-        if (HasTokenPrefix(text, "балкон"))
-        {
-            return HasTokenPrefix(text, "огражд", "перил", "rail") ? "IFCRAILING" : null;
-        }
-
-        if (HasTokenPrefix(text, "крышк", "плитк"))
-        {
-            return null;
-        }
-
         if (HasTokenPrefix(text, "труб", "pipe"))
             return "IFCPIPESEGMENT";
         if (HasTokenPrefix(text, "воздуховод", "duct"))
@@ -749,6 +734,17 @@ internal static class IfcExporter
         return null;
     }
 
+    /// <summary>Words that merely start like a structural keyword (balcony vs beam, lid vs roof, tile vs slab); they are ignored, the rest of the text is still classified.</summary>
+    private static bool IsNonStructuralToken(ReadOnlySpan<char> token) =>
+        token.StartsWith("балкон", StringComparison.OrdinalIgnoreCase)
+        || token.StartsWith("крышк", StringComparison.OrdinalIgnoreCase)
+        || token.StartsWith("плитк", StringComparison.OrdinalIgnoreCase);
+
+    private static string ElementName(NwcMesh mesh, NwcNode? owner) =>
+        !string.IsNullOrEmpty(owner?.Name)
+            ? owner.Name
+            : string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+
     /// <summary>Matches a keyword only at the start of a word token, so "Drywall" is not a wall and "Outdoor" is not a door.</summary>
     private static bool HasTokenPrefix(string text, params string[] prefixes)
     {
@@ -768,6 +764,11 @@ internal static class IfcExporter
             }
 
             var token = text.AsSpan(start, i - start);
+            if (IsNonStructuralToken(token))
+            {
+                continue;
+            }
+
             foreach (string prefix in prefixes)
             {
                 if (token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
