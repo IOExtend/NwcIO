@@ -102,7 +102,7 @@ public static partial class NwcSceneReader
 
         var documents = assembly.Models.Count > 1
             ? assembly.Models
-                .Where(d => !string.Equals(Path.GetExtension(d.FileInfo.SourcePath ?? string.Empty), ".nwf", StringComparison.OrdinalIgnoreCase))
+                .Where(d => !string.Equals(Path.GetExtension(DocumentPath(d) ?? string.Empty), ".nwf", StringComparison.OrdinalIgnoreCase))
                 .ToList()
             : assembly.Models.ToList();
         if (documents.Count == 0)
@@ -130,11 +130,12 @@ public static partial class NwcSceneReader
                     nameof(assembly));
             }
 
-            var result = ConvertInto(scene, document, key, document.FileInfo.SourcePath, options, modelId: scene.Models.Count + 1, usedKeys, nextSuffix);
+            var result = ConvertInto(scene, document, key, document.LoadedPath, options, modelId: scene.Models.Count + 1, usedKeys, nextSuffix);
             diagnostics.AddRange(result.Diagnostics.Select(d => new SceneDiagnostic(
                 d.Severity,
                 d.Code,
-                $"{key}: {d.Message}")));
+                $"{key}: {d.Message}",
+                d.SourceId)));
             elementCount += result.ElementCount;
             elementsWithGeometry += result.ElementsWithGeometry;
 
@@ -147,6 +148,19 @@ public static partial class NwcSceneReader
             {
                 mixedUnits = true;
             }
+        }
+
+        // References OpenNwf could not load: the scene holds nothing of them (the .nwf shell's own xrefs-skipped is not reported).
+        if (assembly.UnresolvedXRefs.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "xrefs-unresolved",
+                $"{assembly.UnresolvedXRefs.Count} external references were not found on disk, so their models are missing from the scene: {XRefNames(assembly.UnresolvedXRefs)}."));
+        }
+
+        if (assembly.SkippedXRefs.Count > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "xrefs-not-loaded",
+                $"{assembly.SkippedXRefs.Count} external references are files other than .nwc and .nwd and were not loaded, so the scene holds none of their content: {XRefNames(assembly.SkippedXRefs)}."));
         }
 
         return new NwcSceneResult
@@ -162,6 +176,13 @@ public static partial class NwcSceneReader
         };
     }
 
+    // The first five effective paths, then the count of the rest.
+    private static string XRefNames(IReadOnlyList<NwcXRef> references) =>
+        string.Join(", ", references.Take(5).Select(r => r.EffectivePath)) + (references.Count > 5 ? $" and {references.Count - 5} more" : "");
+
+    private static string? DocumentPath(NwcDocument document) =>
+        document.LoadedPath ?? document.FileInfo.SourcePath;
+
     private static string ModelKey(
         NwcDocument document,
         int index,
@@ -171,7 +192,7 @@ public static partial class NwcSceneReader
     {
         string candidate = options?.ModelKey is { Length: > 0 } key && index == 0
             ? key
-            : Path.GetFileName(document.FileInfo.SourcePath ?? string.Empty);
+            : Path.GetFileName(DocumentPath(document) ?? string.Empty);
         if (string.IsNullOrWhiteSpace(candidate))
         {
             candidate = $"Model_{index + 1}";
@@ -445,6 +466,8 @@ public static partial class NwcSceneReader
         }
 
         int skippedViewpoints = 0;
+        int approximatedViewpoints = 0;
+        int viewpointContentSkipped = 0;
         if (metresPerUnit is double viewpointMetres)
         {
             foreach (var saved in document.SavedViewpoints)
@@ -452,6 +475,16 @@ public static partial class NwcSceneReader
                 if (TryMapViewpoint(saved, viewpointMetres, out var viewpoint))
                 {
                     scene.Viewpoints.Add(viewpoint);
+                    if (saved.IsCameraApproximated)
+                    {
+                        approximatedViewpoints++;
+                    }
+
+                    if (saved.SectionPlanes.Count > 0 || saved.SectionBox is not null ||
+                        saved.Redlines.Count > 0 || saved.Comments.Count > 0)
+                    {
+                        viewpointContentSkipped++;
+                    }
                 }
                 else
                 {
@@ -472,6 +505,18 @@ public static partial class NwcSceneReader
                 skippedViewpoints > 0
                     ? FormattableString.Invariant($"{skippedViewpoints} saved viewpoints could not be converted.")
                     : "Saved viewpoints could not be read from this file."));
+        }
+
+        if (approximatedViewpoints > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-camera-approximated",
+                FormattableString.Invariant($"{approximatedViewpoints} saved viewpoints have approximated camera parameters: the file does not store a decoded field of view, projection and far distance.")));
+        }
+
+        if (viewpointContentSkipped > 0)
+        {
+            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Info, "viewpoint-content-skipped",
+                FormattableString.Invariant($"{viewpointContentSkipped} saved viewpoints carry section planes, a section box, redlines or comments; only their camera is converted.")));
         }
 
         if (document.XRefs is { References.Count: > 0 } xRefs)
@@ -542,7 +587,8 @@ public static partial class NwcSceneReader
             {
                 Position = ToScene(camera.Position, metresPerUnit),
                 Target = ToScene(camera.Target, metresPerUnit),
-                Up = ToScene(camera.Up, metresPerUnit),
+                // Up is a direction, not a length: only position, target and clip distances scale.
+                Up = new IOScene.Vector3d(camera.Up.X, camera.Up.Y, camera.Up.Z),
                 FieldOfView = camera.FieldOfView * Math.PI / 180.0,
                 AspectRatio = camera.AspectRatio,
                 NearDistance = camera.NearDistance * metresPerUnit,
@@ -596,14 +642,15 @@ public static partial class NwcSceneReader
                     {
                         id = value;
                     }
-                    else if (property.Name == "Elevation" &&
+                    else if (property.InternalName == "lcldrevit_parameter_-1007102" &&
+                             property.ValueType == 6 &&
                              double.TryParse(property.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
                     {
                         elevation = parsed;
                     }
                 }
 
-                if (id is not null && elevation is double e)
+                if (id is not null && elevation is double e && double.IsFinite(e * metres))
                 {
                     result[id] = e * metres;
                 }
@@ -619,7 +666,8 @@ public static partial class NwcSceneReader
 
     // A grid is a line only when it has one line mesh of one segment that is horizontal within 1e-6 m; otherwise it stays an element.
     private static SceneGridLine? GridLine(NwcNode node, List<NwcMesh> meshes, double metresPerUnit)
-    {        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
+    {
+        if (meshes.Count != 1 || meshes[0].LineIndices.Count != 2)
         {
             return null;
         }

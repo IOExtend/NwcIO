@@ -1,7 +1,7 @@
 namespace NwcIO.Internal.Container;
 
 /// <summary>How a raw stream was identified.</summary>
-public enum NwcStreamKind
+internal enum NwcStreamKind
 {
     Unknown,
     /// <summary>Partition 0 header: source file path, timestamp, loader plugin, export options.</summary>
@@ -26,13 +26,15 @@ public enum NwcStreamKind
     SelectionSets,
     /// <summary>4D TimeLiner construction schedule and tasks.</summary>
     TimeLiner,
+    /// <summary>Writer-side per-mesh transform ids ("NWTL").</summary>
+    TransformLinks,
 }
 
 /// <summary>
 /// One zlib-decompressed stream ("chunk") of the container plus its raw placement in the file.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1711:Identifiers should not have incorrect suffix", Justification = "Matches Navisworks LcUStream naming convention")]
-public sealed record LcRawStream
+internal sealed record LcRawStream
 {
     public required int Index { get; init; }
 
@@ -40,7 +42,7 @@ public sealed record LcRawStream
     public required long FileOffset { get; init; }
 
     /// <summary>Compressed (zlib) byte length in the file.</summary>
-    public required int CompressedLength { get; init; }
+    public required long CompressedLength { get; init; }
 
     /// <summary>Bytes skipped in the file right before this stream (framing/section text).</summary>
     public required int GapBefore { get; init; }
@@ -54,7 +56,7 @@ public sealed record LcRawStream
 }
 
 /// <summary>The parsed container: section headers and the ordered stream list.</summary>
-public sealed record NwcContainer
+internal sealed record NwcContainer
 {
     public required IReadOnlyList<LcUStreamHeader> Sections { get; init; }
 
@@ -63,5 +65,5 @@ public sealed record NwcContainer
     public required long FileLength { get; init; }
 
     /// <summary>Bytes at the file tail that could not be attributed to any stream.</summary>
-    public required int TrailingGap { get; init; }
+    public required long TrailingGap { get; init; }
 }

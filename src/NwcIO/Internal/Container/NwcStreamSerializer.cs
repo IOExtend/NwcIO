@@ -30,10 +30,23 @@ internal static class NwcStreamSerializer
             streams.Add(sceneTree);
         }
 
-        // 3. Transforms stream
-        if (doc.Transforms.Count > 0)
+        // 3. Transforms stream and the writer-side mesh-to-transform links. Links use the index in
+        // this list, not NwcTransform.Id: ids repeat across merged documents and are not unique.
+        var transforms = CollectTransforms(doc);
+        var transformIndices = new Dictionary<NwcTransform, int>(ReferenceEqualityComparer.Instance);
+        for (int i = 0; i < transforms.Count; i++)
         {
-            streams.Add(BuildTransformsStream(doc.Transforms));
+            transformIndices[transforms[i]] = i;
+        }
+
+        if (transforms.Count > 0)
+        {
+            streams.Add(BuildTransformsStream(transforms));
+        }
+
+        if (doc.Meshes.Count > 0)
+        {
+            streams.Add(BuildTransformLinksStream(doc.Meshes, transformIndices));
         }
 
         // 4. Guids stream
@@ -106,9 +119,18 @@ internal static class NwcStreamSerializer
                 throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} holds line segments, which the .nwc writer cannot store.", nameof(doc));
             }
 
-            if (mesh.Indices.Count > 0 && !MeshParser.IsStrip(mesh.Indices, mesh.Vertices.Count))
+            if (mesh.Indices.Count % 3 != 0)
             {
-                throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} has triangles the .nwc writer cannot store: it writes positions only and the reader rebuilds one strip over them.", nameof(doc));
+                throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)} has {mesh.Indices.Count.ToString(CultureInfo.InvariantCulture)} indices; expected a multiple of 3.", nameof(doc));
+            }
+
+            for (var i = 0; i < mesh.Indices.Count; i++)
+            {
+                var index = mesh.Indices[i];
+                if (index < 0 || index >= mesh.Vertices.Count)
+                {
+                    throw new ArgumentException($"Mesh {mesh.Id.ToString(CultureInfo.InvariantCulture)}, index {i.ToString(CultureInfo.InvariantCulture)} is {index.ToString(CultureInfo.InvariantCulture)}; expected 0..{(mesh.Vertices.Count - 1).ToString(CultureInfo.InvariantCulture)}.", nameof(doc));
+                }
             }
 
             if (mesh.Vertices.Count < MeshParser.MinMeshVertices ||
@@ -132,6 +154,10 @@ internal static class NwcStreamSerializer
             if (record.Tag is 52 or 53)
             {
                 ValidateRecord(record.FirstInt, record.Name, record.Class, record.Tag == 52);
+                if (record.Tag == 52)
+                {
+                    ValidatePropertyValue(record, record.ValueType);
+                }
             }
         }
 
@@ -149,6 +175,14 @@ internal static class NwcStreamSerializer
             {
                 throw new ArgumentException($"Viewpoint at index {i} has a name the reader would rename.", nameof(doc));
             }
+
+            var viewpoint = doc.SavedViewpoints[i];
+            if (viewpoint.Comments.Count > ViewpointExtensionFormat.MaxComments ||
+                viewpoint.Comments.Any(c => Encoding.UTF8.GetByteCount(c) > ViewpointExtensionFormat.MaxCommentBytes) ||
+                viewpoint.SectionPlanes.Count > ViewpointExtensionFormat.MaxSectionPlanes)
+            {
+                throw new ArgumentException($"Viewpoint at index {i} has more comments, longer comments or more section planes than the reader accepts.", nameof(doc));
+            }
         }
     }
 
@@ -163,12 +197,26 @@ internal static class NwcStreamSerializer
         }
     }
 
+    private static void ValidatePropertyValue(NwcPropertyRecord record, int valueType)
+    {
+        if (valueType is < 0 or > 13)
+        {
+            throw new ArgumentException($"Property '{record.Name}' (record {record.FirstInt}) has unsupported value type {valueType}; the .nwc writer stores types 0..13.");
+        }
+
+        if (valueType is 0 or 2 or 3 && record.IntValue is < int.MinValue or > int.MaxValue)
+        {
+            throw new ArgumentException($"Property '{record.Name}' (record {record.FirstInt}) has IntValue {record.IntValue}, outside the 32-bit range of value type {valueType}.");
+        }
+    }
+
     private static void ValidateNode(NwcNode node)
     {
         ValidateRecord(node.Id, node.Name, node.Class, true);
         foreach (var property in node.Properties)
         {
             ValidateRecord(property.FirstInt, property.Name, property.Class, true);
+            ValidatePropertyValue(property, property.ValueType != 0 ? property.ValueType : 4);
         }
 
         foreach (var child in node.Children)
@@ -291,6 +339,11 @@ internal static class NwcStreamSerializer
                     w.Write(r.FirstInt);
                     w.Write(53);
                     WritePaddedString(w, r.Name);
+                    if (r.ParentId is { } parentId)
+                    {
+                        w.Write(-2);
+                        w.Write(parentId);
+                    }
                 }
                 else if (r.Tag == 52)
                 {
@@ -299,19 +352,27 @@ internal static class NwcStreamSerializer
                     WritePaddedString(w, r.Name);
                     WritePaddedString(w, r.Class);
                     w.Write(r.ValueType);
-                    WritePropertyValue(w, r.ValueType, r.Value);
+                    WritePropertyValue(w, r.ValueType, r.Value, r.IntValue, r.DoubleValue, r.ReferenceId, r.ReferenceTag, r.ReferenceClass);
                 }
             }
         }
         else if (rootNode is not null)
         {
-            FlattenNode(w, rootNode);
+            FlattenRoot(w, rootNode);
         }
 
         return ms.ToArray();
     }
 
-    private static void WritePropertyValue(BinaryWriter w, int valueType, string? value)
+    private static void WritePropertyValue(
+        BinaryWriter w,
+        int valueType,
+        string? value,
+        long? intValue = null,
+        double? doubleValue = null,
+        int? referenceId = null,
+        int? referenceTag = null,
+        string? referenceClass = null)
     {
         switch (valueType)
         {
@@ -322,18 +383,20 @@ internal static class NwcStreamSerializer
             case 0:
             case 2:
             case 3:
-                w.Write(int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var iv) ? iv : 0);
+                w.Write(checked((int)(intValue
+                    ?? (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var iv) ? iv : 0))));
                 break;
             case 1:
             case 6:
             case 7:
             case 10:
             case 11:
-                w.Write(double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv) ? dv : 0.0);
+                w.Write(doubleValue
+                    ?? (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dv) ? dv : 0.0));
                 break;
             case 5:
-                long unixSec = 0L;
-                if (value is not null)
+                long unixSec = intValue ?? 0L;
+                if (intValue is null && value is not null)
                 {
                     if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto))
                     {
@@ -347,10 +410,10 @@ internal static class NwcStreamSerializer
                 w.Write(unixSec);
                 break;
             case 8:
-                w.Write(0);
-                w.Write(0);
+                w.Write(referenceId ?? 0);
+                w.Write(referenceTag ?? 0);
                 WritePaddedString(w, value ?? string.Empty);
-                WritePaddedString(w, string.Empty);
+                WritePaddedString(w, referenceClass ?? string.Empty);
                 break;
             case 12:
                 WritePointDoubles(w, value, 3);
@@ -359,8 +422,7 @@ internal static class NwcStreamSerializer
                 WritePointDoubles(w, value, 2);
                 break;
             default:
-                w.Write(0);
-                break;
+                throw new NotSupportedException($"Unsupported property value type {valueType}.");
         }
     }
 
@@ -384,18 +446,58 @@ internal static class NwcStreamSerializer
         }
     }
 
-    private static void FlattenNode(BinaryWriter w, NwcNode node)
+    private static void FlattenRoot(BinaryWriter w, NwcNode rootNode)
     {
-        // Emit Tag 53 (node name)
+        // The root becomes the model root itself: its name and properties are written as records for id 0,
+        // children follow with parent marker 0.
+        w.Write(0);
+        w.Write(53);
+        WritePaddedString(w, rootNode.Name);
+        w.Write(-2);
+        w.Write(0);
+
+        w.Write(0);
+        w.Write(52);
+        WritePaddedString(w, rootNode.Name);
+        WritePaddedString(w, !string.IsNullOrEmpty(rootNode.Class) ? rootNode.Class : "Model");
+        w.Write(0);
+        w.Write(0);
+
+        foreach (var prop in rootNode.Properties)
+        {
+            w.Write(0);
+            w.Write(52);
+            WritePaddedString(w, prop.Name);
+            WritePaddedString(w, prop.Class);
+            int vType = prop.ValueType != 0 ? prop.ValueType : 4;
+            w.Write(vType);
+            WritePropertyValue(w, vType, prop.Value, prop.IntValue, prop.DoubleValue, prop.ReferenceId, prop.ReferenceTag, prop.ReferenceClass);
+        }
+
+        foreach (var child in rootNode.Children)
+        {
+            FlattenNode(w, child, 0);
+        }
+    }
+
+    private static void FlattenNode(BinaryWriter w, NwcNode node, int? parentId)
+    {
+        // Emit Tag 53 (node name). A -2 marker followed by the parent id keeps the hierarchy;
+        // readers without parent support still consume just the name.
         w.Write(node.Id);
         w.Write(53);
         WritePaddedString(w, node.Name);
+        if (parentId.HasValue)
+        {
+            w.Write(-2);
+            w.Write(parentId.Value);
+        }
 
         // Emit Tag 52 (identity record)
         w.Write(node.Id);
         w.Write(52);
         WritePaddedString(w, node.Name);
-        WritePaddedString(w, !string.IsNullOrEmpty(node.Class) ? node.Class : "LcRevitElement");
+        WritePaddedString(w, !string.IsNullOrEmpty(node.Class) ? node.Class : "LcRevitData_Element");
         w.Write(0); // valueType 0
         w.Write(node.Id);
 
@@ -408,12 +510,12 @@ internal static class NwcStreamSerializer
             WritePaddedString(w, prop.Class);
             int vType = prop.ValueType != 0 ? prop.ValueType : 4;
             w.Write(vType);
-            WritePropertyValue(w, vType, prop.Value);
+            WritePropertyValue(w, vType, prop.Value, prop.IntValue, prop.DoubleValue, prop.ReferenceId, prop.ReferenceTag, prop.ReferenceClass);
         }
 
         foreach (var child in node.Children)
         {
-            FlattenNode(w, child);
+            FlattenNode(w, child, node.Id);
         }
     }
 
@@ -422,13 +524,13 @@ internal static class NwcStreamSerializer
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
 
+        w.Write(TransformStreamFormat.TransformsMagic);
         w.Write(transforms.Count);
 
         for (int i = 0; i < transforms.Count; i++)
         {
             var t = transforms[i];
-            int recId = (i == 0) ? 100 : (t.Id != 0 ? t.Id : 100 + i);
-            w.Write(recId);
+            w.Write(t.Id);
             w.Write(13); // TagTransform
 
             w.Write(1);  // inner id
@@ -457,6 +559,53 @@ internal static class NwcStreamSerializer
         return ms.ToArray();
     }
 
+    public static byte[] BuildTransformLinksStream(
+        IReadOnlyList<NwcMesh> meshes,
+        IReadOnlyDictionary<NwcTransform, int> transformIndices)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        w.Write(TransformStreamFormat.LinksMagic);
+        w.Write(meshes.Count);
+        foreach (var mesh in meshes)
+        {
+            w.Write(mesh.Transform is { } transform && transformIndices.TryGetValue(transform, out int index)
+                ? index
+                : -1);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static List<NwcTransform> CollectTransforms(NwcDocument doc)
+    {
+        var result = new List<NwcTransform>();
+        var seen = new HashSet<NwcTransform>(ReferenceEqualityComparer.Instance);
+
+        void Add(NwcTransform transform)
+        {
+            if (seen.Add(transform))
+            {
+                result.Add(transform);
+            }
+        }
+
+        foreach (var transform in doc.Transforms)
+        {
+            Add(transform);
+        }
+
+        foreach (var mesh in doc.Meshes)
+        {
+            if (mesh.Transform is { } transform)
+            {
+                Add(transform);
+            }
+        }
+
+        return result;
+    }
+
     public static byte[] BuildGuidsStream(IReadOnlyList<Guid> guids)
     {
         using var ms = new MemoryStream();
@@ -472,6 +621,10 @@ internal static class NwcStreamSerializer
         return ms.ToArray();
     }
 
+    // Marks the writer's own mesh trailer: mesh Id, triangle indices and Name follow the positions.
+    // "NWCI" in little-endian byte order; real geometries keep their documented grammar and never carry it.
+    internal const int MeshTrailerMagic = 0x4943574E;
+
     public static void BuildGeometryAndTocStreams(
         IReadOnlyList<NwcMesh> meshes,
         out byte[] geomData,
@@ -486,10 +639,14 @@ internal static class NwcStreamSerializer
             var mesh = meshes[r];
             var verts = mesh.Vertices;
             int vCount = verts.Count;
-            int rLen = 24 + vCount * 12;
+            var nameBytes = Encoding.UTF8.GetBytes(mesh.Name ?? string.Empty);
+            int namePad = (4 - (nameBytes.Length & 3)) & 3;
+            int rLen = 24 + vCount * 12 + 16 + mesh.Indices.Count * 4 + nameBytes.Length + namePad;
             recordLengths[r] = rLen;
 
-            geomWriter.Write(mesh.Id != 0 ? mesh.Id : r); // recId
+            // The record id stays a unique parse index; the mesh id is stored in the trailer, so Id 0
+            // is preserved instead of being replaced by the record position.
+            geomWriter.Write(r); // recId
             geomWriter.Write(94);                         // recTag (94)
             geomWriter.Write(0);                          // flags
             geomWriter.Write(60);                         // subTag (60)
@@ -501,6 +658,22 @@ internal static class NwcStreamSerializer
                 geomWriter.Write((float)verts[v].X);
                 geomWriter.Write((float)verts[v].Y);
                 geomWriter.Write((float)verts[v].Z);
+            }
+
+            // Writer extension: exact triangle indices and the mesh name, which the record header has no room for.
+            geomWriter.Write(MeshTrailerMagic);
+            geomWriter.Write(mesh.Indices.Count);
+            for (int i = 0; i < mesh.Indices.Count; i++)
+            {
+                geomWriter.Write(mesh.Indices[i]);
+            }
+
+            geomWriter.Write(mesh.Id);
+            geomWriter.Write(nameBytes.Length);
+            geomWriter.Write(nameBytes);
+            for (int p = 0; p < namePad; p++)
+            {
+                geomWriter.Write((byte)0);
             }
         }
 
@@ -542,7 +715,7 @@ internal static class NwcStreamSerializer
 
             // Tag 517 record
             vpWriter.Write(517); // tag
-            vpWriter.Write(1);   // subtag
+            vpWriter.Write(cam.Projection == NwcCameraProjection.Orthographic ? 1 : 0); // projection
             vpWriter.Write(0);   // flags
             vpWriter.Write(cam.Position.X);
             vpWriter.Write(cam.Position.Y);
@@ -558,6 +731,8 @@ internal static class NwcStreamSerializer
             vpWriter.Write(cam.FocalDistance > 0 ? cam.FocalDistance : 10.0);
             vpWriter.Write(cam.FieldOfView > 0 ? cam.FieldOfView : 60.0);
             vpWriter.Write(cam.NearDistance > 0 ? cam.NearDistance : 0.1);
+
+            WriteViewpointExtension(vpWriter, vp, cam);
 
             // Comments
             if (vp.Comments.Count > 0)
@@ -583,6 +758,60 @@ internal static class NwcStreamSerializer
         }
 
         return vpMs.ToArray();
+    }
+
+    private static void WriteViewpointExtension(BinaryWriter w, NwcSavedViewpoint viewpoint, NwcCamera camera)
+    {
+        using var ms = new MemoryStream();
+        using (var ext = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+        {
+            ext.Write(ViewpointExtensionFormat.Magic);
+            ext.Write(ViewpointExtensionFormat.Version);
+            ext.Write(camera.FieldOfView > 0 ? camera.FieldOfView : 60.0);
+            ext.Write(camera.FarDistance);
+            ext.Write((int)camera.Projection);
+
+            ext.Write(viewpoint.Id.HasValue ? 1 : 0);
+            if (viewpoint.Id is { } id)
+            {
+                ext.Write(id.ToByteArray());
+            }
+
+            ext.Write(viewpoint.Comments.Count);
+            foreach (string comment in viewpoint.Comments)
+            {
+                WritePaddedString(ext, comment);
+            }
+
+            ext.Write(viewpoint.SectionPlanes.Count);
+            foreach (var plane in viewpoint.SectionPlanes)
+            {
+                ext.Write(plane.PlaneIndex);
+                ext.Write(plane.IsEnabled ? 1 : 0);
+                ext.Write(plane.Normal.X);
+                ext.Write(plane.Normal.Y);
+                ext.Write(plane.Normal.Z);
+                ext.Write(plane.Distance);
+                ext.Write((int)plane.Alignment);
+            }
+
+            ext.Write(viewpoint.SectionBox is null ? 0 : 1);
+            if (viewpoint.SectionBox is { } box)
+            {
+                ext.Write(box.IsEnabled ? 1 : 0);
+                ext.Write(box.Bounds.Min.X);
+                ext.Write(box.Bounds.Min.Y);
+                ext.Write(box.Bounds.Min.Z);
+                ext.Write(box.Bounds.Max.X);
+                ext.Write(box.Bounds.Max.Y);
+                ext.Write(box.Bounds.Max.Z);
+            }
+        }
+
+        byte[] payload = ms.ToArray();
+        w.Write(ViewpointExtensionFormat.Magic);
+        w.Write(payload.Length);
+        w.Write(payload);
     }
 
     private static void WritePaddedString(BinaryWriter w, string s)
