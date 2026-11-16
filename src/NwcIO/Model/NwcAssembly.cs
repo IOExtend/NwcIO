@@ -453,9 +453,13 @@ public sealed class NwcAssembly
     }
 
     /// <summary>Exports the entire federated assembly to a binary glTF 2.0 file (.glb).</summary>
-    public void SaveGlb(string path, bool worldCoordinates = true)
+    public void SaveGlb(string path, bool worldCoordinates = true) =>
+        SaveGlb(path, new NwcGlbExportOptions { WorldCoordinates = worldCoordinates });
+
+    /// <summary>Exports the entire federated assembly to a binary glTF 2.0 file (.glb) with the given options.</summary>
+    public void SaveGlb(string path, NwcGlbExportOptions options)
     {
-        GlbExporter.WriteFile(AllMeshes, AllMaterials, path, worldCoordinates, "NwcIO Assembly", SavedViewpoints);
+        GlbExporter.WriteFile(AllMeshes, AllMaterials, path, options, "NwcIO Assembly", SavedViewpoints);
     }
 
     /// <summary>Exports the entire federated assembly to a Wavefront OBJ file.</summary>

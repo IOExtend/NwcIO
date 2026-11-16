@@ -542,16 +542,24 @@ public sealed class NwcDocument
         Internal.Export.ObjExporter.Write(Meshes, writer, worldCoordinates, FileInfo.SourcePath);
     }
 
-    /// <summary>Exports 3D mesh geometry, materials, and scene hierarchy to a binary glTF 2.0 file (.glb).</summary>
-    public void SaveGlb(string path, bool worldCoordinates = true)
+    /// <summary>Exports 3D mesh geometry and materials to a binary glTF 2.0 file (.glb); node layout is flat.</summary>
+    public void SaveGlb(string path, bool worldCoordinates = true) =>
+        SaveGlb(path, new NwcGlbExportOptions { WorldCoordinates = worldCoordinates });
+
+    /// <summary>Exports 3D mesh geometry and materials to a binary glTF 2.0 file (.glb) with the given options.</summary>
+    public void SaveGlb(string path, NwcGlbExportOptions options)
     {
-        Internal.Export.GlbExporter.WriteFile(Meshes, Materials, path, worldCoordinates, FileInfo.LoaderPlugin, SavedViewpoints);
+        Internal.Export.GlbExporter.WriteFile(Meshes, Materials, path, options, FileInfo.LoaderPlugin, SavedViewpoints);
     }
 
-    /// <summary>Exports 3D mesh geometry, materials, and scene hierarchy to a binary glTF 2.0 stream (.glb).</summary>
-    public void SaveGlb(Stream stream, bool worldCoordinates = true)
+    /// <summary>Exports 3D mesh geometry and materials to a binary glTF 2.0 stream (.glb); node layout is flat.</summary>
+    public void SaveGlb(Stream stream, bool worldCoordinates = true) =>
+        SaveGlb(stream, new NwcGlbExportOptions { WorldCoordinates = worldCoordinates });
+
+    /// <summary>Exports 3D mesh geometry and materials to a binary glTF 2.0 stream (.glb) with the given options.</summary>
+    public void SaveGlb(Stream stream, NwcGlbExportOptions options)
     {
-        Internal.Export.GlbExporter.Write(Meshes, Materials, stream, worldCoordinates, FileInfo.LoaderPlugin, SavedViewpoints);
+        Internal.Export.GlbExporter.Write(Meshes, Materials, stream, options, FileInfo.LoaderPlugin, SavedViewpoints);
     }
 
     /// <summary>Exports 3D mesh geometry, materials, spatial structure, and properties to an IFC STEP physical file (.ifc).</summary>

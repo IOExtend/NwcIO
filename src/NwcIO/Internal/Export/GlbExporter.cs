@@ -28,14 +28,26 @@ public static class GlbExporter
         string path,
         bool worldCoordinates = true,
         string? generatorName = null,
+        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null) =>
+        WriteFile(meshes, materials, path,
+            new NwcGlbExportOptions { WorldCoordinates = worldCoordinates },
+            generatorName, viewpoints);
+
+    public static void WriteFile(
+        IReadOnlyList<NwcMesh> meshes,
+        IReadOnlyList<NwcMaterial> materials,
+        string path,
+        NwcGlbExportOptions options,
+        string? generatorName = null,
         IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(options);
 
         using var fs = File.Create(path);
-        Write(meshes, materials, fs, worldCoordinates, generatorName, viewpoints);
+        Write(meshes, materials, fs, options, generatorName, viewpoints);
     }
 
     public static void Write(
@@ -44,11 +56,62 @@ public static class GlbExporter
         Stream output,
         bool worldCoordinates = true,
         string? generatorName = null,
+        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null) =>
+        Write(meshes, materials, output,
+            new NwcGlbExportOptions { WorldCoordinates = worldCoordinates },
+            generatorName, viewpoints);
+
+    public static void Write(
+        IReadOnlyList<NwcMesh> meshes,
+        IReadOnlyList<NwcMaterial> materials,
+        Stream output,
+        NwcGlbExportOptions options,
+        string? generatorName = null,
         IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(options);
+        if (!double.IsFinite(options.UnitScale) || options.UnitScale <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), options.UnitScale, "UnitScale must be a positive finite number.");
+        }
+
+        bool worldCoordinates = options.WorldCoordinates;
+        double unitScale = options.UnitScale;
+        bool yUp = options.ConvertZUpToYUp;
+
+        // The recentering offset is computed in double precision over the exported positions.
+        Vector3d recenterOffset = default;
+        if (options.RecenterToOrigin)
+        {
+            double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
+            double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
+            foreach (var mesh in meshes)
+            {
+                var vertices = worldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
+                foreach (var vertex in vertices)
+                {
+                    if (!double.IsFinite(vertex.X) || !double.IsFinite(vertex.Y) || !double.IsFinite(vertex.Z))
+                    {
+                        continue;
+                    }
+
+                    minX = Math.Min(minX, vertex.X);
+                    minY = Math.Min(minY, vertex.Y);
+                    minZ = Math.Min(minZ, vertex.Z);
+                    maxX = Math.Max(maxX, vertex.X);
+                    maxY = Math.Max(maxY, vertex.Y);
+                    maxZ = Math.Max(maxZ, vertex.Z);
+                }
+            }
+
+            if (double.IsFinite(minX))
+            {
+                recenterOffset = new Vector3d((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5);
+            }
+        }
 
         // 1. Pack binary buffer (positions, normals, indices)
         using var binMs = new MemoryStream();
@@ -135,7 +198,7 @@ public static class GlbExporter
             var posSpan = new byte[vCount * 12];
             for (int v = 0; v < vCount; v++)
             {
-                var pt = vertices[v];
+                Vector3d pt = ToGlbPoint(vertices[v], recenterOffset, yUp, unitScale);
                 BitConverter.TryWriteBytes(posSpan.AsSpan(v * 12), (float)pt.X);
                 BitConverter.TryWriteBytes(posSpan.AsSpan(v * 12 + 4), (float)pt.Y);
                 BitConverter.TryWriteBytes(posSpan.AsSpan(v * 12 + 8), (float)pt.Z);
@@ -181,10 +244,10 @@ public static class GlbExporter
                 var normSpan = new byte[vCount * 12];
                 for (int v = 0; v < vCount; v++)
                 {
-                    var n = normals[v];
-                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12), n.X);
-                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 4), n.Y);
-                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 8), n.Z);
+                    Vector3d n = ToGlbNormal(normals[v], yUp);
+                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12), (float)n.X);
+                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 4), (float)n.Y);
+                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 8), (float)n.Z);
                 }
 
                 binMs.Write(normSpan);
@@ -399,13 +462,19 @@ public static class GlbExporter
         byte[] binData = binMs.ToArray();
 
         // 2. Build JSON chunk
+        string version = typeof(GlbExporter).Assembly.GetName().Version is { } asmVersion
+            ? $"{asmVersion.Major}.{asmVersion.Minor}.{asmVersion.Build}"
+            : "0.0.0";
         byte[] jsonData = BuildJsonChunk(
             materialTable,
             gltfMeshes,
             accessors,
             bufferViews,
             binData.Length,
-            generatorName ?? "NwcIO glTF 2.0 Exporter",
+            $"NwcIO {version}",
+            generatorName,
+            options,
+            recenterOffset,
             viewpoints,
             materialsWithBlend);
 
@@ -450,6 +519,9 @@ public static class GlbExporter
         List<BufferViewDef> bufferViews,
         int binByteLength,
         string generator,
+        string? sourceLoader,
+        NwcGlbExportOptions options,
+        Vector3d recenterOffset,
         IReadOnlyList<NwcSavedViewpoint>? viewpoints = null,
         HashSet<int>? materialsWithBlend = null)
     {
@@ -462,23 +534,41 @@ public static class GlbExporter
             writer.WriteStartObject("asset");
             writer.WriteString("version", "2.0");
             writer.WriteString("generator", generator);
+            if (!string.IsNullOrEmpty(sourceLoader))
+            {
+                writer.WriteStartObject("extras");
+                writer.WriteString("sourceLoader", sourceLoader);
+                writer.WriteEndObject();
+            }
+
             writer.WriteEndObject();
 
             // scene
             writer.WriteNumber("scene", 0);
 
             // glTF has no value for a non-finite number, so a camera that can't be placed is left out
-            var cameras = viewpoints?.Where(vp => IsFinite(vp.Camera.Position) && IsFinite(vp.Camera.Rotation)).ToList();
+            var cameras = options.ExportCameras
+                ? viewpoints?.Where(vp => IsFinite(vp.Camera.Position) && IsFinite(vp.Camera.Rotation)).ToList()
+                : null;
             int camCount = cameras?.Count ?? 0;
-            int totalNodes = meshes.Count + camCount;
+            bool hasRoot = options.RecenterToOrigin && meshes.Count > 0;
+            int rootOffset = hasRoot ? 1 : 0;
+            int totalNodes = meshes.Count + camCount + rootOffset;
 
             // scenes
             writer.WriteStartArray("scenes");
             writer.WriteStartObject();
             if (totalNodes > 0) writer.WriteStartArray("nodes");
-            for (int i = 0; i < totalNodes; i++)
+            if (hasRoot)
             {
-                writer.WriteNumberValue(i);
+                writer.WriteNumberValue(0);
+            }
+            else
+            {
+                for (int i = 0; i < totalNodes; i++)
+                {
+                    writer.WriteNumberValue(i);
+                }
             }
 
             if (totalNodes > 0) writer.WriteEndArray();
@@ -487,6 +577,26 @@ public static class GlbExporter
 
             // nodes
             if (totalNodes > 0) writer.WriteStartArray("nodes");
+            if (hasRoot)
+            {
+                Vector3d offset = ToGlbPoint(recenterOffset, default, options.ConvertZUpToYUp, options.UnitScale);
+                writer.WriteStartObject();
+                writer.WriteString("name", "NwcIO Model Root");
+                writer.WriteStartArray("translation");
+                writer.WriteNumberValue(offset.X);
+                writer.WriteNumberValue(offset.Y);
+                writer.WriteNumberValue(offset.Z);
+                writer.WriteEndArray();
+                writer.WriteStartArray("children");
+                for (int i = 1; i < totalNodes; i++)
+                {
+                    writer.WriteNumberValue(i);
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+
             for (int i = 0; i < meshes.Count; i++)
             {
                 writer.WriteStartObject();
@@ -501,21 +611,24 @@ public static class GlbExporter
                 {
                     var vp = cameras[i];
                     var cam = vp.Camera;
+                    Vector3d position = ToGlbPoint(cam.Position, recenterOffset, options.ConvertZUpToYUp, options.UnitScale);
+                    Quaterniond rotation = options.ConvertZUpToYUp ? ToYUpRotation(cam.Rotation) : cam.Rotation.Normalized();
+
                     writer.WriteStartObject();
                     writer.WriteString("name", vp.Name);
                     writer.WriteNumber("camera", i);
 
                     writer.WriteStartArray("translation");
-                    writer.WriteNumberValue(cam.Position.X);
-                    writer.WriteNumberValue(cam.Position.Y);
-                    writer.WriteNumberValue(cam.Position.Z);
+                    writer.WriteNumberValue(position.X);
+                    writer.WriteNumberValue(position.Y);
+                    writer.WriteNumberValue(position.Z);
                     writer.WriteEndArray();
 
                     writer.WriteStartArray("rotation");
-                    writer.WriteNumberValue(cam.Rotation.X);
-                    writer.WriteNumberValue(cam.Rotation.Y);
-                    writer.WriteNumberValue(cam.Rotation.Z);
-                    writer.WriteNumberValue(cam.Rotation.W);
+                    writer.WriteNumberValue(rotation.X);
+                    writer.WriteNumberValue(rotation.Y);
+                    writer.WriteNumberValue(rotation.Z);
+                    writer.WriteNumberValue(rotation.W);
                     writer.WriteEndArray();
 
                     writer.WriteEndObject();
@@ -539,12 +652,12 @@ public static class GlbExporter
                     {
                         writer.WriteString("type", "orthographic");
                         writer.WriteStartObject("orthographic");
-                        double xmag = Math.Max(1.0, PositiveOr(cam.FocalDistance * 0.5, 1.0));
+                        double xmag = Math.Max(1.0, PositiveOr(cam.FocalDistance * 0.5, 1.0)) * options.UnitScale;
                         double ymag = xmag / PositiveOr(cam.AspectRatio, 1.0);
                         writer.WriteNumber("xmag", xmag);
                         writer.WriteNumber("ymag", PositiveOr(ymag, xmag));
-                        writer.WriteNumber("zfar", PositiveOr(cam.FarDistance, 10000.0));
-                        writer.WriteNumber("znear", PositiveOr(cam.NearDistance, 0.1));
+                        writer.WriteNumber("zfar", PositiveOr(cam.FarDistance, 10000.0) * options.UnitScale);
+                        writer.WriteNumber("znear", PositiveOr(cam.NearDistance, 0.1) * options.UnitScale);
                         writer.WriteEndObject();
                     }
                     else
@@ -553,8 +666,8 @@ public static class GlbExporter
                         writer.WriteStartObject("perspective");
                         writer.WriteNumber("aspectRatio", PositiveOr(cam.AspectRatio, 1.0));
                         writer.WriteNumber("yfov", PositiveOr(cam.FieldOfView * (Math.PI / 180.0), 1.04719755));
-                        writer.WriteNumber("zfar", PositiveOr(cam.FarDistance, 10000.0));
-                        writer.WriteNumber("znear", PositiveOr(cam.NearDistance, 0.1));
+                        writer.WriteNumber("zfar", PositiveOr(cam.FarDistance, 10000.0) * options.UnitScale);
+                        writer.WriteNumber("znear", PositiveOr(cam.NearDistance, 0.1) * options.UnitScale);
                         writer.WriteEndObject();
                     }
 
@@ -745,6 +858,37 @@ public static class GlbExporter
     }
 
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
+
+    private static Vector3d ToGlbPoint(Vector3d point, Vector3d recenterOffset, bool yUp, double unitScale)
+    {
+        double x = point.X - recenterOffset.X;
+        double y = point.Y - recenterOffset.Y;
+        double z = point.Z - recenterOffset.Z;
+        if (yUp)
+        {
+            (y, z) = (z, -y);
+        }
+
+        return new Vector3d(x * unitScale, y * unitScale, z * unitScale);
+    }
+
+    private static Vector3d ToGlbNormal(Vector3d normal, bool yUp) =>
+        yUp ? new Vector3d(normal.X, normal.Z, -normal.Y) : normal;
+
+    private static Vector3d ToGlbNormal((float X, float Y, float Z) normal, bool yUp) =>
+        ToGlbNormal(new Vector3d(normal.X, normal.Y, normal.Z), yUp);
+
+    private static Quaterniond ToYUpRotation(Quaterniond rotation)
+    {
+        // -90 degrees about X maps (x, y, z) to (x, z, -y).
+        var axis = new Quaterniond(-0.7071067811865476, 0, 0, 0.7071067811865476);
+        Quaterniond q = rotation.Normalized();
+        return new Quaterniond(
+            axis.W * q.X + axis.X * q.W + axis.Y * q.Z - axis.Z * q.Y,
+            axis.W * q.Y - axis.X * q.Z + axis.Y * q.W + axis.Z * q.X,
+            axis.W * q.Z + axis.X * q.Y - axis.Y * q.X + axis.Z * q.W,
+            axis.W * q.W - axis.X * q.X - axis.Y * q.Y - axis.Z * q.Z).Normalized();
+    }
 
     private static bool IsFinite(Quaterniond q) =>
         double.IsFinite(q.X) && double.IsFinite(q.Y) && double.IsFinite(q.Z) && double.IsFinite(q.W);

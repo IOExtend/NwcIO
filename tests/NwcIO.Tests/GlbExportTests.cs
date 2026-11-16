@@ -1000,6 +1000,135 @@ public class GlbExportTests
     private static JsonElement? MaterialOf(JsonElement root, JsonElement primitive) =>
         primitive.TryGetProperty("material", out var index) ? root.GetProperty("materials")[index.GetInt32()] : null;
 
+    [Fact]
+    public void GlbExporter_ConvertZUpToYUp_TransformsPositionsAndBounds()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Vertical",
+            Vertices = [new(0, 0, 10), new(1, 0, 10), new(0, 1, 10)],
+            Indices = [0, 1, 2],
+        };
+        var doc = NwcDocument.Create(meshes: [mesh]);
+        using var ms = new MemoryStream();
+
+        doc.SaveGlb(ms, new NwcGlbExportOptions { ConvertZUpToYUp = true });
+
+        byte[] glb = ms.ToArray();
+        using var json = JsonDocument.Parse(JsonOf(glb));
+        var root = json.RootElement;
+        var accessor = PositionAccessor(root);
+        Assert.Equal([0f, 10f, -1f], accessor.GetProperty("min").EnumerateArray().Select(e => e.GetSingle()).ToArray());
+        Assert.Equal([1f, 10f, 0f], accessor.GetProperty("max").EnumerateArray().Select(e => e.GetSingle()).ToArray());
+        Assert.Equal(new Vector3d(0, 10, 0), ReadPosition(glb, root, 0));
+    }
+
+    [Fact]
+    public void GlbExporter_UnitScale_ScalesPositionsAndCameraDistances()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Millimetres",
+            Vertices = [new(1000, 0, 0), new(0, 1000, 0), new(0, 0, 1000)],
+            Indices = [0, 1, 2],
+        };
+        var viewpoint = new NwcSavedViewpoint
+        {
+            Name = "Camera",
+            Camera = new NwcCamera { Position = new(1000, 0, 0), NearDistance = 10, FarDistance = 2000 },
+        };
+        var doc = NwcDocument.Create(meshes: [mesh], savedViewpoints: [viewpoint]);
+        using var ms = new MemoryStream();
+
+        doc.SaveGlb(ms, new NwcGlbExportOptions { UnitScale = 0.001 });
+
+        byte[] glb = ms.ToArray();
+        using var json = JsonDocument.Parse(JsonOf(glb));
+        var root = json.RootElement;
+        Assert.Equal(new Vector3d(1, 0, 0), ReadPosition(glb, root, 0));
+        var cameraNode = root.GetProperty("nodes").EnumerateArray().Single(n => n.TryGetProperty("camera", out _));
+        Assert.Equal([1.0, 0.0, 0.0], cameraNode.GetProperty("translation").EnumerateArray().Select(e => e.GetDouble()).ToArray());
+        var perspective = root.GetProperty("cameras")[0].GetProperty("perspective");
+        Assert.Equal(0.01, perspective.GetProperty("znear").GetDouble(), 6);
+        Assert.Equal(2.0, perspective.GetProperty("zfar").GetDouble(), 6);
+    }
+
+    [Fact]
+    public void GlbExporter_RecenterToOrigin_CentersPositionsAndRestoresRootTranslation()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Name = "Far",
+            Vertices = [new(1000, 0, 0), new(1001, 0, 0), new(1000, 1, 0)],
+            Indices = [0, 1, 2],
+        };
+        var doc = NwcDocument.Create(meshes: [mesh]);
+        using var ms = new MemoryStream();
+
+        doc.SaveGlb(ms, new NwcGlbExportOptions { RecenterToOrigin = true });
+
+        byte[] glb = ms.ToArray();
+        using var json = JsonDocument.Parse(JsonOf(glb));
+        var root = json.RootElement;
+        var accessor = PositionAccessor(root);
+        Assert.Equal([-0.5f, -0.5f, 0f], accessor.GetProperty("min").EnumerateArray().Select(e => e.GetSingle()).ToArray());
+        Assert.Equal([0.5f, 0.5f, 0f], accessor.GetProperty("max").EnumerateArray().Select(e => e.GetSingle()).ToArray());
+        Assert.Equal([0], root.GetProperty("scenes")[0].GetProperty("nodes").EnumerateArray().Select(e => e.GetInt32()).ToArray());
+
+        var rootNode = root.GetProperty("nodes")[0];
+        Assert.Equal([1000.5, 0.5, 0.0], rootNode.GetProperty("translation").EnumerateArray().Select(e => e.GetDouble()).ToArray());
+        Assert.Equal([1], rootNode.GetProperty("children").EnumerateArray().Select(e => e.GetInt32()).ToArray());
+    }
+
+    [Fact]
+    public void GlbExporter_Generator_IdentifiesNwcIOAndKeepsSourceLoaderInExtras()
+    {
+        var doc = NwcDocument.Create(fileInfo: new NwcFileInfo
+        {
+            SourcePath = "model.rvt",
+            LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit",
+        });
+        using var ms = new MemoryStream();
+
+        doc.SaveGlb(ms);
+
+        using var json = JsonDocument.Parse(JsonOf(ms.ToArray()));
+        var asset = json.RootElement.GetProperty("asset");
+        Assert.StartsWith("NwcIO", asset.GetProperty("generator").GetString());
+        Assert.Equal("LcNwcLoaderPlugin:lcldrevit", asset.GetProperty("extras").GetProperty("sourceLoader").GetString());
+    }
+
+    private static string JsonOf(byte[] glb)
+    {
+        int jsonLength = (int)BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        return System.Text.Encoding.UTF8.GetString(glb, 20, jsonLength).TrimEnd(' ');
+    }
+
+    private static JsonElement PositionAccessor(JsonElement root)
+    {
+        var primitive = root.GetProperty("meshes")[0].GetProperty("primitives")[0];
+        int index = primitive.GetProperty("attributes").GetProperty("POSITION").GetInt32();
+        return root.GetProperty("accessors")[index];
+    }
+
+    private static Vector3d ReadPosition(byte[] glb, JsonElement root, int vertex)
+    {
+        var accessor = PositionAccessor(root);
+        var view = root.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+        int jsonLength = (int)BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        int start = 28 + jsonLength
+            + view.GetProperty("byteOffset").GetInt32()
+            + accessor.GetProperty("byteOffset").GetInt32()
+            + vertex * 12;
+        return new Vector3d(
+            BitConverter.ToSingle(glb, start),
+            BitConverter.ToSingle(glb, start + 4),
+            BitConverter.ToSingle(glb, start + 8));
+    }
+
     private static string AlphaModeOf(JsonElement root, JsonElement primitive) =>
         MaterialOf(root, primitive) is { } material && material.TryGetProperty("alphaMode", out var mode) ? mode.GetString()! : "OPAQUE";
 
