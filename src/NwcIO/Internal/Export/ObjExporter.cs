@@ -43,7 +43,7 @@ public static class ObjExporter
         writer.WriteLine("# Wavefront OBJ exported by NwcIO");
         if (!string.IsNullOrEmpty(sourceDocument))
         {
-            writer.WriteLine(FormattableString.Invariant($"# Source: {sourceDocument}"));
+            writer.WriteLine(FormattableString.Invariant($"# Source: {SanitizeObjLine(sourceDocument)}"));
         }
 
         writer.WriteLine(FormattableString.Invariant($"# Meshes: {meshes.Count}"));
@@ -61,12 +61,18 @@ public static class ObjExporter
                 continue;
             }
 
-            string objectName = string.IsNullOrEmpty(mesh.Name) ? $"Mesh_{mesh.Id}" : mesh.Name;
+            string objectName = string.IsNullOrEmpty(mesh.Name) ? string.Empty : SanitizeObjLine(mesh.Name);
+            if (objectName.Length == 0)
+            {
+                objectName = $"Mesh_{mesh.Id}";
+            }
+
             string? prefix = objectNamePrefix?.Invoke(mesh);
             if (!string.IsNullOrEmpty(prefix))
             {
-                objectName = $"{prefix}/{objectName}";
+                objectName = $"{SanitizeObjLine(prefix)}/{objectName}";
             }
+
             writer.WriteLine(FormattableString.Invariant($"o {objectName}"));
 
             // Vertex positions
@@ -103,5 +109,12 @@ public static class ObjExporter
             baseVertexIndex += vertices.Count;
             writer.WriteLine();
         }
+    }
+
+    /// <summary>OBJ directives are line based; never let a name from the file inject its own line.</summary>
+    private static string SanitizeObjLine(string value)
+    {
+        var characters = value.Select(c => char.IsControl(c) || c is '\u2028' or '\u2029' ? '_' : c).ToArray();
+        return new string(characters).Trim();
     }
 }

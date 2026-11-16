@@ -154,6 +154,37 @@ public class AssemblyTests
         Assert.Equal(2.0, clash.IntersectionBox.Max.X);
     }
 
+    [Theory]
+    [InlineData(0.0005, 0.001, 1)]
+    [InlineData(0.0005, 0.0, 0)]
+    public void FindClashes_ToleranceReportsNearMissAtTheGap(double gap, double tolerance, int expected)
+    {
+        var meshA = new NwcMesh
+        {
+            Id = 10,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 1)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 0), new(1, 1, 1)),
+        };
+        var meshB = new NwcMesh
+        {
+            Id = 20,
+            Vertices = [new(0, 0, 1 + gap), new(1, 0, 1 + gap), new(0, 1, 2)],
+            Indices = [0, 1, 2],
+            BoundingBox = new BoundingBox3d(new(0, 0, 1 + gap), new(1, 1, 2)),
+        };
+
+        var assembly = NwcAssembly.Create("Coordination", CreateMockDocument("A.rvt", [meshA]), CreateMockDocument("B.rvt", [meshB]));
+
+        var clashes = assembly.FindClashes(tolerance);
+
+        Assert.Equal(expected, clashes.Count);
+        if (expected == 1)
+        {
+            Assert.Equal(1 + gap / 2, clashes[0].IntersectionBox.Center.Z, 9); // middle of the gap, not of the element centres
+        }
+    }
+
     private static NwcDocument CreateMockDocument(string sourceName, IReadOnlyList<NwcMesh> meshes)
     {
         // Synthetic minimal container with PartitionHeader
