@@ -255,6 +255,7 @@ PAD8      := one zero int32 if the cursor (from stream start) is 4 mod 8, else n
   - Saved viewpoint streams are identified by the presence of marker Tag `517` (`0x0205`), accompanied by consecutive IEEE 754 double sequences representing 3D coordinates and rotation quaternions.
 - **Binary Layout of Viewpoint Records**:
   - String record prefix: Length-prefixed 32-bit integer followed by UTF-8 (or CP866 / CP1251 in localized releases) display name string (e.g., `"Общий вид здания"`, `"Navisworks коллизии"`).
+  - Legacy names: the reader accepts strict UTF-8 first, then decodes the bytes as both CP866 and CP1251 and keeps the more plausible Russian text (letter-frequency score, with penalties for box-drawing and symbol noise), so a CP1251 name is no longer shown as CP866 mojibake.
   - Header tag: `517` (`0x00000205`), followed by `int32 1`, `int32 0`.
   - Eye position: 3 consecutive 64-bit IEEE 754 doubles at `offset + 12, +20, +28` ($X, Y, Z$ in model world coordinates).
   - Orientation quaternion: 4 consecutive 64-bit IEEE 754 doubles at `offset + 36, +44, +52, +60` ($Q_X, Q_Y, Q_Z, Q_W$), where $Q_X^2 + Q_Y^2 + Q_Z^2 + Q_W^2 \approx 1.0$.

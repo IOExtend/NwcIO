@@ -15,6 +15,7 @@ internal static class ViewpointParser
 
     private static readonly Encoding Encoding866;
     private static readonly Encoding Encoding1251;
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     static ViewpointParser()
     {
@@ -191,30 +192,97 @@ internal static class ViewpointParser
         }
 
         string result;
-        // 1. Try UTF-8
+        // 1. Try strict UTF-8; invalid sequences throw instead of leaving U+FFFD behind.
         try
         {
-            string utf8 = Encoding.UTF8.GetString(data, offset, length);
-            if (!utf8.Contains('\uFFFD') && utf8.All(c => !char.IsControl(c) || c == '\t'))
+            string utf8 = StrictUtf8.GetString(data, offset, length);
+            if (utf8.All(c => !char.IsControl(c) || c is '\t' or '\n' or '\r'))
             {
                 result = utf8;
                 return Sanitize(result);
             }
         }
-        catch { }
-
-        // 2. Try CP866 (common in Navisworks localized releases)
-        string cp866 = Encoding866.GetString(data, offset, length);
-        if (cp866.All(c => !char.IsControl(c) || c == '\t'))
+        catch (DecoderFallbackException)
         {
-            result = cp866;
-            return Sanitize(result);
         }
 
-        // 3. Fallback to CP1251
-        result = Encoding1251.GetString(data, offset, length);
+        // 2. Legacy 8-bit code page: Navisworks releases stored names as CP866 or CP1251 and the
+        // section header does not say which. Decode both and keep the more plausible Cyrillic text;
+        // CP866 was the previous unconditional choice, so it wins ties.
+        string cp866 = Encoding866.GetString(data, offset, length);
+        string cp1251 = Encoding1251.GetString(data, offset, length);
+        result = LegacyTextScore(cp1251) > LegacyTextScore(cp866) ? cp1251 : cp866;
         return Sanitize(result);
     }
+
+    /// <summary>
+    /// Scores decoded legacy text: Russian letter frequencies plus penalties for box-drawing,
+    /// symbol-noise and non-Russian Cyrillic letters that a wrong code page produces.
+    /// </summary>
+    private static double LegacyTextScore(string text)
+    {
+        double score = 0;
+        bool atWordStart = true;
+        foreach (char raw in text)
+        {
+            char c = char.ToLowerInvariant(raw);
+            if (c is >= 'а' and <= 'я')
+            {
+                score += RussianLetterFrequency(c);
+                if (char.IsUpper(raw) && !atWordStart)
+                {
+                    score -= 6;
+                }
+
+                atWordStart = false;
+            }
+            else if (c == 'ё')
+            {
+                score += 0.2;
+                atWordStart = false;
+            }
+            else if (c is 'і' or 'ї' or 'є' or 'ґ')
+            {
+                score += 0.1;
+                atWordStart = false;
+            }
+            else if (c is >= '\u0400' and <= '\u04FF')
+            {
+                score -= 4;
+                atWordStart = false;
+            }
+            else if (c is >= '\u2500' and <= '\u259F')
+            {
+                score -= 12;
+            }
+            else if (c is '\u2219' or '\u00A4' or '\u00A9' or '\u00AE' or '\u00B7')
+            {
+                score -= 6;
+            }
+            else if (char.IsLetter(c))
+            {
+                // Latin letters are equally plausible in either code page and carry no signal.
+                score += 1;
+                atWordStart = false;
+            }
+            else if (char.IsWhiteSpace(c) || char.IsPunctuation(c) || char.IsSymbol(c) || char.IsDigit(c))
+            {
+                atWordStart = true;
+            }
+        }
+
+        return score;
+    }
+
+    private static double RussianLetterFrequency(char c) => c switch
+    {
+        'о' => 11.0, 'е' => 8.5, 'а' => 8.0, 'и' => 7.4, 'н' => 6.7, 'т' => 6.3, 'с' => 5.5,
+        'р' => 4.7, 'в' => 4.5, 'л' => 4.4, 'к' => 3.5, 'м' => 3.2, 'д' => 3.0, 'п' => 2.8,
+        'у' => 2.6, 'я' => 2.0, 'ы' => 1.9, 'ь' => 1.7, 'г' => 1.7, 'з' => 1.7, 'б' => 1.6,
+        'ч' => 1.4, 'й' => 1.2, 'х' => 1.0, 'ж' => 0.9, 'ш' => 0.7, 'ю' => 0.6, 'ц' => 0.5,
+        'щ' => 0.4, 'э' => 0.3, 'ф' => 0.3, 'ъ' => 0.05,
+        _ => 0.0,
+    };
 
     private static string Sanitize(string text)
     {
