@@ -349,14 +349,15 @@ public static partial class NwcSceneReader
                     {
                         id = value;
                     }
-                    else if (property.Name == "Elevation" &&
+                    else if (property.InternalName == "lcldrevit_parameter_-1007102" &&
+                             property.ValueType == 6 &&
                              double.TryParse(property.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
                     {
                         elevation = parsed;
                     }
                 }
 
-                if (id is not null && elevation is double e)
+                if (id is not null && elevation is double e && double.IsFinite(e * metres))
                 {
                     result[id] = e * metres;
                 }
