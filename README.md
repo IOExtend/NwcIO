@@ -159,7 +159,7 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 ## Limitations
 
 - Version 0.12.1 is a preview. The API can evolve before 1.0.
-- Geometry extraction decodes triangle strips, polylines and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported.
+- Geometry extraction decodes triangle strips, polylines (including two-vertex line records) and stored normals from `.nwc`/`.nwd` geometry records; point records and quantised positions are not supported. On the lenient path, records above `NwcReaderOptions.MaxMeshVertices` (200,000 by default) are skipped; raise the option for exceptionally large records.
 - `.nwd` scene trees with partition nodes are not decoded yet, and linked Revit models (a tree that places one element under two parents) are not supported: open them with `BuildSceneTree = false` (CLI: `--no-tree`), also for `.nwf` federations that reference such files.
 - The `.nwc` writer stores vertex positions and rotation/translation; it rejects scaled transforms, line meshes and meshes whose triangles differ from the single strip the reader rebuilds over the positions.
 - The reader bounds crafted input: pointer nesting and tree height at most 256, at most 8,388,608 expanded tree nodes and 134,217,728 expanded property and property-tab references (properties from `LcOaPartitionProps` count toward the property cap), and at most one render vertex or corner per geometry-record byte. Files beyond these limits fail with `InvalidDataException`.

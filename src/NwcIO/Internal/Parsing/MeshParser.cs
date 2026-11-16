@@ -16,9 +16,17 @@ public static class MeshParser
     /// <summary>
     /// Parses all 3D meshes found in the container streams.
     /// </summary>
-    public static IReadOnlyList<NwcMesh> Parse(NwcContainer container, IReadOnlyList<NwcTransform>? transforms = null)
+    /// <param name="maxVertices">Cap on one record's vertices; records above it are skipped. Defaults to <see cref="MaxPlausibleVertices"/>.</param>
+    public static IReadOnlyList<NwcMesh> Parse(
+        NwcContainer container,
+        IReadOnlyList<NwcTransform>? transforms = null,
+        int maxVertices = MaxPlausibleVertices)
     {
         ArgumentNullException.ThrowIfNull(container);
+        if (maxVertices < MinMeshVertices)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxVertices), maxVertices, $"The vertex cap is at least {MinMeshVertices}.");
+        }
 
         var meshes = new List<NwcMesh>();
 
@@ -26,13 +34,13 @@ public static class MeshParser
         var tocStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (tocStream is not null)
         {
-            ParseViaToc(container, tocStream, meshes, transforms);
+            ParseViaToc(container, tocStream, meshes, transforms, maxVertices);
         }
 
         // 2. Secondary fallback: if TOC yielded no meshes, scan individual streams for vertex buffers.
         if (meshes.Count == 0)
         {
-            ParseViaHeuristicScan(container, meshes, transforms);
+            ParseViaHeuristicScan(container, meshes, transforms, maxVertices);
         }
 
         return meshes;
@@ -42,7 +50,8 @@ public static class MeshParser
         NwcContainer container,
         LcRawStream tocStream,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices)
     {
         var tocData = tocStream.Data;
         if (tocData.Length < 16)
@@ -138,9 +147,11 @@ public static class MeshParser
                         vCount = p1;
                     }
 
-                    if (vCount >= MinMeshVertices && vCount <= MaxPlausibleVertices)
+                    bool lines = recTag == 95 || vCount == 2;
+                    int minVertices = lines ? 2 : MinMeshVertices;
+                    if (vCount >= minVertices && vCount <= maxVertices)
                     {
-                        var mesh = TryBuildMesh(combined, curPos + 24, vCount, meshes.Count);
+                        var mesh = TryBuildMesh(combined, curPos + 24, vCount, meshes.Count, lines);
                         if (mesh is not null)
                         {
                             if (transforms is not null && meshes.Count < transforms.Count)
@@ -161,7 +172,8 @@ public static class MeshParser
     private static void ParseViaHeuristicScan(
         NwcContainer container,
         List<NwcMesh> meshes,
-        IReadOnlyList<NwcTransform>? transforms)
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices)
     {
         foreach (var stream in container.Streams)
         {
@@ -180,7 +192,9 @@ public static class MeshParser
                 }
 
                 int vCount = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(i + 8));
-                if (vCount < MinMeshVertices || vCount > MaxPlausibleVertices)
+                bool lines = vCount == 2;
+                int minVertices = lines ? 2 : MinMeshVertices;
+                if (vCount < minVertices || vCount > maxVertices)
                 {
                     continue;
                 }
@@ -191,7 +205,7 @@ public static class MeshParser
                     continue;
                 }
 
-                var mesh = TryBuildMesh(data, i + 16, vCount, meshes.Count);
+                var mesh = TryBuildMesh(data, i + 16, vCount, meshes.Count, lines);
                 if (mesh is not null)
                 {
                     if (transforms is not null && meshes.Count < transforms.Count)
@@ -206,7 +220,7 @@ public static class MeshParser
         }
     }
 
-    private static NwcMesh? TryBuildMesh(byte[] buffer, int vertexOffset, int vertexCount, int meshId)
+    private static NwcMesh? TryBuildMesh(byte[] buffer, int vertexOffset, int vertexCount, int meshId, bool lines)
     {
         var vertices = new Vector3d[vertexCount];
         double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
@@ -242,9 +256,26 @@ public static class MeshParser
             Id = meshId,
             Name = $"Mesh_{meshId}",
             Vertices = vertices,
-            Indices = BuildStripIndices(vertexCount),
+            Indices = lines ? [] : BuildStripIndices(vertexCount),
+            LineIndices = lines ? BuildLineIndices(vertexCount) : [],
             BoundingBox = new BoundingBox3d(new Vector3d(minX, minY, minZ), new Vector3d(maxX, maxY, maxZ)),
         };
+    }
+
+    /// <summary>
+    /// Consecutive segment pairs over the vertices: (0,1), (1,2), ... — an open polyline.
+    /// </summary>
+    internal static int[] BuildLineIndices(int vertexCount)
+    {
+        var indices = new int[Math.Max(0, (vertexCount - 1) * 2)];
+        int idx = 0;
+        for (int i = 0; i < vertexCount - 1; i++)
+        {
+            indices[idx++] = i;
+            indices[idx++] = i + 1;
+        }
+
+        return indices;
     }
 
     /// <summary>

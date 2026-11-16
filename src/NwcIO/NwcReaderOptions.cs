@@ -39,4 +39,10 @@ public sealed class NwcReaderOptions
 
     /// <summary>Keep the stream catalog (offsets, sizes, kinds) in the document (default: true).</summary>
     public bool KeepStreamCatalog { get; set; } = true;
+
+    /// <summary>
+    /// Cap on the vertices of one geometry record on the lenient reader path (default: 200,000). Larger records are skipped.
+    /// Model files read through their DbCache directory use the strict geometry parser and its own bounds.
+    /// </summary>
+    public int MaxMeshVertices { get; set; } = Internal.Parsing.MeshParser.MaxPlausibleVertices;
 }
