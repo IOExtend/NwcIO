@@ -1300,7 +1300,7 @@ internal static class Program
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err);
+            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err, assembly);
         }
 
         if (listViewpoints)
@@ -1600,7 +1600,7 @@ internal static class Program
 
         if (!string.IsNullOrEmpty(raycastArg))
         {
-            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err);
+            ExecuteRaycastTest(assembly.SpatialIndex, raycastArg, infoOut, @err, assembly);
         }
 
         if (listViewpoints)
@@ -1671,7 +1671,12 @@ internal static class Program
         }
     }
 
-    private static void ExecuteRaycastTest(NwcSpatialIndex index, string coords, TextWriter? writer = null, TextWriter? errWriter = null)
+    private static void ExecuteRaycastTest(
+        NwcSpatialIndex index,
+        string coords,
+        TextWriter? writer = null,
+        TextWriter? errWriter = null,
+        NwcAssembly? assembly = null)
     {
         var @out = writer ?? Console.Out;
         var @err = errWriter ?? Console.Error;
@@ -1693,8 +1698,10 @@ internal static class Program
 
         if (index.Raycast(origin, dir, out var hit))
         {
+            string? modelLabel = assembly?.GetModelLabel(hit.Mesh);
+            string modelSuffix = modelLabel is null ? string.Empty : FormattableString.Invariant($", Model={modelLabel}");
             @out.WriteLine(FormattableString.Invariant(
-                $"Raycast HIT at distance {hit.Distance:F3}: Point={hit.Point}, Normal={hit.Normal}, MeshId={hit.Mesh.Id}, Triangle={hit.TriangleIndex}"));
+                $"Raycast HIT at distance {hit.Distance:F3}: Point={hit.Point}, Normal={hit.Normal}, MeshId={hit.Mesh.Id}, Triangle={hit.TriangleIndex}{modelSuffix}"));
         }
         else
         {

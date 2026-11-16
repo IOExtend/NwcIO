@@ -136,6 +136,41 @@ public class CliArgumentValidationTests
     }
 
     [Fact]
+    public void Raycast_FolderAssemblyWithSharedSourcePath_ReportsModelIndexInLabel()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-val-ray-dir-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            foreach (var (file, offsetX) in new[] { ("A.nwc", 0.0), ("B.nwc", 20.0) })
+            {
+                new NwcDocumentBuilder().SetFileInfo("Arch.rvt")
+                    .AddMesh(new NwcMesh
+                    {
+                        Id = 0,
+                        Vertices = [new(offsetX, 0, 0), new(offsetX + 1, 0, 0), new(offsetX, 1, 0)],
+                        Indices = [0, 1, 2],
+                        BoundingBox = new BoundingBox3d(new(offsetX, 0, 0), new(offsetX + 1, 1, 0)),
+                    })
+                    .Build()
+                    .Save(Path.Combine(dir, file));
+            }
+
+            var (exitA, outA, errA) = Run([dir, "--raycast", "0.25,0.25,1,0,0,-1"]);
+            var (exitB, outB, errB) = Run([dir, "--raycast", "20.25,0.25,1,0,0,-1"]);
+
+            Assert.True(exitA == 0, errA);
+            Assert.True(exitB == 0, errB);
+            Assert.Contains("Model=M1_Arch", outA);
+            Assert.Contains("Model=M2_Arch", outB);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public void TimeLinerSimulate_UnparseableDate_Exits1()
     {
         string model = TempModel();

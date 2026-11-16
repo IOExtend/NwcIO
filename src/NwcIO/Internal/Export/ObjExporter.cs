@@ -16,14 +16,15 @@ public static class ObjExporter
         IReadOnlyList<NwcMesh> meshes,
         string path,
         bool worldCoordinates = true,
-        string? sourceDocument = null)
+        string? sourceDocument = null,
+        Func<NwcMesh, string?>? objectNamePrefix = null)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(path);
 
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
-        Write(meshes, writer, worldCoordinates, sourceDocument);
+        Write(meshes, writer, worldCoordinates, sourceDocument, objectNamePrefix);
     }
 
     /// <summary>
@@ -33,7 +34,8 @@ public static class ObjExporter
         IReadOnlyList<NwcMesh> meshes,
         TextWriter writer,
         bool worldCoordinates = true,
-        string? sourceDocument = null)
+        string? sourceDocument = null,
+        Func<NwcMesh, string?>? objectNamePrefix = null)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(writer);
@@ -63,6 +65,12 @@ public static class ObjExporter
             if (objectName.Length == 0)
             {
                 objectName = $"Mesh_{mesh.Id}";
+            }
+
+            string? prefix = objectNamePrefix?.Invoke(mesh);
+            if (!string.IsNullOrEmpty(prefix))
+            {
+                objectName = $"{SanitizeObjLine(prefix)}/{objectName}";
             }
 
             writer.WriteLine(FormattableString.Invariant($"o {objectName}"));
