@@ -13,7 +13,7 @@ public sealed class ExportCancellationTests
         cancellation.Cancel();
 
         Assert.Throws<OperationCanceledException>(() =>
-            document.SaveGlb(Path.GetTempFileName(), true, null, cancellation.Token));
+            document.Save(Path.GetTempFileName(), null, null, cancellation.Token));
         Assert.Throws<OperationCanceledException>(() =>
             document.SaveJson(Path.GetTempFileName(), null, null, cancellation.Token));
     }
@@ -27,10 +27,10 @@ public sealed class ExportCancellationTests
         document.SaveJson(jsonStream, null, json, CancellationToken.None);
         Assert.Contains(json.Reports, p => p.Phase == "export-json" && p.Completed == 1 && p.Total == 1);
 
-        var glb = new CollectingProgress();
-        using var glbStream = new MemoryStream();
-        document.SaveGlb(glbStream, true, glb, CancellationToken.None);
-        Assert.Contains(glb.Reports, p => p.Phase == "export-glb" && p.Completed == 1 && p.Total == 1);
+        var nwc = new CollectingProgress();
+        using var nwcStream = new MemoryStream();
+        document.Save(nwcStream, null, nwc, CancellationToken.None);
+        Assert.Contains(nwc.Reports, p => p.Phase == "export-nwc" && p.Completed == 1 && p.Total == 1);
     }
 
     [Fact]
@@ -40,8 +40,10 @@ public sealed class ExportCancellationTests
         var assembly = NwcAssembly.Create("Fed", document);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.json");
         Assert.Throws<OperationCanceledException>(() =>
-            assembly.SaveGlb(Path.GetTempFileName(), true, null, cancellation.Token));
+            assembly.SaveJson(path, null, null, cancellation.Token));
+        Assert.False(File.Exists(path));
 
         var progress = new CollectingProgress();
         using var stream = new MemoryStream();
@@ -103,49 +105,6 @@ public sealed class ExportCancellationTests
             assembly.SaveJson(stream, null, new CancellingProgress(cancellation), cancellation.Token));
 
         Assert.Equal(0, stream.Length);
-    }
-
-    [Fact]
-    public void AssemblyBcfStream_ProgressCancelsBeforeWrite_WritesNothing()
-    {
-        var assembly = NwcAssembly.Create("Fed", Document());
-        using var cancellation = new CancellationTokenSource();
-        using var stream = new MemoryStream();
-
-        Assert.Throws<OperationCanceledException>(() =>
-            assembly.SaveBcf(stream, [], new CancellingProgress(cancellation), cancellation.Token));
-
-        Assert.Equal(0, stream.Length);
-    }
-
-    [Fact]
-    public void AssemblyBcfAndHtmlFiles_ProgressCancelsBeforeWrite_CreateNoFile()
-    {
-        var assembly = NwcAssembly.Create("Fed", Document());
-        string bcf = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.bcfzip");
-        string html = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.html");
-        try
-        {
-            using (var cancellation = new CancellationTokenSource())
-            {
-                Assert.Throws<OperationCanceledException>(() =>
-                    assembly.SaveBcf(bcf, [], new CancellingProgress(cancellation), cancellation.Token));
-            }
-
-            using (var cancellation = new CancellationTokenSource())
-            {
-                Assert.Throws<OperationCanceledException>(() =>
-                    assembly.SaveClashReportHtml(html, [], new CancellingProgress(cancellation), cancellation.Token));
-            }
-
-            Assert.False(File.Exists(bcf));
-            Assert.False(File.Exists(html));
-        }
-        finally
-        {
-            if (File.Exists(bcf)) File.Delete(bcf);
-            if (File.Exists(html)) File.Delete(html);
-        }
     }
 
     [Fact]

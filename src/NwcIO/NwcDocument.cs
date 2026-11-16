@@ -593,86 +593,38 @@ public sealed class NwcDocument
 
     /// <summary>Exports 3D mesh geometry to a Wavefront OBJ file.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
-        => SaveObj(path, worldCoordinates, null, default);
-
-    /// <summary>Exports OBJ with cancellation and progress.</summary>
-    public void SaveObj(string path, bool worldCoordinates, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-obj", 0, 1));
         Internal.Export.ObjExporter.WriteFile(Meshes, path, worldCoordinates, FileInfo.SourcePath);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-obj", 1, 1));
     }
 
     /// <summary>Exports 3D mesh geometry to a <see cref="TextWriter"/> in Wavefront OBJ format.</summary>
     public void SaveObj(TextWriter writer, bool worldCoordinates = true)
-        => SaveObj(writer, worldCoordinates, null, default);
-
-    /// <summary>Exports OBJ to a writer with cancellation and progress.</summary>
-    public void SaveObj(TextWriter writer, bool worldCoordinates, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-obj", 0, 1));
         Internal.Export.ObjExporter.Write(Meshes, writer, worldCoordinates, FileInfo.SourcePath);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-obj", 1, 1));
     }
 
     /// <summary>Exports 3D mesh geometry, materials, and scene hierarchy to a binary glTF 2.0 file (.glb).</summary>
     public void SaveGlb(string path, bool worldCoordinates = true)
-        => SaveGlb(path, worldCoordinates, null, default);
-
-    /// <summary>Exports GLB with cancellation and progress.</summary>
-    public void SaveGlb(string path, bool worldCoordinates, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-glb", 0, 1));
         Internal.Export.GlbExporter.WriteFile(Meshes, Materials, path, worldCoordinates, FileInfo.LoaderPlugin, SavedViewpoints);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-glb", 1, 1));
     }
 
     /// <summary>Exports 3D mesh geometry, materials, and scene hierarchy to a binary glTF 2.0 stream (.glb).</summary>
     public void SaveGlb(Stream stream, bool worldCoordinates = true)
-        => SaveGlb(stream, worldCoordinates, null, default);
-
-    /// <summary>Exports GLB to a stream with cancellation and progress.</summary>
-    public void SaveGlb(Stream stream, bool worldCoordinates, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-glb", 0, 1));
         Internal.Export.GlbExporter.Write(Meshes, Materials, stream, worldCoordinates, FileInfo.LoaderPlugin, SavedViewpoints);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-glb", 1, 1));
     }
 
     /// <summary>Exports 3D mesh geometry, materials, spatial structure, and properties to an IFC STEP physical file (.ifc).</summary>
     public void SaveIfc(string path, NwcIfcExportOptions? options = null)
-        => SaveIfc(path, options, null, default);
-
-    /// <summary>Exports IFC with cancellation and progress.</summary>
-    public void SaveIfc(string path, NwcIfcExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-ifc", 0, 1));
         Internal.Export.IfcExporter.WriteFile(this, path, options);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-ifc", 1, 1));
     }
 
     /// <summary>Exports 3D mesh geometry, materials, spatial structure, and properties to a <see cref="TextWriter"/> in IFC format.</summary>
     public void SaveIfc(TextWriter writer, NwcIfcExportOptions? options = null)
-        => SaveIfc(writer, options, null, default);
-
-    /// <summary>Exports IFC to a writer with cancellation and progress.</summary>
-    public void SaveIfc(TextWriter writer, NwcIfcExportOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-ifc", 0, 1));
         Internal.Export.IfcExporter.Write(this, writer, options);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-ifc", 1, 1));
     }
 
     /// <summary>Serializes 3D mesh geometry, materials, spatial structure, and properties to an IFC STEP physical string.</summary>
@@ -685,44 +637,20 @@ public sealed class NwcDocument
 
     /// <summary>Exports saved viewpoints to a buildingSMART BCF 2.1 zip archive (.bcfzip).</summary>
     public void SaveViewpointsBcf(string path)
-        => SaveViewpointsBcf(path, null, default);
-
-    /// <summary>Exports viewpoints BCF with cancellation and progress.</summary>
-    public void SaveViewpointsBcf(string path, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-bcf", 0, 1));
         Internal.Export.BcfExporter.WriteViewpointsFile(SavedViewpoints, path, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-bcf", 1, 1));
     }
 
     /// <summary>Exports saved viewpoints to a buildingSMART BCF 2.1 zip stream.</summary>
     public void SaveViewpointsBcf(Stream stream)
-        => SaveViewpointsBcf(stream, null, default);
-
-    /// <summary>Exports viewpoints BCF to a stream with cancellation and progress.</summary>
-    public void SaveViewpointsBcf(Stream stream, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-bcf", 0, 1));
         Internal.Export.BcfExporter.WriteViewpoints(SavedViewpoints, stream, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-bcf", 1, 1));
     }
 
     /// <summary>Exports saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints file.</summary>
     public void SaveViewpointsXml(string path, string units = "m")
-        => SaveViewpointsXml(path, units, null, default);
-
-    /// <summary>Exports viewpoints XML with cancellation and progress.</summary>
-    public void SaveViewpointsXml(string path, string units, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-viewpoints-xml", 0, 1));
         Model.Sectioning.NwcXmlViewpointSerializer.Save(path, SavedViewpoints, units);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-viewpoints-xml", 1, 1));
     }
 
     /// <summary>Serializes saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints string.</summary>
@@ -775,16 +703,8 @@ public sealed class NwcDocument
     /// Exports the document to a standalone interactive 3D WebGL HTML viewer (.html) with zero external dependencies.
     /// </summary>
     public void SaveHtmlViewer(string path, Model.Viewer.NwcHtmlViewerOptions? options = null)
-        => SaveHtmlViewer(path, options, null, default);
-
-    /// <summary>Exports the HTML viewer with cancellation and progress.</summary>
-    public void SaveHtmlViewer(string path, Model.Viewer.NwcHtmlViewerOptions? options, IProgress<NwcProgress>? progress, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-html", 0, 1));
         Model.Viewer.NwcHtmlViewerExporter.Save(path, this, options);
-        cancellationToken.ThrowIfCancellationRequested();
-        progress?.Report(new NwcProgress("export-html", 1, 1));
     }
 
     /// <summary>
@@ -828,43 +748,43 @@ public sealed class NwcDocument
 
     /// <summary>Saves OBJ asynchronously.</summary>
     public Task SaveObjAsync(string path, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveObj(path, worldCoordinates, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveObj(path, worldCoordinates), cancellationToken);
 
     /// <summary>Saves OBJ to a text writer asynchronously.</summary>
     public Task SaveObjAsync(TextWriter writer, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveObj(writer, worldCoordinates, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveObj(writer, worldCoordinates), cancellationToken);
 
     /// <summary>Saves GLB asynchronously.</summary>
     public Task SaveGlbAsync(string path, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveGlb(path, worldCoordinates, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveGlb(path, worldCoordinates), cancellationToken);
 
     /// <summary>Saves GLB to a stream asynchronously.</summary>
     public Task SaveGlbAsync(Stream stream, bool worldCoordinates = true, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveGlb(stream, worldCoordinates, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveGlb(stream, worldCoordinates), cancellationToken);
 
     /// <summary>Saves IFC asynchronously.</summary>
     public Task SaveIfcAsync(string path, NwcIfcExportOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveIfc(path, options, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveIfc(path, options), cancellationToken);
 
     /// <summary>Saves IFC to a text writer asynchronously.</summary>
     public Task SaveIfcAsync(TextWriter writer, NwcIfcExportOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveIfc(writer, options, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveIfc(writer, options), cancellationToken);
 
     /// <summary>Saves viewpoints as a BCF archive asynchronously.</summary>
     public Task SaveViewpointsBcfAsync(string path, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveViewpointsBcf(path, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveViewpointsBcf(path), cancellationToken);
 
     /// <summary>Saves viewpoints as a BCF stream asynchronously.</summary>
     public Task SaveViewpointsBcfAsync(Stream stream, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveViewpointsBcf(stream, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveViewpointsBcf(stream), cancellationToken);
 
     /// <summary>Saves viewpoints as Navisworks XML asynchronously.</summary>
     public Task SaveViewpointsXmlAsync(string path, string units = "m", CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveViewpointsXml(path, units, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveViewpointsXml(path, units), cancellationToken);
 
     /// <summary>Saves the HTML viewer asynchronously.</summary>
     public Task SaveHtmlViewerAsync(string path, Model.Viewer.NwcHtmlViewerOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveHtmlViewer(path, options, null, cancellationToken), cancellationToken);
+        => Task.Run(() => SaveHtmlViewer(path, options), cancellationToken);
 
     /// <summary>
     /// Populates clash grid location tags across all clash detective tests in this document using the provided or attached grid system.

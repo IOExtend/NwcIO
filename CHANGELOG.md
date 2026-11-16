@@ -5,7 +5,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 ## [Unreleased]
 
 ### Added
-- Cancellation and progress overloads for document and assembly exports: `.nwc`, GLB, IFC, OBJ, JSON, BCF, viewpoints XML and HTML. Existing `Save*` signatures are unchanged; the new overloads report `export-*` phases and check the token before and after the exporter. `Save*Async` wrappers now pass the token into those overloads.
+- Cancellation and progress overloads for `.nwc` and JSON export: `NwcDocument.Save`, `NwcDocument.SaveJson` and `NwcAssembly.SaveJson` (path and stream). Existing signatures are unchanged; the new overloads report `export-nwc` and `export-json` phases and check the token before and after the exporter. `SaveAsync` and `SaveJsonAsync` now pass the token into them. `NwcAssembly.SaveJson(path, ...)` writes a temporary file and moves it over the target, so a cancelled export keeps an existing file.
 - Cancellation and progress overloads for `NwcDocument.Open`, `NwcAssembly.LoadFromDirectory` and `NwcAssembly.OpenNwf`, plus `OpenAsync`, `LoadFromDirectoryAsync`, `OpenNwfAsync` and `Save*Async` wrappers. `NwcProgress` reports phases such as `read-container`, `read-geometry`, `open` and per-model `load-models` counts.
 - `NwcIO.Scene` diagnostics for document content the conversion leaves out: `xrefs-skipped` (Warning, with the number of external references, for example the models of a `.nwf` file), `selection-sets-skipped`, `timeliner-skipped` and `clash-tests-skipped` (Warning, each only when the document has that content), and `properties-skipped` (Info, the number of property values left out for a reason other than an unknown unit). A document with none of this content gets none of them.
 
