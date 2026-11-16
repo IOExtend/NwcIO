@@ -563,7 +563,7 @@ public class TimeLinerMsProjectAndPrimaveraTests
     [InlineData("Set: Core Walls | Type: Demolish", "Core Walls", NwcTimeLinerTaskType.Demolish)]
     [InlineData("Set: Core Walls", "Core Walls", NwcTimeLinerTaskType.Construct)]
     [InlineData("Type: Temporary", null, NwcTimeLinerTaskType.Temporary)]
-    [InlineData("Set: Level\1 Walls", "Level\1 Walls", NwcTimeLinerTaskType.Construct)]
+    [InlineData(@"Set: Level\1 Walls", @"Level\1 Walls", NwcTimeLinerTaskType.Construct)]
     public void MsProjectXml_LegacyAndUnknownEscapeNotes_AreRead(string notes, string? expectedSet, NwcTimeLinerTaskType expectedType)
     {
         string xml = "<?xml version=\"1.0\"?><Project xmlns=\"http://schemas.microsoft.com/project\"><Tasks>"
