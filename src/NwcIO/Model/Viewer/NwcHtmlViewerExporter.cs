@@ -42,9 +42,9 @@ public sealed class NwcHtmlViewerOptions
 /// <param name="TotalMeshes">Number of meshes in the source.</param>
 /// <param name="ExportedMeshes">Number of meshes written to the viewer.</param>
 /// <param name="SkippedMeshes">Number of meshes dropped because of the vertex budget.</param>
-/// <param name="TotalVertices">Number of source vertices across all meshes.</param>
-/// <param name="ExportedVertices">Number of vertices written to the viewer.</param>
-/// <param name="SkippedVertices">Number of vertices dropped with the skipped meshes.</param>
+/// <param name="TotalVertices">Number of vertices across all meshes as the viewer stores them (meshes above 65,535 vertices are split into chunks, so vertices shared between chunks count once per chunk).</param>
+/// <param name="ExportedVertices">Number of those vertices written to the viewer; never above <see cref="NwcHtmlViewerOptions.MaxMeshVertices"/>.</param>
+/// <param name="SkippedVertices">Number of those vertices dropped with the skipped meshes.</param>
 public sealed record NwcHtmlViewerExportResult(
     int TotalMeshes,
     int ExportedMeshes,
@@ -90,12 +90,6 @@ public static class NwcHtmlViewerExporter
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
         return WriteWithResult(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options);
-    }
-
-    private static void Save(bool document, string path, NwcDocument doc, NwcHtmlViewerOptions? options)
-    {
-        _ = document;
-        SaveWithResult(path, doc, options);
     }
 
     /// <summary>
@@ -1563,7 +1557,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         const int maxVertices = 65535;
         if (mesh.Vertices.Count <= maxVertices)
         {
-            yield return (mesh.Vertices, mesh.Indices);
+            yield return (mesh.Vertices, ValidTriangles(mesh));
             yield break;
         }
 
@@ -1611,6 +1605,31 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         }
     }
 
+    // Indices are written as unsigned integers, so a triangle that references a
+    // missing vertex (or a trailing partial triangle) is dropped, as SplitMesh does.
+    private static IReadOnlyList<int> ValidTriangles(NwcMesh mesh)
+    {
+        var count = mesh.Vertices.Count;
+        var indices = mesh.Indices;
+        if (indices.Count % 3 == 0 && indices.All(i => i >= 0 && i < count))
+        {
+            return indices;
+        }
+
+        var valid = new List<int>(indices.Count);
+        for (var i = 0; i + 2 < indices.Count; i += 3)
+        {
+            int a = indices[i], b = indices[i + 1], c = indices[i + 2];
+            if (a >= 0 && a < count && b >= 0 && b < count && c >= 0 && c < count)
+            {
+                valid.Add(a);
+                valid.Add(b);
+                valid.Add(c);
+            }
+        }
+        return valid;
+    }
+
     private static void WriteChunk(
         Utf8JsonWriter writer,
         (IReadOnlyList<Vector3d> Vertices, IReadOnlyList<int> Indices) chunk,
@@ -1618,8 +1637,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     {
         var vertices = chunk.Vertices;
 
-        // Centre the Float32 positions on the chunk so large world coordinates
-        // keep their relative precision after the double -> float conversion.
+        // Store the Float32 positions relative to the chunk centre so large world
+        // coordinates are not rounded to the Float32 grid at their magnitude when
+        // stored. The viewer adds the centre back in double for picking and measuring.
         var min = new Vector3d(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity);
         var max = new Vector3d(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
         foreach (var v in vertices)
@@ -1629,7 +1649,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             max = new Vector3d(Math.Max(max.X, position.X), Math.Max(max.Y, position.Y), Math.Max(max.Z, position.Z));
         }
         var offset = vertices.Count > 0
-            ? new Vector3d((min.X + max.X) * 0.5, (min.Y + max.Y) * 0.5, (min.Z + max.Z) * 0.5)
+            ? new Vector3d(min.X * 0.5 + max.X * 0.5, min.Y * 0.5 + max.Y * 0.5, min.Z * 0.5 + max.Z * 0.5)
             : default;
 
         var positionBytes = new byte[vertices.Count * 3 * sizeof(float)];
@@ -1721,12 +1741,16 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         long skippedVertices = 0;
         foreach (var mesh in meshes)
         {
-            totalVertices += mesh.Vertices.Count;
+            // The budget counts the vertices actually written, which chunk splitting can
+            // raise above the source count.
+            var chunks = SplitMesh(mesh).ToList();
+            var meshVertexCount = chunks.Sum(c => c.Vertices.Count);
+            totalVertices += meshVertexCount;
 
-            if (exportedVertices + mesh.Vertices.Count > budget)
+            if (exportedVertices + meshVertexCount > budget)
             {
                 skippedMeshes++;
-                skippedVertices += mesh.Vertices.Count;
+                skippedVertices += meshVertexCount;
                 continue;
             }
 
@@ -1769,12 +1793,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             }
 
             var meshBounds = BoundingBox3d.Empty;
-            var meshVertexCount = 0;
             writer.WriteStartArray("chunks");
-            foreach (var chunk in SplitMesh(mesh))
+            foreach (var chunk in chunks)
             {
                 WriteChunk(writer, chunk, ref meshBounds);
-                meshVertexCount += chunk.Vertices.Count;
             }
             writer.WriteEndArray();
 

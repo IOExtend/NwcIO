@@ -1688,7 +1688,7 @@ internal static class Program
         }
     }
 
-    private static void WarnIfViewerTruncated(NwcHtmlViewerExportResult result, TextWriter err)
+    internal static void WarnIfViewerTruncated(NwcHtmlViewerExportResult result, TextWriter err)
     {
         if (!result.Truncated)
         {

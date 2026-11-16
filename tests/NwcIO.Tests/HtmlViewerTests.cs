@@ -302,12 +302,119 @@ public sealed class HtmlViewerTests
         Assert.Equal(36, Convert.FromBase64String(chunk.GetProperty("positions").GetString()!).Length);
         Assert.Equal(6, Convert.FromBase64String(chunk.GetProperty("indices").GetString()!).Length);
 
-        // Positions are relative to the chunk centre, so large coordinates keep
-        // their Float32 precision while the decoded world position stays correct.
         var positions = DecodePositions(chunk);
         Assert.Equal(3, positions.Length / 3);
         Assert.Equal(new Vector3d(1000000, 2000000, 3000000), DecodePosition(chunk, positions, 0));
         Assert.False(result.Truncated);
+    }
+
+    [Fact]
+    public void Write_Geometry_StoresPositionsRelativeToChunkCentre()
+    {
+        // At this magnitude the Float32 grid is 8 units wide, so absolute Float32
+        // positions could not hold the 0.5 steps below.
+        const double x = 123456789.0123, y = 234567890.5, z = 345678901.25;
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(x, y, z), new(x + 0.5, y, z), new(x, y + 0.5, z)],
+            Indices = [0, 1, 2],
+        };
+
+        using var payload = ReadPayload(ExportMesh(mesh));
+        var chunk = Assert.Single(Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray())
+            .GetProperty("chunks").EnumerateArray());
+        var offset = chunk.GetProperty("offset").EnumerateArray().Select(v => v.GetDouble()).ToArray();
+        var positions = DecodePositions(chunk);
+
+        Assert.Equal(x + 0.25, offset[0], 6);
+        Assert.Equal(y + 0.25, offset[1], 6);
+        Assert.Equal(z, offset[2], 6);
+        Assert.All(positions, p => Assert.InRange(p, -0.25001f, 0.25001f));
+        var expected = mesh.Vertices;
+        for (var i = 0; i < 3; i++)
+        {
+            var decoded = DecodePosition(chunk, positions, i);
+            Assert.Equal(expected[i].X, decoded.X, 6);
+            Assert.Equal(expected[i].Y, decoded.Y, 6);
+            Assert.Equal(expected[i].Z, decoded.Z, 6);
+        }
+    }
+
+    [Fact]
+    public void Write_SplitMeshBudget_CountsChunkVerticesAndNeverExceedsBudget()
+    {
+        // Sliding-window triangles share vertices across the chunk boundary, so the
+        // 70,000 source vertices become 70,002 written vertices.
+        var vertices = Enumerable.Range(0, 70000).Select(i => new Vector3d(i, 0, 0)).ToArray();
+        var indices = Enumerable.Range(0, 69998).SelectMany(i => new[] { i, i + 1, i + 2 }).ToArray();
+        var mesh = new NwcMesh { Id = 1, Vertices = vertices, Indices = indices };
+
+        using var tight = new StringWriter();
+        var skipped = NwcHtmlViewerExporter.WriteWithResult(
+            tight, [mesh], [], [], BoundingBox3d.Empty, new NwcHtmlViewerOptions { MaxMeshVertices = 70000 });
+        Assert.True(skipped.Truncated);
+        Assert.Equal(0, skipped.ExportedVertices);
+        Assert.Equal(70002, skipped.TotalVertices);
+        Assert.Equal(70002, skipped.SkippedVertices);
+        using (var payload = ReadPayload(tight.ToString()))
+        {
+            Assert.Equal(0, payload.RootElement.GetProperty("meshes").GetArrayLength());
+        }
+
+        using var roomy = new StringWriter();
+        var exported = NwcHtmlViewerExporter.WriteWithResult(
+            roomy, [mesh], [], [], BoundingBox3d.Empty, new NwcHtmlViewerOptions { MaxMeshVertices = 70002 });
+        Assert.False(exported.Truncated);
+        Assert.Equal(70002, exported.ExportedVertices);
+        using var roomyPayload = ReadPayload(roomy.ToString());
+        var writtenVertices = roomyPayload.RootElement.GetProperty("meshes")[0].GetProperty("chunks")
+            .EnumerateArray().Sum(c => DecodePositions(c).Length / 3);
+        Assert.Equal(70002, writtenVertices);
+    }
+
+    [Fact]
+    public void Write_SmallMesh_DropsInvalidAndIncompleteTrianglesWithoutThrowing()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2, 0, 1, 3, -1, 0, 1, 0, 1, 70000, 2, 1],
+        };
+
+        using var payload = ReadPayload(ExportMesh(mesh));
+        var chunk = Assert.Single(Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray())
+            .GetProperty("chunks").EnumerateArray());
+        Assert.Equal<int>([0, 1, 2], DecodeIndices(chunk));
+    }
+
+    [Fact]
+    public void Write_ExtremeCoordinates_DoNotOverflowChunkCentre()
+    {
+        var mesh = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(1.7e308, 0, 0), new(1.7e308, 1, 0), new(1.6e308, 0, 1)],
+            Indices = [0, 1, 2],
+        };
+
+        using var payload = ReadPayload(ExportMesh(mesh));
+        var chunk = Assert.Single(Assert.Single(payload.RootElement.GetProperty("meshes").EnumerateArray())
+            .GetProperty("chunks").EnumerateArray());
+        Assert.All(chunk.GetProperty("offset").EnumerateArray(), v => Assert.True(double.IsFinite(v.GetDouble())));
+    }
+
+    [Fact]
+    public void WarnIfViewerTruncated_WritesWarningOnlyWhenMeshesWereSkipped()
+    {
+        using var clean = new StringWriter();
+        NwcIO.Cli.Program.WarnIfViewerTruncated(new NwcHtmlViewerExportResult(2, 2, 0, 10, 10, 0), clean);
+        Assert.Equal(string.Empty, clean.ToString());
+
+        using var truncated = new StringWriter();
+        NwcIO.Cli.Program.WarnIfViewerTruncated(new NwcHtmlViewerExportResult(4, 2, 2, 8000, 4000, 4000), truncated);
+        Assert.Contains("skipped 2 of 4 meshes", truncated.ToString(), StringComparison.Ordinal);
     }
 
     private static string ExportMesh(NwcMesh mesh)
