@@ -24,7 +24,13 @@ jobs:
             10.0.x
       - run: dotnet restore NwcIO.slnx
       - run: dotnet build NwcIO.slnx -c Release --no-restore
-      - run: dotnet test NwcIO.slnx -c Release --no-build
+      - run: dotnet format NwcIO.slnx --verify-no-changes --severity error --no-restore
+      - run: dotnet test NwcIO.slnx -c Release --no-build --collect:"XPlat Code Coverage" --results-directory coverage
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage/**/coverage.cobertura.xml
+          if-no-files-found: error
       - run: dotnet pack NwcIO.slnx -c Release --no-build -o artifacts
       - uses: actions/upload-artifact@v7
         with:
@@ -32,7 +38,7 @@ jobs:
           path: artifacts/*.nupkg
           if-no-files-found: error
 
-  build-linux:
+  test-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,4 +47,19 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
-      - run: dotnet build src/NwcIO.Cli/NwcIO.Cli.csproj -c Release
+      - run: dotnet restore NwcIO.slnx
+      - run: dotnet build NwcIO.slnx -c Release --no-restore
+      - run: dotnet test NwcIO.slnx -c Release --no-build
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet restore NwcIO.slnx
+      - run: dotnet build NwcIO.slnx -c Release --no-restore
+      - run: dotnet test NwcIO.slnx -c Release --no-build

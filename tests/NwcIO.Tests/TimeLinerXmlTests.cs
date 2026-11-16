@@ -206,4 +206,27 @@ public class TimeLinerXmlTests
         Assert.NotNull(roundtripped.ActualCost);
         Assert.Equal(10m, roundtripped.ActualCost!.Value);
     }
+
+    [Fact]
+    public void Xml_MissingEndAndId_UsesParsedStartAndDeterministicId()
+    {
+        const string xml = """
+            <exchange name="S">
+              <tasks>
+                <task name="A"><planned start="2026-01-01T00:00:00+03:00" /></task>
+              </tasks>
+            </exchange>
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(xml));
+
+        var read = NwcTimeLinerXmlSerializer.Read(stream);
+
+        var task = Assert.Single(read.Tasks);
+        Assert.Equal("task-1", task.Id);
+        var start = DateTimeOffset.Parse("2026-01-01T00:00:00+03:00", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        Assert.Equal(start, task.PlannedStart);
+        Assert.Equal(start.AddDays(7), task.PlannedEnd);
+        Assert.Contains(read.Warnings, w => w.Contains("id is missing", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(read.Warnings, w => w.Contains("planned end", StringComparison.OrdinalIgnoreCase));
+    }
 }

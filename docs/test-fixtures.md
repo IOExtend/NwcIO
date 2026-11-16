@@ -4,6 +4,31 @@ Some integration tests require sample Navisworks files (`.nwc`, `.nwd`, `.nwf`) 
 
 The repository contains **no proprietary models, customer files, or binary Navisworks caches**.
 
+## What Is Discovered
+
+The per-model tests (`RealFixtureTests`) discover every `*.nwc`, `*.nwd` and `*.nwf` file under the roots below and run each as its own theory case, so one bad fixture does not stop the others. Cases are identified by position in the fixture list, never by path, so no private name reaches the test output. `.nwc` files are opened with the scene tree; `.nwd` and `.nwf` files are opened with `BuildSceneTree = false` (a `.nwd` holds partition nodes the tree builder rejects) and only the checks that apply to the data present run. Without a sidecar file the tests assert only model-independent invariants (valid transforms, mesh and index sanity, export structure and counts, BVH queries, a `.nwc` save/open round trip); no source application, loader plugin, element count or output size is assumed. The multi-model test uses the first two `.nwc`/`.nwd` fixtures and is skipped when fewer than two exist. The other real-file suites (`RealFileInvariantTests`, `RealCorpusTests`) keep reading `.nwc` and `.nwd` only.
+
+## Optional Per-Fixture Expectations
+
+A fixture may carry `<name>.expect.json` next to it. Only present values are asserted:
+
+```json
+{
+  "sourceContains": ".rvt",
+  "loaderPlugin": "LcNwcLoaderPlugin:lcldrevit",
+  "minGuids": 1000,
+  "minPropertyRecords": 500,
+  "minTransforms": 1000,
+  "minMeshes": 500,
+  "minViewpoints": 10,
+  "minGlbBytes": 100000,
+  "minIfc2x3Bytes": 100000,
+  "minIfc4Bytes": 50000
+}
+```
+
+`sourceContains` is matched case-insensitively against `FileInfo.SourcePath`; the other fields are minimum counts/sizes. A sidecar for `Sample1.nwc` is named `Sample1.expect.json`; it applies to every fixture with that file name stem, so keep one stem per model. An unknown key is an error, so a typo cannot silently disable an expectation.
+
 ## Where Fixtures Are Looked For
 
 1. The path or folder specified by the `NWCIO_TEST_FILES` environment variable.
