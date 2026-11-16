@@ -58,6 +58,101 @@ public class MeshParserTests
         Assert.Empty(MeshParser.Parse(container));
     }
 
+    [Fact]
+    public void Parse_TocSkippedRecordNextToValidMesh_CountsSkippedRecord()
+    {
+        // The valid first record keeps the heuristic fallback from running, so only the TOC path counts.
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var skipped = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var chunk = triangle.Concat(skipped).ToArray();
+        var toc = Int32Bytes(2, 1, chunk.Length, triangle.Length, skipped.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var meshes = MeshParser.Parse(container, null, MeshParser.MaxPlausibleVertices, null, out int skippedRecords);
+
+        Assert.Single(meshes);
+        Assert.Equal(1, skippedRecords);
+    }
+
+    [Fact]
+    public void Parse_ValidRecords_CountNoSkippedRecords()
+    {
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var toc = Int32Bytes(1, 1, triangle.Length, triangle.Length);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([triangle, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        MeshParser.Parse(container, null, MeshParser.MaxPlausibleVertices, null, out int skippedRecords);
+
+        Assert.Equal(0, skippedRecords);
+    }
+
+    [Fact]
+    public void Parse_LoneTruncatedRecord_CountsSkippedRecord()
+    {
+        // A vertex count in range but more bytes than present is the typical truncation. No mesh is found,
+        // so the heuristic fallback replaces the TOC attempt and must count the record as well.
+        var chunk = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var toc = Int32Bytes(1, 1, chunk.Length, 1224);
+        var container = NwcContainerReader.Read(NwcContainerWriter.Write([chunk, toc]));
+        container.Streams[1].Kind = NwcStreamKind.Toc;
+
+        var meshes = MeshParser.Parse(container, null, MeshParser.MaxPlausibleVertices, null, out int skippedRecords);
+
+        Assert.Empty(meshes);
+        Assert.Equal(1, skippedRecords);
+    }
+
+    [Fact]
+    public void Open_TruncatedGeometryRecord_ReportsMeshesSkipped()
+    {
+        var chunk = Int32Bytes(0, 94, 0, 60, 100, 0, 0, 0);
+        var toc = Int32Bytes(1, 1, chunk.Length, 1224);
+        using var file = new MemoryStream(NwcContainerWriter.Write([chunk, toc]));
+
+        var diagnostic = Assert.Single(NwcDocument.Open(file).Diagnostics);
+
+        Assert.Equal("meshes-skipped", diagnostic.Code);
+        Assert.Equal(NwcDiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.StartsWith("1 geometry records were skipped", diagnostic.Message);
+    }
+
+    [Fact]
+    public void Open_OutOfRangeVertexCount_ReportsCapFromOptions()
+    {
+        var chunk = Int32Bytes(0, 94, 0, 60, 5, 0, 0, 0);
+        var toc = Int32Bytes(1, 1, chunk.Length, chunk.Length);
+        using var file = new MemoryStream(NwcContainerWriter.Write([chunk, toc]));
+
+        var diagnostic = Assert.Single(NwcDocument.Open(file, new NwcReaderOptions { MaxMeshVertices = 4 }).Diagnostics);
+
+        Assert.Equal("meshes-skipped", diagnostic.Code);
+        Assert.Contains("3..4", diagnostic.Message);
+    }
+
+    [Fact]
+    public void Open_ModelWithoutSkippedRecords_HasNoDiagnostics()
+    {
+        var triangle = Int32Bytes(0, 94, 0, 60, 3, 9,
+            0, 0, 0,
+            BitConverter.SingleToInt32Bits(1f), 0, 0,
+            0, BitConverter.SingleToInt32Bits(1f), 0);
+        var toc = Int32Bytes(1, 1, triangle.Length, triangle.Length);
+        using var file = new MemoryStream(NwcContainerWriter.Write([triangle, toc]));
+
+        var doc = NwcDocument.Open(file);
+
+        Assert.Single(doc.Meshes);
+        Assert.Empty(doc.Diagnostics);
+    }
+
     [Theory]
     [InlineData(536870912)]
     [InlineData(int.MaxValue)]

@@ -183,6 +183,7 @@ public sealed class NwcDocument
 
         var transforms = new List<NwcTransform>();
         var meshes = new List<NwcMesh>();
+        int skippedMeshRecords = 0;
         var materials = new List<NwcMaterial>();
         NwcNode? rootNode = null;
         if (segments is not null)
@@ -216,7 +217,7 @@ public sealed class NwcDocument
                     transformIndices = TransformLinkParser.TryParse(linksStream);
                 }
 
-                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices, transformIndices));
+                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices, transformIndices, out skippedMeshRecords));
             }
 
             if (options.BuildSceneTree)
@@ -279,17 +280,26 @@ public sealed class NwcDocument
         }
 
         var document = new NwcDocument(fileInfo, records, guids, transforms, meshes, materials, rootNode, xRefs, dbCache, savedViewpoints, selectionSets, timeLiner, container);
+        var diagnostics = new List<NwcDiagnostic>();
+        if (skippedMeshRecords > 0)
+        {
+            diagnostics.Add(new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "meshes-skipped",
+                $"{skippedMeshRecords} geometry records were skipped: their vertex count is outside " +
+                $"{MeshParser.MinMeshVertices}..{options.MaxMeshVertices} or the record is malformed."));
+        }
+
         if (container.TrailingGap > 0)
         {
-            document.Diagnostics =
-            [
-                new NwcDiagnostic(
-                    NwcDiagnosticSeverity.Warning,
-                    "ContainerTrailingGap",
-                    $"Unrecognized {container.TrailingGap} byte tail after the last stream.",
-                    ByteOffset: container.FileLength - container.TrailingGap),
-            ];
+            diagnostics.Add(new NwcDiagnostic(
+                NwcDiagnosticSeverity.Warning,
+                "ContainerTrailingGap",
+                $"Unrecognized {container.TrailingGap} byte tail after the last stream.",
+                ByteOffset: container.FileLength - container.TrailingGap));
         }
+
+        document.Diagnostics = diagnostics;
 
         return document;
     }

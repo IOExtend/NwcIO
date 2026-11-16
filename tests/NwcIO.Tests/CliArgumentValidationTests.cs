@@ -740,4 +740,97 @@ public class CliArgumentValidationTests
             Directory.Delete(dir, true);
         }
     }
+
+    private static void AppendTail(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Append, FileAccess.Write);
+        stream.Write(new byte[8]);
+    }
+
+    [Fact]
+    public void Report_PrintsDocumentDiagnostics_OnlyWhenPresent()
+    {
+        string model = TempModel();
+        string clean = Path.Combine(Path.GetTempPath(), "cli-diag-" + Guid.NewGuid().ToString("N") + ".json");
+        string output = Path.Combine(Path.GetTempPath(), "cli-diag-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            var (cleanExit, _, cleanErr) = Run([model, clean, "--report"]);
+            Assert.Equal(0, cleanExit);
+            Assert.DoesNotContain("Diagnostics:", cleanErr);
+
+            AppendTail(model);
+            var (exit, _, err) = Run([model, output, "--report"]);
+
+            Assert.Equal(0, exit);
+            Assert.Contains("Diagnostics:      1", err);
+            Assert.Contains("[Warning] ContainerTrailingGap", err);
+        }
+        finally
+        {
+            foreach (var f in new[] { model, clean, output })
+            {
+                if (File.Exists(f)) File.Delete(f);
+            }
+        }
+    }
+
+    [Fact]
+    public void Report_PrintsAssemblyDiagnostics_ForFolderAndManifest()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-diag-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string a = Path.Combine(dir, "a.nwc");
+            WriteModel(a);
+            AppendTail(a);
+            WriteModel(Path.Combine(dir, "b.nwc"));
+
+            var (folderExit, _, folderErr) = Run([dir, "--report"]);
+            Assert.True(folderExit == 0, folderErr);
+            Assert.Contains("Diagnostics:      1", folderErr);
+            Assert.Contains("ContainerTrailingGap", folderErr);
+
+            string manifest = Path.Combine(dir, "fed.nwf.xml");
+            var m = new NwcIO.Model.Clash.NwcNwfManifest("Fed");
+            m.ModelPaths.Add("a.nwc");
+            m.ModelPaths.Add("b.nwc");
+            m.Save(manifest);
+
+            var (exit, _, err) = Run([manifest, "--report"]);
+            Assert.True(exit == 0, err);
+            Assert.Contains("Diagnostics:      1", err);
+            Assert.Contains("ContainerTrailingGap", err);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Report_UnresolvedReference_IsReportedOnce()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "cli-diag-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            WriteModel(Path.Combine(dir, "a.nwc"));
+            string manifest = Path.Combine(dir, "fed.nwf.xml");
+            var m = new NwcIO.Model.Clash.NwcNwfManifest("Fed");
+            m.ModelPaths.Add("a.nwc");
+            m.ModelPaths.Add("missing.nwc");
+            m.Save(manifest);
+
+            var (exit, _, err) = Run([manifest, "--report"]);
+
+            Assert.True(exit == 0, err);
+            Assert.Equal(1, err.Split("missing.nwc").Length - 1);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }

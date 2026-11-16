@@ -24,6 +24,18 @@ internal static class MeshParser
         IReadOnlyList<NwcTransform>? transforms = null,
         int maxVertices = MaxPlausibleVertices,
         IReadOnlyList<int>? transformIndices = null)
+        => Parse(container, transforms, maxVertices, transformIndices, out _);
+
+    /// <summary>
+    /// Parses all 3D meshes and reports how many geometry records were recognised but skipped
+    /// (vertex count out of range, record truncated or malformed).
+    /// </summary>
+    public static IReadOnlyList<NwcMesh> Parse(
+        NwcContainer container,
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices,
+        IReadOnlyList<int>? transformIndices,
+        out int skippedRecords)
     {
         ArgumentNullException.ThrowIfNull(container);
         if (maxVertices < MinMeshVertices)
@@ -32,20 +44,24 @@ internal static class MeshParser
         }
 
         var meshes = new List<NwcMesh>();
+        int tocSkipped = 0;
+        int scanSkipped = 0;
 
         // 1. Primary path: parse via Table of Contents (TOC) stream and chunked geometry block.
         var tocStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (tocStream is not null)
         {
-            ParseViaToc(container, tocStream, meshes, transforms, maxVertices, transformIndices);
+            ParseViaToc(container, tocStream, meshes, transforms, maxVertices, transformIndices, ref tocSkipped);
         }
 
         // 2. Secondary fallback: if TOC yielded no meshes, scan individual streams for vertex buffers.
         if (meshes.Count == 0)
         {
-            ParseViaHeuristicScan(container, meshes, transforms, maxVertices, transformIndices);
+            ParseViaHeuristicScan(container, meshes, transforms, maxVertices, transformIndices, ref scanSkipped);
         }
 
+        // The fallback replaces the TOC attempt; take the larger count so neither path hides a skipped record.
+        skippedRecords = Math.Max(tocSkipped, scanSkipped);
         return meshes;
     }
 
@@ -81,7 +97,8 @@ internal static class MeshParser
         List<NwcMesh> meshes,
         IReadOnlyList<NwcTransform>? transforms,
         int maxVertices,
-        IReadOnlyList<int>? transformIndices)
+        IReadOnlyList<int>? transformIndices,
+        ref int skippedRecords)
     {
         var tocData = tocStream.Data;
         if (tocData.Length < 16)
@@ -192,6 +209,14 @@ internal static class MeshParser
 
                             meshes.Add(mesh);
                         }
+                        else
+                        {
+                            skippedRecords++;
+                        }
+                    }
+                    else
+                    {
+                        skippedRecords++;
                     }
                 }
             }
@@ -205,7 +230,8 @@ internal static class MeshParser
         List<NwcMesh> meshes,
         IReadOnlyList<NwcTransform>? transforms,
         int maxVertices,
-        IReadOnlyList<int>? transformIndices)
+        IReadOnlyList<int>? transformIndices,
+        ref int skippedRecords)
     {
         foreach (var stream in container.Streams)
         {
@@ -228,12 +254,14 @@ internal static class MeshParser
                 int minVertices = lines ? 2 : MinMeshVertices;
                 if (vCount < minVertices || vCount > maxVertices)
                 {
+                    skippedRecords++;
                     continue;
                 }
 
                 // vCount can reach int.MaxValue through MaxMeshVertices: compare without multiplying.
                 if (vCount > (data.Length - (i + 16)) / 12)
                 {
+                    skippedRecords++;
                     continue;
                 }
 
@@ -244,6 +272,10 @@ internal static class MeshParser
 
                     meshes.Add(mesh);
                     i += 12 + vCount * 12;
+                }
+                else
+                {
+                    skippedRecords++;
                 }
             }
         }
