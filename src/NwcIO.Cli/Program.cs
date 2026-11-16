@@ -1571,8 +1571,14 @@ internal static class Program
             // Models[0] is the .nwf document itself; report the component files separately.
             @err.WriteLine($"Loaded Models:    {assembly.Models.Count} (component files: {assembly.Models.Count - 1})");
             @err.WriteLine($"Total Meshes:     {assembly.AllMeshes.Count}");
+            @err.WriteLine($"Total Materials:  {assembly.AllMaterials.Count}");
             @err.WriteLine($"Saved viewpoints: {assembly.SavedViewpoints.Count}");
             @err.WriteLine($"Bounding Box:     {assembly.BoundingBox}");
+            if (bvhStats)
+            {
+                var idx = assembly.SpatialIndex;
+                @err.WriteLine($"BVH Nodes:        {idx.NodeCount} ({idx.LeafCount} leaves, max depth {idx.MaxDepth})");
+            }
             foreach (var xref in assembly.UnresolvedXRefs)
             {
                 @err.WriteLine($"Warning: unresolved reference, component model missing: '{xref.EffectivePath}'");
@@ -1591,7 +1597,7 @@ internal static class Program
         else
         {
             infoOut.WriteLine(FormattableString.Invariant(
-                $"NWF Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
+                $"NWF Assembly '{assembly.Name}': {assembly.Models.Count} models, {assembly.AllMeshes.Count} meshes, {assembly.AllMaterials.Count} materials exported to '{outputPath}' in {sw.ElapsedMilliseconds} ms."));
         }
 
         return 0;
