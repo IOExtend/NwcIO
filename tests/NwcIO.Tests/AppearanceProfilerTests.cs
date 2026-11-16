@@ -306,4 +306,46 @@ public sealed class AppearanceProfilerTests
         Assert.Same(node.Material, m1.Material);
         Assert.Same(node.Material, m2.Material);
     }
+
+    [Fact]
+    public void ProfilerMaterials_AreReusedPerRuleAndExportedToGlb()
+    {
+        var m1 = new NwcMesh { Id = 1, Name = "Vent 1", Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] };
+        var m2 = new NwcMesh { Id = 2, Name = "Vent 2", Vertices = [new(2, 0, 0), new(3, 0, 0), new(2, 1, 0)], Indices = [0, 1, 2] };
+        static NwcNode Node(int id, string name, NwcMesh mesh)
+        {
+            var node = new NwcNode { Id = id, Name = name, Class = "LcRevitData_Element", Mesh = mesh };
+            node.Properties.Add(new NwcPropertyRecord { FirstInt = id, Tag = 1, Class = "Item", Name = "System", Value = "Exhaust" });
+            return node;
+        }
+
+        var root = new NwcNode { Id = 0, Name = "Building", Class = "LcOpModelFile" };
+        var n1 = Node(1, "Vent 1", m1);
+        var n2 = Node(2, "Vent 2", m2);
+        root.Children.Add(n1);
+        root.Children.Add(n2);
+        var doc = NwcDocument.Create(meshes: [m1, m2], rootNode: root);
+
+        var profiler = new NwcAppearanceProfiler();
+        profiler.AddRule("Mag", "Item", "System", NwcSearchOperator.Equals, "Exhaust", new RgbaColor(1, 0, 1, 1));
+        Assert.Equal(2, doc.ApplyAppearanceProfiler(profiler));
+
+        Assert.Same(n1.Material, n2.Material);
+        Assert.Same(n1.Material, m1.Material);
+        Assert.Same(n2.Material, m2.Material);
+        Assert.Empty(doc.Materials);
+
+        using var stream = new MemoryStream();
+        doc.SaveGlb(stream);
+        byte[] glb = stream.ToArray();
+        int jsonLength = (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        using var json = System.Text.Json.JsonDocument.Parse(glb.AsMemory(20, jsonLength));
+        var materials = json.RootElement.GetProperty("materials");
+        var material = Assert.Single(materials.EnumerateArray());
+        Assert.Equal("Profiler_Mag", material.GetProperty("name").GetString());
+        var color = material.GetProperty("pbrMetallicRoughness").GetProperty("baseColorFactor");
+        Assert.Equal([1f, 0f, 1f, 1f], color.EnumerateArray().Select(c => c.GetSingle()).ToArray());
+        Assert.Equal(0, json.RootElement.GetProperty("meshes")[0].GetProperty("primitives")[0].GetProperty("material").GetInt32());
+        Assert.Equal(0, json.RootElement.GetProperty("meshes")[1].GetProperty("primitives")[0].GetProperty("material").GetInt32());
+    }
 }
