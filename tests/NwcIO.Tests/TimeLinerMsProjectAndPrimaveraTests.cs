@@ -409,8 +409,8 @@ public class TimeLinerMsProjectAndPrimaveraTests
         NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms);
         ms.Position = 0;
         string xer = new StreamReader(ms, leaveOpen: true).ReadToEnd();
-        Assert.Contains("	2026-06-01 05:00	2026-06-01 14:00	Active", xer); // PROJECT plan dates
-        Assert.Contains("	2026-06-01 05:00	2026-06-01 14:00	2026-06-01 06:00	2026-06-01 09:00	", xer); // TASK dates
+        Assert.Contains("\t2026-06-01 05:00\t2026-06-01 14:00\tActive", xer); // PROJECT plan dates
+        Assert.Contains("\t2026-06-01 05:00\t2026-06-01 14:00\t2026-06-01 06:00\t2026-06-01 09:00\t", xer); // TASK dates
 
         ms.Position = 0;
         var imported = NwcTimeLinerPrimaveraXerSerializer.Read(ms);
@@ -501,6 +501,153 @@ public class TimeLinerMsProjectAndPrimaveraTests
         Assert.Contains(read.Warnings, w => w.Contains("id is missing", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(read.Warnings, w => w.Contains("target start", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(read.Warnings, w => w.Contains("target end", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PrimaveraXer_WritesNoBomAndEndsWithTerminator()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "A", start, start.AddDays(1)));
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms);
+        var bytes = ms.ToArray();
+
+        Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+        string text = System.Text.Encoding.UTF8.GetString(bytes);
+        Assert.StartsWith("ERMHDR", text, StringComparison.Ordinal);
+        Assert.EndsWith("%E", text.TrimEnd(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PrimaveraXer_NestedTasksAndTypes_Roundtrip()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var parent = new NwcTimeLinerTask("A", "Parent", start, start.AddDays(10));
+        parent.Children.Add(new NwcTimeLinerTask("A1", "Child 1", start.AddDays(1), start.AddDays(3), NwcTimeLinerTaskType.Demolish));
+        parent.Children.Add(new NwcTimeLinerTask("A2", "Child 2", start.AddDays(4), start.AddDays(6), NwcTimeLinerTaskType.Temporary));
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(parent);
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms);
+        ms.Position = 0;
+        var read = NwcTimeLinerPrimaveraXerSerializer.Read(ms);
+
+        var root = Assert.Single(read.Tasks);
+        Assert.Equal("Parent", root.Name);
+        Assert.Equal(2, root.Children.Count);
+        Assert.Equal("Child 1", root.Children[0].Name);
+        Assert.Equal(NwcTimeLinerTaskType.Demolish, root.Children[0].TaskType);
+        Assert.Equal("Child 2", root.Children[1].Name);
+        Assert.Equal(NwcTimeLinerTaskType.Temporary, root.Children[1].TaskType);
+    }
+
+    [Fact]
+    public void PrimaveraXer_ReadWithEncoding_DecodesNonUtf8File()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("Café");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "Café", start, start.AddDays(1)));
+
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms, System.Text.Encoding.Latin1);
+        ms.Position = 0;
+        var read = NwcTimeLinerPrimaveraXerSerializer.Read(ms, System.Text.Encoding.Latin1);
+
+        Assert.Equal("Café", read.Name);
+        Assert.Equal("Café", Assert.Single(read.Tasks).Name);
+    }
+
+    private static NwcTimeLinerSchedule ReadXer(string text)
+    {
+        using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(text));
+        return NwcTimeLinerPrimaveraXerSerializer.Read(ms);
+    }
+
+    private const string XerTaskFields = "%F\ttask_id\twbs_id\ttask_code\ttask_name\ttarget_start_date\ttarget_end_date";
+
+    [Fact]
+    public void PrimaveraXer_ForeignFileWithSharedWbs_StaysFlatWithWarning()
+    {
+        string xer = string.Join("\n",
+            "%T\tPROJWBS", "%F\twbs_id\tparent_wbs_id\twbs_name",
+            "%R\t100\t\tRoot", "%R\t101\t100\tPhase",
+            "%T\tTASK", XerTaskFields,
+            "%R\t1\t100\tMS1\tStart\t2026-06-01 00:00\t2026-06-01 00:00",
+            "%R\t2\t100\tMS2\tFinish\t2026-06-10 00:00\t2026-06-10 00:00",
+            "%R\t3\t101\tA1\tDig\t2026-06-02 00:00\t2026-06-03 00:00",
+            "%E");
+
+        var read = ReadXer(xer);
+
+        Assert.Equal(["Start", "Finish", "Dig"], read.Tasks.Select(t => t.Name));
+        Assert.All(read.Tasks, t => Assert.Empty(t.Children));
+        Assert.Contains(read.Warnings, w => w.Contains("nwcio_task_type", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PrimaveraXer_SharedWbsIdInNwcioFile_StaysFlatWithWarning()
+    {
+        string xer = string.Join("\n",
+            "%T\tPROJWBS", "%F\twbs_id\tparent_wbs_id\twbs_name",
+            "%R\t100\t\tRoot", "%R\t101\t100\tA",
+            "%T\tTASK", XerTaskFields + "\tnwcio_task_type",
+            "%R\t1\t101\tA\tA\t2026-06-01 00:00\t2026-06-02 00:00\tConstruct",
+            "%R\t2\t101\tB\tB\t2026-06-03 00:00\t2026-06-04 00:00\tConstruct",
+            "%E");
+
+        var read = ReadXer(xer);
+
+        Assert.Equal(2, read.Tasks.Count);
+        Assert.Contains(read.Warnings, w => w.Contains("shared by several tasks", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PrimaveraXer_ParentCycle_KeepsAllTasksAndWarns()
+    {
+        string xer = string.Join("\n",
+            "%T\tPROJWBS", "%F\twbs_id\tparent_wbs_id\twbs_name",
+            "%R\t1\t2\tX", "%R\t2\t1\tY",
+            "%T\tTASK", XerTaskFields + "\tnwcio_task_type",
+            "%R\t1\t1\tX\tX\t2026-06-01 00:00\t2026-06-02 00:00\tConstruct",
+            "%R\t2\t2\tY\tY\t2026-06-03 00:00\t2026-06-04 00:00\tConstruct",
+            "%E");
+
+        var read = ReadXer(xer);
+
+        int total = read.Tasks.Count + read.Tasks.Sum(t => t.Children.Count);
+        Assert.Equal(2, total);
+        Assert.NotEmpty(read.Tasks);
+        Assert.Contains(read.Warnings, w => w.Contains("cycle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PrimaveraXer_UndecodableBytes_AddWarning()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "Café", start, start.AddDays(1)));
+        using var ms = new MemoryStream();
+        NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms, System.Text.Encoding.Latin1);
+        ms.Position = 0;
+
+        var read = NwcTimeLinerPrimaveraXerSerializer.Read(ms);
+
+        Assert.Contains(read.Warnings, w => w.Contains("U+FFFD", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PrimaveraXer_WriteUnrepresentableCharacter_Throws()
+    {
+        var start = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var schedule = new NwcTimeLinerSchedule("P");
+        schedule.Tasks.Add(new NwcTimeLinerTask("A", "Бетон", start, start.AddDays(1)));
+
+        using var ms = new MemoryStream();
+        Assert.ThrowsAny<System.Text.EncoderFallbackException>(() =>
+            NwcTimeLinerPrimaveraXerSerializer.Write(schedule, ms, System.Text.Encoding.Latin1));
     }
 
     [Fact]
