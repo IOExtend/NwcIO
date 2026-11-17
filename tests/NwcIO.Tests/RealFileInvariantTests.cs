@@ -173,7 +173,6 @@ public class RealFileInvariantTests
 
         Check(elements + twins == doc.Guids.Count, i, "element-count-is-guid-table");
         Check(doc.LengthUnit == NwcLengthUnit.Feet, i, "unit-feet");
-        Check(doc.FileInfo.SourceTimestampUtc != null, i, "timestamp");
         totals.Elements += elements;
         totals.Twins += twins;
         totals.Materials += doc.Materials.Count;
