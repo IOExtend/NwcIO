@@ -44,7 +44,6 @@ internal static class HierarchyParser
     /// after the hierarchy tail. It returns null, or is null, when the file has no such segment; an empty list is a segment without streams.
     /// </param>
     /// <returns>The nodes in preorder; [0] is the synthetic root (Id 0, Name <paramref name="rootName"/>, Class "Model", Tag 0).</returns>
-    /// <exception cref="NotSupportedException">A partition (class-32) node or an unknown class is present.</exception>
     public static IReadOnlyList<NwcNode> Read(
         byte[] data,
         string rootName,
@@ -289,8 +288,7 @@ internal static class HierarchyParser
 
         private object ReadBody(int classId) => classId switch
         {
-            53 or 22 => ReadNode(classId),
-            32 => throw new NotSupportedException("LcOpNwdLogicalHierarchy holds .nwd partition nodes (class 32), which are not decoded; open with BuildSceneTree = false to read geometry and placement."),
+            53 or 22 or 32 => ReadNode(classId),
             52 => ReadUsernameBody(),
             86 => ReadPropertyTab(),
             31 => ReadMaterial(),
@@ -320,8 +318,15 @@ internal static class HierarchyParser
         }
 
         // NODE53 / NODE22 (docs/format-notes.md §2.2): name, username, flags, X, Y attributes, and for 53 the children.
+        // NODE32, a .nwd partition (docs/format-notes.md §2.2): one more string before the NODE53 body, then a trailer after its children.
         private Node ReadNode(int classId)
         {
+            if (classId == 32)
+            {
+                // Empty in every file seen; the name that follows is the partition's source file name.
+                _reader.ReadString();
+            }
+
             string? name = _reader.ReadString();
             var username = ReadUsername();
             _reader.ReadInt32();
@@ -360,9 +365,48 @@ internal static class HierarchyParser
                 }
             }
 
-            Node[] children = classId == 53 ? ReadNodes(ChildClasses) : [];
+            Node[] children = classId is 53 or 32 ? ReadNodes(ChildClasses) : [];
+            if (classId == 32)
+            {
+                ReadPartitionTrailer();
+            }
+
             var (size, propertyReferences, height) = Measure(children, ownProperties);
             return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, materialName, transform, tabs, hyperlinks, ownProperties, children, size, propertyReferences, height);
+        }
+
+        // The NODE32 trailer (docs/format-notes.md §2.2), read and dropped: [i32 2][i32] 3 x f64 [i32][str loader plugin][i32 format version]
+        // [i32][i32] 6 x f64 [i32][str][i32][str source path] 3 x f64, then 4 x f64 (the source's plan box), [i32][i32]. It holds no objects.
+        private void ReadPartitionTrailer()
+        {
+            if (_reader.ReadInt32() != 2)
+            {
+                throw _reader.Fail("partition trailer does not start with 2");
+            }
+
+            _reader.ReadInt32();
+            SkipDoubles(3);
+            _reader.ReadInt32();
+            _reader.ReadString();
+            _reader.ReadInt32();
+            _reader.ReadInt32();
+            _reader.ReadInt32();
+            SkipDoubles(6);
+            _reader.ReadInt32();
+            _reader.ReadString();
+            _reader.ReadInt32();
+            _reader.ReadString();
+            SkipDoubles(7);
+            _reader.ReadInt32();
+            _reader.ReadInt32();
+        }
+
+        private void SkipDoubles(int count)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                _reader.ReadDouble();
+            }
         }
 
         // Expanded size, property references and height of a node with these children; children finish before their parent, so theirs are known.
@@ -682,8 +726,8 @@ internal static class HierarchyParser
         }
     }
 
-    // The LcOaPartitionProps roots (docs/format-notes.md §2.2.1), read on demand so that a .nwd fails at its first class-32 node before
-    // any of them: the n-th null attribute slot of the hierarchy takes the n-th root of stream 0, then stream 1, and so on.
+    // The LcOaPartitionProps roots (docs/format-notes.md §2.2.1), read on demand from the first null attribute slot:
+    // the n-th null attribute slot of the hierarchy takes the n-th root of stream 0, then stream 1, and so on.
     private sealed class PartitionRoots
     {
         private readonly LcObjectReader _hierarchy;

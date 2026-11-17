@@ -321,13 +321,34 @@ public class HierarchyParserTests
         => AssertRule(rule, FormatVectors.Patched(FormatVectors.H1, offset, [value]));
 
     [Fact]
-    public void Read_PartitionNode_ThrowsNotSupported()
+    public void Read_PartitionNode_ReadsLikeAGroupNamedAfterItsFile()
     {
-        var ex = Assert.Throws<NotSupportedException>(() => HierarchyParser.Read(PartitionHierarchy(), "Model"));
-        Assert.Equal(
-            "LcOpNwdLogicalHierarchy holds .nwd partition nodes (class 32), which are not decoded; open with BuildSceneTree = false to read geometry and placement.",
-            ex.Message);
+        var nodes = HierarchyParser.Read(PartitionHierarchy(), "Model");
+
+        Assert.Equal(2, nodes.Count);
+        Assert.Equal("P", nodes[1].Name);
+        Assert.Equal("LcOaPartition", nodes[1].Class);
+        Assert.Equal(32, nodes[1].Tag);
+        Assert.Same(nodes[0], nodes[1].Parent);
     }
+
+    // Two partitions, each with a leaf: the trailer of the first ends where the second starts
+    [Fact]
+    public void Read_TwoPartitionsWithLeaves_ReadsBothSubtrees()
+    {
+        var w = Begin(n: 2);
+        Partition(w, "a.x", 1, l => Leaf(l, 0, _ => { }));
+        Partition(w, "bb.x", 1, l => Leaf(l, 0, _ => { }));
+
+        var nodes = HierarchyParser.Read(End(w), "Model");
+
+        Assert.Equal(["Model", "a.x", "L", "bb.x", "L"], nodes.Select(n => n.Name));
+        Assert.Same(nodes[3], nodes[4].Parent);
+    }
+
+    [Fact]
+    public void Read_PartitionTrailerTagNot2_Throws()
+        => AssertRule("partition trailer does not start with 2", End(Partition(Begin(), "P", 0, _ => { }, trailerTag: 3)));
 
     [Fact]
     public void Read_SharedPropertyTab_SharesRecords()
@@ -470,17 +491,41 @@ public class HierarchyParserTests
         Assert.InRange(allocated, 0, 16 << 20);
     }
 
-    // [k = 1][roots ?? 0][root 100][n = 1], then the top-level partition node: [i32 0] + a class-53 body + 16 zero bytes for its trailer.
-    internal static byte[] PartitionHierarchy(int[]? roots = null)
+    // [k = 1][roots ?? 0][root 100][n = 1], then the top-level partition node (docs/format-notes.md §2.2): an empty string + a class-53
+    // body named "P" with no attributes and no children + its trailer.
+    internal static byte[] PartitionHierarchy(int[]? roots = null) => End(Partition(Begin(roots: roots), "P", 0, _ => { }));
+
+    // [k = 1][0][root 100][n = 1], a partition whose preorder is 1 partition, 2 leaf, 3 group, 4-7 leaves: F1's fragments name 2 and 7.
+    internal static byte[] PartitionHierarchyForF1() => End(Partition(Begin(), "P", 2, w =>
     {
-        var w = Begin(roots: roots);
+        Leaf(w, 0, _ => { });
+        Group(w, 4);
+        for (int i = 0; i < 4; i++)
+        {
+            Leaf(w, 0, _ => { });
+        }
+    }));
+
+    // A class-32 node named after its source file: an empty string, a class-53 body without attributes whose childCount children
+    // the callback writes, then the trailer.
+    internal static LcGraphWriter Partition(LcGraphWriter w, string name, int childCount, Action<LcGraphWriter> children, int trailerTag = 2)
+    {
         w.New(32);
-        w.Int(0);
-        w.Str("P");
-        Username(w, "P", "LcOaPartition");
-        w.Int(0).Int(0).Int(0).Int(0);
-        w.Int(0).Int(0).Int(0).Int(0);
-        return End(w);
+        w.Str("");
+        w.Str(name);
+        Username(w, "File", "LcOaPartition");
+        w.Int(0).Int(0).Int(0).Int(childCount);
+        children(w);
+
+        // [i32 2][i32] 3 x f64 [i32][str loader plugin][i32 format version][i32][i32] 6 x f64 [i32][str][i32][str source path]
+        // 3 x f64, 4 x f64 (the source's plan box), [i32][i32]
+        w.Int(trailerTag).Int(0).Double(0).Double(0).Double(0).Int(0);
+        w.Str("Loader").Int(448).Int(0).Int(1);
+        w.Double(0).Double(0).Double(1).Double(0).Double(1).Double(0);
+        w.Int(0).Str(null).Int(1).Str("dir/" + name);
+        w.Double(0).Double(1).Double(double.Epsilon);
+        w.Double(10).Double(20).Double(30).Double(40);
+        return w.Int(1).Int(0);
     }
 
     // A group whose one leaf holds a three-item class-86 tab.

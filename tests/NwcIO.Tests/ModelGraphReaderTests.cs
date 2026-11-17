@@ -195,12 +195,18 @@ public class ModelGraphReaderTests
         Assert.Equal(FormatVectors.F1, SyntheticFragments.Build(new(2, new(10, 0, 0), 1, 2, 4, Rec: 1), new(7, Vector3d.Zero, -1, 2, 4, SharesGeometryOf: 0)));
 
     [Fact]
-    public void Open_PartitionHierarchy_NeedsBuildSceneTreeOff()
+    public void Open_PartitionHierarchy_LinksMeshesToThePartitionLeaves()
     {
-        Assert.Throws<NotSupportedException>(() => NwcDocument.Open(new MemoryStream(PartitionFile())));
-        var doc = NwcDocument.Open(new MemoryStream(PartitionFile()), new NwcReaderOptions { BuildSceneTree = false });
+        var doc = NwcDocument.Open(new MemoryStream(PartitionFile()));
+        var partition = doc.RootNode!.Children.Single();
+        Assert.Equal(("P", "LcOaPartition"), (partition.Name, partition.Class));
         Assert.Equal(2, doc.Meshes.Count);
-        Assert.All(doc.Meshes, m => Assert.Null(m.Node));
+        Assert.All(doc.Meshes, m => Assert.Equal(22, m.Node!.Tag));
+        Assert.Equal([2, 7], doc.Meshes.Select(m => m.Node!.Id));
+
+        var withoutTree = NwcDocument.Open(new MemoryStream(PartitionFile()), new NwcReaderOptions { BuildSceneTree = false });
+        Assert.Equal(2, withoutTree.Meshes.Count);
+        Assert.All(withoutTree.Meshes, m => Assert.Null(m.Node));
     }
 
     [Theory]
@@ -252,9 +258,9 @@ public class ModelGraphReaderTests
         Assert.Throws<ArgumentException>(() => doc.ToByteArray());
     }
 
-    /// <summary>The hierarchy with a class-32 top-level node (the H1 bytes with the first node as class 32) + F1 + [R1].</summary>
+    /// <summary>A hierarchy with a class-32 top-level node whose leaves sit where F1's fragments point + F1 + [R1].</summary>
     internal static byte[] PartitionFile() =>
-        SyntheticNwcFile.Build(HierarchyParserTests.PartitionHierarchy(), FormatVectors.F1, [FormatVectors.R1], [120]);
+        SyntheticNwcFile.Build(HierarchyParserTests.PartitionHierarchyForF1(), FormatVectors.F1, [FormatVectors.R1], [120]);
 
     private static IEnumerable<NwcNode> Preorder(NwcNode node) => [node, .. node.Children.SelectMany(Preorder)];
 

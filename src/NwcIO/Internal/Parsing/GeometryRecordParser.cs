@@ -137,9 +137,10 @@ internal static class GeometryRecordParser
                 at = pos;
                 int w = ReadInt32(record, ref pos);
                 int bu = w & 0xFF, bv = w >> 8;
-                if (w >> 16 != 0 || bu == 0 || bv == 0)
+                // One width may be 0: that coordinate is constant over the record (seen in .nwd files saved by Navisworks 2026).
+                if (w >> 16 != 0 || (bu == 0 && bv == 0))
                 {
-                    throw Fail("UV bit widths are not two non-zero bytes", at);
+                    throw Fail("UV bit widths are not two bytes with one non-zero", at);
                 }
 
                 at = pos;
@@ -223,7 +224,9 @@ internal static class GeometryRecordParser
                 : Array.ConvertAll(Tokens(record, ref pos, p1, cpal, false), k => palette[k]);
         }
 
-        if (lines ? hasUv || normals is not null || !hasColour : normals is null || hasColour)
+        // The colour slot is optional in both classes (seen in .nwd files saved by Navisworks 2026): triangles may carry one, which is
+        // read for length and dropped, and lines may come without one, so their mesh falls back to its material colour.
+        if (lines ? hasUv || normals is not null : normals is null)
         {
             throw Fail("slot set does not match the class", pos);
         }
@@ -341,7 +344,7 @@ internal static class GeometryRecordParser
             Indices = indices,
             LineIndices = lineIndices,
             Normals = normals,
-            LineColors = lineColors,
+            LineColors = lines ? lineColors : null,
             Bounds = bounds,
         };
     }

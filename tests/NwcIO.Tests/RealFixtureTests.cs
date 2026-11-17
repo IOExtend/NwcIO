@@ -165,9 +165,9 @@ public class RealFixtureTests
 
     private static string PathOf(int index) => TestFiles.EnumerateAll(includeFederations: true)[index];
 
-    // A .nwd holds partition nodes the scene-tree builder rejects, so only .nwc is opened with a tree.
+    // A .nwc or .nwd is opened with its tree (a .nwd's partition nodes included); a federation without.
     private static NwcDocument Open(string path) =>
-        NwcDocument.Open(path, new NwcReaderOptions { BuildSceneTree = IsNwc(path) });
+        NwcDocument.Open(path, new NwcReaderOptions { BuildSceneTree = !path.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase) });
 
     private static NwcDocument OpenFixture(string path, FixtureExpectations? expectations = null)
     {

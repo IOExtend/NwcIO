@@ -45,16 +45,22 @@ public sealed class NwcSceneReaderTests
             NwcSceneReader.Read(Doc(RevitSample.Build(), new NwcReaderOptions { BuildSceneTree = false }), new() { ModelKey = "k" })).Message);
 
     [Fact]
-    public void Read_PartitionTree_ThrowsNotSupportedWithTheAdapterReason()
+    public void Read_PartitionTree_ConvertsThePartitionAsAGroup()
     {
-        // [k=1][0][root][n=1], a class-32 top-level node: [i32 0] + a class-53 body + 16 zero bytes (as HierarchyParserTests.PartitionHierarchy)
+        // [k=1][0][root][n=1], a class-32 top-level node (as HierarchyParserTests.PartitionHierarchy): an empty string + a class-53
+        // body named "P" without attributes or children + its trailer, then the hierarchy tail [1]
         var w = new LcGraphWriter().Int(1).Int(0);
-        w.ImplicitRoot(); w.Int(1); w.New(32); w.Int(0).Str("P"); w.New(52); w.Str("P").Str("LcOaPartition");
-        w.Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(0).Int(1);
+        w.ImplicitRoot(); w.Int(1); w.New(32); w.Str("").Str("P"); w.New(52); w.Str("File").Str("LcOaPartition");
+        w.Int(0).Int(0).Int(0).Int(0);
+        w.Int(2).Int(0).Double(0).Double(0).Double(0).Int(0).Str("Loader").Int(448).Int(0).Int(1);
+        w.Double(0).Double(0).Double(1).Double(0).Double(1).Double(0).Int(0).Str(null).Int(1).Str("dir/P");
+        w.Double(0).Double(1).Double(double.Epsilon).Double(10).Double(20).Double(30).Double(40).Int(1).Int(0);
+        w.Int(1);
         using var file = TempFile(SyntheticNwcFile.Build(w.ToArray(), null, [], []), "Site.nwd");
-        var ex = Assert.Throws<NotSupportedException>(() => NwcSceneReader.Read(file.Path));
-        Assert.StartsWith("NwcIO.Scene needs the scene tree: .nwd partition trees are not supported yet. ", ex.Message);
-        Assert.IsType<NotSupportedException>(ex.InnerException);
+
+        var result = NwcSceneReader.Read(file.Path);
+
+        Assert.Contains(result.Document.Elements, e => e.Name == "P");
     }
 
     [Theory]

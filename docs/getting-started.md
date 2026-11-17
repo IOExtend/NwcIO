@@ -39,8 +39,8 @@ dotnet tool install --global NwcIO.Cli
 ```csharp
 using NwcIO;
 
-// Open a .nwc file directly from disk. A .nwd whose scene tree holds partition nodes needs
-// new NwcReaderOptions { BuildSceneTree = false }, because those nodes are not decoded yet.
+// Open a .nwc file directly from disk. A .nwd opens the same way: each appended model is a
+// top-level partition node named after its source file.
 // A linked Revit model (a tree that places one element under two parents) is kept and
 // converted into separate scene models.
 var doc = NwcDocument.Open("model.nwc");
@@ -120,7 +120,7 @@ This feature is frozen (bug fixes only).
 using NwcIO;
 using NwcIO.Model.Viewer;
 
-// A .nwd is opened without its scene tree: partition nodes in the tree are not decoded yet.
+// A .nwd opened without its scene tree, when only geometry and placement are needed.
 var doc = NwcDocument.Open("construction_site.nwd", new NwcReaderOptions { BuildSceneTree = false });
 
 // Export self-contained single-file HTML WebGL viewer with 4D schedule playback

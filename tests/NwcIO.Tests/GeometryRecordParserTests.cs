@@ -95,6 +95,9 @@ public class GeometryRecordParserTests
     private static byte[] BuildR3WithUv() =>
         [.. FormatVectors.R3[..68], .. Words([102, 61, 6, 12]), .. new byte[48], .. FormatVectors.R3[72..76], .. Words([103]), .. FormatVectors.R3[80..]];
 
+    // R3 without its colour slot: R3[0..76) + colour id 0; R3[104..120) (96 bytes)
+    private static byte[] BuildR3WithoutColours() => [.. FormatVectors.R3[..76], .. Words([0]), .. FormatVectors.R3[104..]];
+
     private static void AssertRule(string rule, byte[] record)
     {
         var ex = Assert.Throws<InvalidDataException>(() => GeometryRecordParser.Parse(record, 16));
@@ -181,13 +184,23 @@ public class GeometryRecordParserTests
 
     // R1q header: w at +100, m at +104 (quantised UV, docs/format-notes.md §2.6)
     [Theory]
-    [InlineData(100, "08000000", "UV bit widths are not two non-zero bytes")] // bv = 0
-    [InlineData(100, "00080000", "UV bit widths are not two non-zero bytes")] // bu = 0
-    [InlineData(100, "08080100", "UV bit widths are not two non-zero bytes")] // w >> 16 != 0
+    [InlineData(100, "00000000", "UV bit widths are not two bytes with one non-zero")] // bu = bv = 0
+    [InlineData(100, "08080100", "UV bit widths are not two bytes with one non-zero")] // w >> 16 != 0
     [InlineData(104, "00000000", "UV value count is not in 1..p1")]           // m = 0
     [InlineData(104, "05000000", "UV value count is not in 1..p1")]           // m > p1
     public void Parse_QuantisedUvHeaderDefect_Throws(int offset, string bytes, string rule)
         => AssertRule(rule, FormatVectors.Patched(BuildR1q(), offset, Convert.FromHexString(bytes)));
+
+    // One UV width may be 0, a coordinate constant over the record (seen in .nwd files saved by Navisworks 2026): R1q with
+    // widths w at +100 and its packed word at +108 cleared, as only 16 of its bits are used
+    [Theory]
+    [InlineData("08000000")] // bv = 0
+    [InlineData("00080000")] // bu = 0
+    public void Parse_QuantisedUvOneZeroWidth_DecodesAsR1(string bytes)
+    {
+        var record = FormatVectors.Patched(FormatVectors.Patched(BuildR1q(), 100, Convert.FromHexString(bytes)), 108, new byte[4]);
+        AssertR1(GeometryRecordParser.Parse(record, 16));
+    }
 
     // Triangles with S > p1 (docs/format-notes.md §2.6): R1 with S = 4 at +116, token 03 (-> [0,1,2,3]) and 7 zero pad bytes (128 bytes)
     [Fact]
@@ -254,12 +267,29 @@ public class GeometryRecordParserTests
     public void Parse_GrammarViolation_Throws(string vector, int offset, string bytes, string rule)
         => AssertRule(rule, FormatVectors.Patched(Vector(vector), offset, Convert.FromHexString(bytes)));
 
-    // Slot sets the class forbids, each slot otherwise well formed (docs/format-notes.md §2.6)
-    [Theory]
-    [InlineData("trianglesWithColour")] // R1 + a colour slot after its normals
-    [InlineData("linesWithUv")]         // R3 + a raw UV slot before its colours
-    public void Parse_SlotSetAgainstClass_Throws(string variant)
-        => AssertRule("slot set does not match the class", variant == "trianglesWithColour" ? BuildR1WithColours() : BuildR3WithUv());
+    // A slot set the class forbids, each slot otherwise well formed (docs/format-notes.md §2.6): R3 + a raw UV slot before its colours
+    [Fact]
+    public void Parse_LinesWithUv_Throws() => AssertRule("slot set does not match the class", BuildR3WithUv());
+
+    // The colour slot is optional in both classes (seen in .nwd files saved by Navisworks 2026)
+    [Fact]
+    public void Parse_TrianglesWithColour_DecodesAsR1WithoutColours()
+    {
+        var g = GeometryRecordParser.Parse(BuildR1WithColours(), 16);
+        AssertR1(g);
+        Assert.Null(g.LineColors);
+    }
+
+    [Fact]
+    public void Parse_LinesWithoutColour_DecodesAsR3WithoutColours()
+    {
+        var r3 = GeometryRecordParser.Parse(FormatVectors.R3, 16);
+        var g = GeometryRecordParser.Parse(BuildR3WithoutColours(), 16);
+        Assert.True(g.IsLines);
+        Assert.Equal(r3.Vertices, g.Vertices);
+        Assert.Equal(r3.LineIndices, g.LineIndices);
+        Assert.Null(g.LineColors);
+    }
 
     [Fact]
     public void Parse_IdentityNormalPalette_DecodesAsR1() => AssertR1(GeometryRecordParser.Parse(BuildR1IdentityNormals(), 16));

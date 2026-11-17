@@ -26,7 +26,6 @@ public static partial class NwcSceneReader
     /// <param name="options">Conversion options; null uses the defaults.</param>
     /// <returns>The scene with a report of the conversion.</returns>
     /// <exception cref="ArgumentException"><paramref name="path"/> or <see cref="NwcSceneOptions.ModelKey"/> is empty.</exception>
-    /// <exception cref="NotSupportedException">The file's scene tree holds <c>.nwd</c> partition nodes.</exception>
     public static NwcSceneResult Read(string path, NwcSceneOptions? options = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -36,17 +35,7 @@ public static partial class NwcSceneReader
             throw new ArgumentException("NwcSceneOptions.ModelKey must not be empty; leave it null to use the file name.", nameof(options));
         }
 
-        NwcDocument document;
-        try
-        {
-            document = NwcDocument.Open(path);
-        }
-        catch (NotSupportedException ex)
-        {
-            throw new NotSupportedException("NwcIO.Scene needs the scene tree: .nwd partition trees are not supported yet. " + ex.Message, ex);
-        }
-
-        return Convert(document, key, path, options);
+        return Convert(NwcDocument.Open(path), key, path, options);
     }
 
     /// <summary>

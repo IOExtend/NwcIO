@@ -203,7 +203,6 @@ public sealed class NwcAssembly
     /// Discovers and loads all .nwc models in a folder into a single federated assembly.
     /// </summary>
     /// <exception cref="InvalidDataException">A file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">A file is a .nwd whose scene tree holds partition (class-32) nodes; load with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcAssembly LoadFromDirectory(
         string directoryPath,
         string searchPattern = "*.nwc",
@@ -363,7 +362,6 @@ public sealed class NwcAssembly
     /// Opens a Navisworks File (.nwf) assembly, automatically discovering and loading its external references.
     /// </summary>
     /// <exception cref="InvalidDataException">A file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="NotSupportedException">A referenced .nwd has a scene tree with partition (class-32) nodes; open with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static NwcAssembly OpenNwf(string nwfPath, NwcReaderOptions? options = null)
         => OpenNwf(nwfPath, options, null, default);
 

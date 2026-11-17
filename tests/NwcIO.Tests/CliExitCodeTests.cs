@@ -48,7 +48,7 @@ public class CliExitCodeTests
     }
 
     [Fact]
-    public void PartitionHierarchyNwc_Exits3WithoutNoTreeAndOpensWithIt()
+    public void PartitionHierarchyNwc_OpensWithAndWithoutTree()
     {
         string root = TempRoot();
         Directory.CreateDirectory(root);
@@ -58,9 +58,8 @@ public class CliExitCodeTests
         using var error = new StringWriter();
         try
         {
-            Assert.Equal(3, NwcIO.Cli.Program.Run([path, json], errorWriter: error));
-            Assert.Contains("Use --no-tree", error.ToString());
-            Assert.False(File.Exists(json));
+            Assert.Equal(0, NwcIO.Cli.Program.Run([path, json], errorWriter: error));
+            Assert.Contains("\"LcOaPartition\"", File.ReadAllText(json));
 
             Assert.Equal(0, NwcIO.Cli.Program.Main([path, json, "--no-tree"]));
             Assert.True(File.Exists(json));
@@ -72,7 +71,7 @@ public class CliExitCodeTests
     }
 
     [Fact]
-    public void PartitionHierarchyFolder_Exits3WithoutNoTreeAndOpensWithIt()
+    public void PartitionHierarchyFolder_OpensWithAndWithoutTree()
     {
         string root = TempRoot();
         string dir = Path.Combine(root, "models");
@@ -81,7 +80,7 @@ public class CliExitCodeTests
         string glb = Path.Combine(root, "out.glb");
         try
         {
-            Assert.Equal(3, NwcIO.Cli.Program.Main([dir, glb]));
+            Assert.Equal(0, NwcIO.Cli.Program.Main([dir, glb]));
             Assert.Equal(0, NwcIO.Cli.Program.Main([dir, glb, "--no-tree"]));
             Assert.True(File.Exists(glb));
         }
