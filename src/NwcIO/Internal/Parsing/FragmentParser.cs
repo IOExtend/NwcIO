@@ -42,7 +42,7 @@ internal static class FragmentParser
 
     private sealed record Pose(Vector3d Translation, Quaterniond Rotation, double Scale);
 
-    private sealed record GeometryReference(BoundingBox3d Bounds, int Record);
+    private sealed record GeometryReference(BoundingBox3d Bounds, int Record, Vector3d Centre);
 
     private sealed class Parser
     {
@@ -93,10 +93,12 @@ internal static class FragmentParser
             _reader.ReadInt32();
             int seq = _reader.ReadInt32();
 
-            // A pose is never shared, so it is always a new object.
-            var pose = (Pose)_reader.ReadPointer(PoseClasses, _readBody, allowNull: false, allowBackReference: false)!;
+            // A pose is never shared, so it is always a new object. It may be null (seen in .nwd files saved by Navisworks 2026): the
+            // record then sits at its class-93 centre, unrotated and unscaled (docs/format-notes.md §2.4).
+            var pose = (Pose?)_reader.ReadPointer(PoseClasses, _readBody, allowBackReference: false);
             var look = (FragmentLook)_reader.ReadPointer(AppearanceClasses, _readBody, allowNull: false)!;
             var geometry = (GeometryReference)_reader.ReadPointer(GeometryClasses, _readBody, allowNull: false)!;
+            pose ??= new Pose(geometry.Centre, Quaterniond.Identity, 1.0);
             return new Fragment(seq, geometry.Record, primitiveCount, pose.Translation, pose.Rotation, pose.Scale, geometry.Bounds, look);
         }
 
@@ -152,19 +154,16 @@ internal static class FragmentParser
             return new FragmentLook(v[3], v[4], v[5], v[13]);
         }
 
-        // Class 93: [6 f32 bbox: min xyz, max xyz][3 f64 c][f32 f][key][rec]; c, f and key are dropped.
+        // Class 93: [6 f32 bbox: min xyz, max xyz][3 f64 c][f32 f][key][rec]; f and key are dropped.
         private GeometryReference ReadGeometry()
         {
             var min = new Vector3d(ReadBoxValue(), ReadBoxValue(), ReadBoxValue());
             var max = new Vector3d(ReadBoxValue(), ReadBoxValue(), ReadBoxValue());
-            for (int i = 0; i < 3; i++)
-            {
-                _reader.ReadDouble();
-            }
-
+            // c: the record's centre, as the pose translation of a posed fragment in its partition's frame.
+            var centre = new Vector3d(ReadFinite(), ReadFinite(), ReadFinite());
             _reader.ReadSingle();
             _reader.ReadInt32();
-            return new GeometryReference(new BoundingBox3d(min, max), _reader.ReadInt32());
+            return new GeometryReference(new BoundingBox3d(min, max), _reader.ReadInt32(), centre);
         }
 
         private float ReadBoxValue()

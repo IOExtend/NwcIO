@@ -87,6 +87,15 @@ public class FragmentParserTests
     [InlineData("materialNull", "null pointer in a slot that needs an object")]     // class 55 with a null material and no class-54 object
     public void Read_ObservedSlotRuleBroken_Throws(string defect, string rule) => AssertRule(rule, BuildF1(defect));
 
+    // A null pose (seen in .nwd files saved by Navisworks 2026) places the record at its class-93 centre c, here (0.5, 0.5, 0)
+    [Fact]
+    public void Read_NullPose_PlacesTheRecordAtItsCentre()
+    {
+        var f = FragmentParser.Read(BuildF1("poseNull"));
+        var box = new BoundingBox3d(new(0, 0, 0), new(1, 1, 0));
+        Assert.Equal(new Fragment(7, 1, 2, new(0.5, 0.5, 0), Quaterniond.Identity, 1.0, box, new FragmentLook(0, 0, 0, 0)), f[1]);
+    }
+
     // flags & 32 adds a class-185 slot after the material; null and a new class 185 both read as F1 does
     [Theory]
     [InlineData("extra185")]
@@ -123,6 +132,10 @@ public class FragmentParserTests
         if (variant == "sharedPose")
         {
             w.Ref(pose);
+        }
+        else if (variant == "poseNull")
+        {
+            w.Null();
         }
         else
         {

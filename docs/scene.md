@@ -89,7 +89,7 @@ A property with no text, a non-finite number, numeric text that does not parse, 
 
 ## Limits
 
-- `.nwd` partition trees (class 32) are not supported: `Read` throws `NotSupportedException`. Linked Revit placements are supported: each placement becomes its own `SceneModel`.
+- `.nwd` partition trees (class 32) are read: each partition is a group named after its source file. Linked Revit placements are supported: each placement becomes its own `SceneModel`.
 - A `.nwf` file is read like a `.nwc` by `Read(string)`: the models it refers to are not loaded, so the scene holds only the content of the file itself (`xrefs-skipped`), and its `SourceFormat` is still `nwc`. Use `Read(NwcAssembly, ...)` with `NwcAssembly.OpenNwf` to convert the component models into one scene.
 - Level elevations are written in metres when the level carries its length parameter and the unit is known; otherwise they stay null. Saved viewpoints are written when their camera is finite and the document unit is known; otherwise they are reported with `viewpoints-skipped`. File viewpoints without the writer trailer (every Navisworks file) use an approximated projection, field of view and far distance (`viewpoint-camera-approximated`), and their section planes, section box, redlines and comments are not part of the scene (`viewpoint-content-skipped`).
 - Selection sets and search sets, the TimeLiner schedule and clash tests are not converted (`selection-sets-skipped`, `timeliner-skipped`, `clash-tests-skipped`).

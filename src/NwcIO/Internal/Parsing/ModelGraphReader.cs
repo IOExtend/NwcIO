@@ -71,7 +71,7 @@ internal static class ModelGraphReader
                     guidStore = Once(guidStore, entry, GuidStoreSegment);
                     break;
                 case PartitionPropsSegment:
-                    // Only recorded: the tree reader checks them, so a .nwd fails at its first class-32 node first (docs/format-notes.md §2.2.1).
+                    // Only recorded: the tree reader checks them when it needs them (docs/format-notes.md §2.2.1).
                     props.Add(entry);
                     break;
             }
@@ -115,7 +115,6 @@ internal static class ModelGraphReader
 
     /// <summary>The tree first, so a tree that cannot be read fails before any geometry work; then geometry, fragments and links.</summary>
     /// <exception cref="InvalidDataException">A segment breaks its grammar or a fragment breaks a link rule.</exception>
-    /// <exception cref="NotSupportedException">The model's scene tree holds partition (class-32) nodes; open it with <see cref="NwcReaderOptions.BuildSceneTree"/> off.</exception>
     public static ModelGraph Read(ModelSegments segments, NwcReaderOptions options, string rootName)
     {
         // The tree needs the table for element GUIDs whatever ReadGuids says.

@@ -149,8 +149,11 @@ public class PartitionPropsTests
     }
 
     [Fact]
-    public void Open_PartitionHierarchy_ThrowsNotSupportedBeforeThePropsChecks() =>
-        Assert.Throws<NotSupportedException>(() => NwcDocument.Open(new MemoryStream(PartitionFileWithBrokenToc())));
+    public void Open_PartitionHierarchy_ChecksThePropsEntry()
+    {
+        var ex = Assert.Throws<InvalidDataException>(() => NwcDocument.Open(new MemoryStream(PartitionFileWithBrokenToc())));
+        Assert.Contains("LcOaPartitionProps", ex.Message);
+    }
 
     [Fact]
     public void Open_WithoutTree_ChecksNoPropsEntry()
