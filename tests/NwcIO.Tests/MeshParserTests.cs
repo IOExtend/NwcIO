@@ -715,6 +715,42 @@ public class MeshParserTests
         Assert.Equal([5, 0, 2], meshes.Select(mesh => mesh.Id));
     }
 
+    [Fact]
+    public void Parse_ManyDuplicateTrailerIds_AreAllUnique()
+    {
+        const int count = 2000;
+        var records = Enumerable.Range(0, count)
+            .Select(i => TrailerRecord(i, meshId: 5, [0, 1, 2], "M"))
+            .ToArray();
+
+        var meshes = ParseRecords(records);
+
+        Assert.Equal(count, meshes.Count);
+        Assert.Equal(count, meshes.Select(mesh => mesh.Id).Distinct().Count());
+        Assert.Equal(5, meshes[0].Id);
+    }
+
+    [Fact]
+    public void MeshIdAllocator_DuplicatesOfOccupiedRange_ProbeLinearly()
+    {
+        var allocator = new MeshParser.MeshIdAllocator();
+        for (int id = 1000; id < 2000; id++)
+        {
+            allocator.Claim(id, id);
+        }
+
+        var claimed = new HashSet<int>();
+        for (int i = 0; i < 1000; i++)
+        {
+            claimed.Add(allocator.Claim(1000, fallbackStart: 1000 + i));
+        }
+
+        Assert.Equal(1000, claimed.Count);
+        Assert.DoesNotContain(claimed, id => id is >= 1000 and < 2000);
+        // A probe restarted from fallbackStart for every duplicate needs about 1,000,000 tries here.
+        Assert.True(allocator.Probes < 10_000, $"Probes: {allocator.Probes}");
+    }
+
     [Theory]
     [InlineData("magic")]
     [InlineData("indexCount")]
