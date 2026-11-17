@@ -597,7 +597,7 @@ public sealed class NwcAssembly
         var manifest = new Clash.NwcNwfManifest(Name);
         for (int i = 0; i < Models.Count; i++)
         {
-            var p = Models[i].LoadedPath;
+            var p = Models[i].GetLoadedPath();
             if (string.IsNullOrEmpty(p))
             {
                 p = Models[i].FileInfo.SourcePath;

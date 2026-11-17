@@ -649,6 +649,7 @@ public sealed class NwcSceneReaderTests
             Model("A.nwc", 1, 0),
             Model("B.nwc", 2, 10));
 
+        Assert.All(assembly.Models, model => Assert.Null(model.GetLoadedPath()));
         var result = NwcSceneReader.Read(assembly, new NwcSceneOptions { LengthUnit = NwcLengthUnit.Meters });
 
         Assert.Equal([1, 2], result.Document.Models.Select(m => m.Id));
@@ -921,6 +922,11 @@ public sealed class NwcSceneReaderTests
             var assembly = NwcAssembly.LoadFromDirectory(directory);
             var result = Valid(NwcSceneReader.Read(assembly));
 
+            Assert.All(assembly.Models, model =>
+            {
+                Assert.Equal("Tower.rvt", model.FileInfo.SourcePath);
+                Assert.Equal(Path.GetFullPath(directory), Path.GetDirectoryName(model.GetLoadedPath()));
+            });
             Assert.Equal(["Arch.nwc", "Struct.nwc"],
                 result.Document.Models.Select(model => model.Key).OrderBy(key => key, StringComparer.Ordinal));
             Assert.All(result.Document.Models, model =>

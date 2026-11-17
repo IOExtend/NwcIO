@@ -112,7 +112,11 @@ public sealed class NwcDocument
 
     internal NwcContainer Container { get; }
 
-    internal string? LoadedPath { get; private set; }
+    private string? _loadedPath;
+
+    /// <summary>Returns the full path passed to the file-based reader, or <see langword="null"/> for a stream or an in-memory document.</summary>
+    /// <remarks>This is the location of the Navisworks file. <see cref="NwcFileInfo.SourcePath"/> comes from the file's metadata.</remarks>
+    public string? GetLoadedPath() => _loadedPath;
 
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
@@ -138,7 +142,7 @@ public sealed class NwcDocument
         cancellationToken.ThrowIfCancellationRequested();
         using var stream = File.OpenRead(path);
         var document = Open(stream, options, Path.GetFileNameWithoutExtension(path), progress, cancellationToken);
-        document.LoadedPath = Path.GetFullPath(path);
+        document._loadedPath = Path.GetFullPath(path);
         return document;
     }
 
