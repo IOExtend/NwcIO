@@ -282,10 +282,13 @@ internal static class MeshParser
     }
 
     /// <summary>Tracks claimed mesh ids. Fallback probing resumes from the last fallback, so many duplicates stay linear.</summary>
-    private sealed class MeshIdAllocator
+    internal sealed class MeshIdAllocator
     {
         private readonly HashSet<int> _used = [];
         private int _nextFallback = int.MinValue;
+
+        /// <summary>Number of fallback candidates tried so far (exposed for complexity tests).</summary>
+        public int Probes { get; private set; }
 
         public int Claim(int id, int fallbackStart)
         {
@@ -295,9 +298,11 @@ internal static class MeshParser
             }
 
             id = Math.Max(fallbackStart, _nextFallback);
+            Probes++;
             while (!_used.Add(id))
             {
                 id++;
+                Probes++;
             }
 
             _nextFallback = id + 1;
