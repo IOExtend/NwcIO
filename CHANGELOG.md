@@ -4,6 +4,8 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-17
+
 ### Added
 - Cancellation and progress overloads for `.nwc` and JSON export: `NwcDocument.Save`, `NwcDocument.SaveJson` and `NwcAssembly.SaveJson` (path and stream). Existing signatures are unchanged; the new overloads report `export-nwc` and `export-json` phases and check the token before and after the exporter. `NwcDocument.SaveAsync` passes the token into the `.nwc` overloads. `NwcAssembly.SaveJson(path, ...)` writes a temporary file and moves it over the target, so a cancelled export keeps an existing file.
 - Cancellation and progress overloads for `NwcDocument.Open`, `NwcAssembly.LoadFromDirectory` (also with several patterns and recursion) and `NwcAssembly.OpenNwf` and `NwcAssembly.OpenManifest`, plus `OpenAsync`, `LoadFromDirectoryAsync`, `OpenNwfAsync` and `SaveAsync` (`.nwc`) wrappers on `Task.Run`. `NwcProgress` reports `read-container`, `read-geometry`, `open` and per-model `load-models` counts (`OpenNwf` counts every reference, so `Completed` reaches `Total`). The token is checked between phases and models; a running container read is not interrupted.
@@ -32,6 +34,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - The `NwcIO` and `NwcIO.Cli` package tags no longer name the frozen viewer and coordination extras (`clash-detection`, `clash-matrix`, `clash-grouping`, `model-diff`, `diff`, `grid-system`, `grids`, `measure`, `measurement`, `bcf`, `bcfzip`, `html-viewer`, `webgl`, `spatial-index`, `bvh`), and the `NwcIO.Scene` package has its own tags (`navisworks`, `nwc`, `ioscene`, `scene`, `bim`).
 
 ### Fixed
+- Duplicate mesh ids on the lenient TOC reader path resume the free-id search from the last fallback, keeping probing linear for files with many duplicates. A deterministic probe-count test guards against quadratic regression. (#248)
 - The saved-view reader now accepts perspective records (`projection = 0`) as well as orthographic ones and sets `NwcCamera.Projection` from the stored flag.
 - The CLI `--report` for a `.nwf` input prints `Total Materials:`, and the one-line `.nwf` summary counts the materials, as the folder report already did.
 - `NwcDocument.Save` throws `ArgumentException` naming the property when a property record has a value type outside 0..13 (it used to write a 4-byte zero that corrupted the stream) or an `IntValue` outside the 32-bit range for types 0, 2 and 3.
