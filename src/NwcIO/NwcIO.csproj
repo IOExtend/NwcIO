@@ -11,7 +11,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="NwcIO.Tests" />
-    <InternalsVisibleTo Include="NwcIO.Scene" />
     <InternalsVisibleTo Include="NwcIO.Scene.Tests" />
     <InternalsVisibleTo Include="NwcIO.Cli" />
   </ItemGroup>

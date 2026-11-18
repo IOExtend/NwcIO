@@ -30,6 +30,9 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 | `Vector3d`, `Quaterniond`, `BoundingBox3d`, `RgbaColor` | Double-precision geometry primitives and RGBA colour. |
 | `NwcClash` | Simple pairwise clash check between two meshes. Frozen: bug fixes only. |
 
+`NwcDocument.GetLoadedPath()` returns the full path of a document opened by filename. It returns `null` for
+documents opened from a stream or created in memory. `NwcFileInfo.SourcePath` is the source path stored in the file.
+
 ## Coordination & Clash Detection (`NwcIO.Model.Clash`)
 
 | Type | Description |

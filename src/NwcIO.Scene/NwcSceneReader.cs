@@ -119,7 +119,7 @@ public static partial class NwcSceneReader
                     nameof(assembly));
             }
 
-            var result = ConvertInto(scene, document, key, document.LoadedPath, options, modelId: scene.Models.Count + 1, usedKeys, nextSuffix);
+            var result = ConvertInto(scene, document, key, document.GetLoadedPath(), options, modelId: scene.Models.Count + 1, usedKeys, nextSuffix);
             diagnostics.AddRange(result.Diagnostics.Select(d => new SceneDiagnostic(
                 d.Severity,
                 d.Code,
@@ -170,7 +170,7 @@ public static partial class NwcSceneReader
         string.Join(", ", references.Take(5).Select(r => r.EffectivePath)) + (references.Count > 5 ? $" and {references.Count - 5} more" : "");
 
     private static string? DocumentPath(NwcDocument document) =>
-        document.LoadedPath ?? document.FileInfo.SourcePath;
+        document.GetLoadedPath() ?? document.FileInfo.SourcePath;
 
     private static string ModelKey(
         NwcDocument document,
