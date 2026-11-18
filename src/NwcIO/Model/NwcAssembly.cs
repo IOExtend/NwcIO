@@ -1,5 +1,4 @@
 using NwcIO.Internal.Json;
-using NwcIO.Model.Spatial;
 
 namespace NwcIO.Model;
 
@@ -9,7 +8,6 @@ namespace NwcIO.Model;
 /// </summary>
 public sealed partial class NwcAssembly
 {
-    private NwcSpatialIndex? _spatialIndex;
     private readonly Dictionary<NwcMesh, int> _meshModelIndexes;
 
     public string Name { get; }
@@ -61,11 +59,6 @@ public sealed partial class NwcAssembly
     /// <see cref="OpenNwf"/>; empty for assemblies built otherwise.
     /// </summary>
     public IReadOnlyList<NwcXRef> SkippedXRefs { get; internal set; } = [];
-
-    /// <summary>
-    /// Gets the spatial acceleration index (BVH) over all meshes across all contributing models.
-    /// </summary>
-    public NwcSpatialIndex SpatialIndex => _spatialIndex ??= new NwcSpatialIndex(AllMeshes);
 
     private NwcAssembly(
         string name,
@@ -406,7 +399,7 @@ public sealed partial class NwcAssembly
             return copy;
         }
 
-        return NwcDocument.Create(
+        return NwcDocument.CreateNative(
             fileInfo: new NwcFileInfo
             {
                 SourcePath = $"{Name}.nwc",

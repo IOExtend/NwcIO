@@ -4,11 +4,58 @@ namespace NwcIO;
 
 public sealed partial class NwcDocument
 {
+    private Model.Spatial.NwcSpatialIndex? _spatialIndex;
+
+    /// <summary>3D spatial acceleration index (BVH) over meshes for raycasting and spatial selection.</summary>
+    public Model.Spatial.NwcSpatialIndex SpatialIndex => _spatialIndex ??= new Model.Spatial.NwcSpatialIndex(Meshes);
+
+    // Use the same snapshot as SpatialIndex when both APIs are available.
+    partial void GetIndexedBounds(ref BoundingBox3d? bounds) => bounds = SpatialIndex.Bounds;
+
     /// <summary>Configured Clash Detective tests and results for this document.</summary>
     public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
 
     /// <summary>Spatial grid system (axes and levels) associated with the document.</summary>
     public Model.Grids.NwcGridSystem? GridSystem { get; set; }
+
+    /// <summary>Navisworks Appearance Profiler color/transparency rules associated with the document.</summary>
+    public Model.Appearance.NwcAppearanceProfiler? AppearanceProfiler { get; set; }
+
+    /// <summary>Applies an appearance profiler to colorize the document based on property rules.</summary>
+    /// <returns>The total number of scene nodes and meshes whose appearance was overridden.</returns>
+    public int ApplyAppearanceProfiler(Model.Appearance.NwcAppearanceProfiler profiler)
+    {
+        ArgumentNullException.ThrowIfNull(profiler);
+        AppearanceProfiler = profiler;
+        return profiler.Apply(this);
+    }
+
+    /// <summary>
+    /// Creates a new <see cref="NwcDocument"/> programmatically from components.
+    /// </summary>
+    public static NwcDocument Create(
+        NwcFileInfo? fileInfo = null,
+        IEnumerable<NwcMesh>? meshes = null,
+        IEnumerable<NwcTransform>? transforms = null,
+        IEnumerable<NwcSavedViewpoint>? savedViewpoints = null,
+        IEnumerable<Guid>? guids = null,
+        IEnumerable<NwcPropertyRecord>? propertyRecords = null,
+        IEnumerable<NwcMaterial>? materials = null,
+        NwcNode? rootNode = null,
+        NwcXRefTable? xRefs = null,
+        NwcDbCacheDirectory? dbCache = null,
+        IEnumerable<Model.Sets.NwcSetItem>? selectionSets = null,
+        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null,
+        Model.Appearance.NwcAppearanceProfiler? appearanceProfiler = null)
+    {
+        var doc = CreateNative(fileInfo, meshes, transforms, savedViewpoints, guids, propertyRecords,
+            materials, rootNode, xRefs, dbCache, selectionSets, timeLiner);
+        if (appearanceProfiler is not null)
+        {
+            doc.ApplyAppearanceProfiler(appearanceProfiler);
+        }
+        return doc;
+    }
 
     /// <summary>Exports the document appearance profiler rules to a Navisworks XML format (.xml).</summary>
     public void ExportAppearanceProfilerXml(string path)

@@ -191,8 +191,8 @@ NwcIO reads and writes its own format. These extras are frozen: they receive bug
 JSON export (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`) is not frozen: it is core and grows with the reader.
 
 For viewing through [IOViewer](https://github.com/IOExtend/IOViewer), use `NwcIO.Scene` in .NET or export the scene with
-`nwcio model.nwc --scene model.scene.json`. The [IOScene tools source previews](https://github.com/IOExtend/IOScene/blob/main/docs/tools.md)
-provide a shared GLB writer in `IOScene.Formats` and coordination queries and BCF export in `IOCoord`. The existing frozen
+`nwcio model.nwc --scene model.scene.json`. The [IOScene tool previews](https://github.com/IOExtend/IOScene/blob/main/docs/tools.md)
+provide shared GLB and OBJ writers in `IOScene.Formats` and coordination queries and BCF export in `IOCoord`. The existing frozen
 features stay in the regular `NwcIO` package and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
 
 ## Build from source and tests

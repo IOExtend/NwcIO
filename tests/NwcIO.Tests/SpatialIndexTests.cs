@@ -20,6 +20,19 @@ public class SpatialIndexTests
     }
 
     [Fact]
+    public void DocumentBounds_UseTheSameSnapshotAsTheSpatialIndex()
+    {
+        var mesh = Assert.Single(CreateTestMeshes(1));
+        var document = new NwcDocumentBuilder().AddMesh(mesh).Build();
+        var original = document.SpatialIndex.Bounds;
+
+        mesh.Transform = new NwcTransform { Id = 1, Translation = new Vector3d(20, 0, 0) };
+
+        Assert.NotEqual(original, mesh.GetWorldBoundingBox());
+        Assert.Equal(original, document.BoundingBox);
+    }
+
+    [Fact]
     public void QueryBox_FindsIntersectingMeshes()
     {
         var meshes = CreateTestMeshes(20);

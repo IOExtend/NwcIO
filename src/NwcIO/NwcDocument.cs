@@ -86,32 +86,27 @@ public sealed partial class NwcDocument
     /// <summary>4D TimeLiner construction simulation schedule.</summary>
     public Model.TimeLiner.NwcTimeLinerSchedule? TimeLiner { get; set; }
 
-    /// <summary>Navisworks Appearance Profiler color/transparency rules associated with the document.</summary>
-    public Model.Appearance.NwcAppearanceProfiler? AppearanceProfiler { get; set; }
-
-    /// <summary>Applies an appearance profiler to colorize the document based on property rules.</summary>
-    /// <returns>The total number of scene nodes and meshes whose appearance was overridden.</returns>
-    public int ApplyAppearanceProfiler(Model.Appearance.NwcAppearanceProfiler profiler)
-    {
-        ArgumentNullException.ThrowIfNull(profiler);
-        AppearanceProfiler = profiler;
-        return profiler.Apply(this);
-    }
-
     /// <summary>Reader diagnostics for data that was skipped or substituted.</summary>
     public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
 
     /// <summary>Gets the total 3D bounding box over all meshes in the document.</summary>
-    public BoundingBox3d BoundingBox => SpatialIndex.Bounds;
+    public BoundingBox3d BoundingBox
+    {
+        get
+        {
+            BoundingBox3d? indexedBounds = null;
+            GetIndexedBounds(ref indexedBounds);
+            return indexedBounds ?? (_bounds ??= Meshes.Aggregate(BoundingBox3d.Empty,
+                static (bounds, mesh) => bounds.Union(mesh.GetWorldBoundingBox())));
+        }
+    }
 
     /// <summary>Gets the primary/default viewpoint of the document.</summary>
     public NwcSavedViewpoint? DefaultViewpoint =>
         SavedViewpoints.Count > 0 ? SavedViewpoints[0] : (!BoundingBox.IsEmpty ? NwcSavedViewpoint.CreateDefault(BoundingBox) : null);
 
-    private Model.Spatial.NwcSpatialIndex? _spatialIndex;
-
-    /// <summary>3D spatial acceleration index (BVH) over meshes for raycasting and spatial selection.</summary>
-    public Model.Spatial.NwcSpatialIndex SpatialIndex => _spatialIndex ??= new Model.Spatial.NwcSpatialIndex(Meshes);
+    private BoundingBox3d? _bounds;
+    partial void GetIndexedBounds(ref BoundingBox3d? bounds);
 
     internal NwcContainer Container { get; }
 
@@ -361,10 +356,7 @@ public sealed partial class NwcDocument
         return document;
     }
 
-    /// <summary>
-    /// Creates a new <see cref="NwcDocument"/> programmatically from components.
-    /// </summary>
-    public static NwcDocument Create(
+    internal static NwcDocument CreateNative(
         NwcFileInfo? fileInfo = null,
         IEnumerable<NwcMesh>? meshes = null,
         IEnumerable<NwcTransform>? transforms = null,
@@ -376,8 +368,7 @@ public sealed partial class NwcDocument
         NwcXRefTable? xRefs = null,
         NwcDbCacheDirectory? dbCache = null,
         IEnumerable<Model.Sets.NwcSetItem>? selectionSets = null,
-        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null,
-        Model.Appearance.NwcAppearanceProfiler? appearanceProfiler = null)
+        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null)
     {
         var fi = fileInfo ?? new NwcFileInfo { SourcePath = "Model.rvt", LoaderPlugin = "LcOpRevitExport", SourceTimestampUtc = DateTime.UtcNow };
         if (fi.LengthUnit == NwcLengthUnit.Unknown)
@@ -400,12 +391,7 @@ public sealed partial class NwcDocument
             TrailingGap = 0,
         };
 
-        var doc = new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
-        if (appearanceProfiler is not null)
-        {
-            doc.ApplyAppearanceProfiler(appearanceProfiler);
-        }
-        return doc;
+        return new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
     }
 
     /// <summary>
