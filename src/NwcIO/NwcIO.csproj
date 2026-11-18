@@ -9,6 +9,14 @@
     <PackageValidationBaselineVersion>0.12.1</PackageValidationBaselineVersion>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(BuildNativeCoreOnly)' == 'true'">
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(BuildNativeCoreOnly)' == 'true'">
+    <Compile Remove="Compatibility/**/*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="NwcIO.Tests" />
     <InternalsVisibleTo Include="NwcIO.Scene.Tests" />

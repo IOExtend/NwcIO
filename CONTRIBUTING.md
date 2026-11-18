@@ -26,12 +26,21 @@ Report security vulnerabilities privately through the **Security** tab.
 ## Library boundaries
 
 The native reader, writer and JSON output follow the Navisworks file model.
-The frozen convenience methods on `NwcDocument` and `NwcAssembly` are in
-`src/NwcIO/Compatibility`. They keep their existing signatures and assembly
-so applications can continue using them while replacements are developed.
+The frozen exports, viewer, coordination and XML federation manifest live in
+`src/NwcIO/Compatibility`. The regular library keeps their signatures,
+namespaces and assembly identity. Binary NWF reading stays with the engine.
 Keep new native-format operations with the reader or writer.
 The CLI uses the public APIs of NwcIO and NwcIO.Scene. Command-specific
 presentation, such as model labels in raycast output, belongs to the CLI.
+
+CI also compiles the native library and its scene adapter with the compatibility
+sources excluded.
+Use a separate artifact path for this compile check. It keeps the regular
+build available for testing and produces no NuGet package.
+
+```sh
+dotnet build src/NwcIO.Scene/NwcIO.Scene.csproj -c Release -p:BuildNativeCoreOnly=true --artifacts-path ./artifacts/native-core-check
+```
 
 ## Test Fixtures
 

@@ -5,7 +5,7 @@ namespace NwcIO;
 /// <summary>
 /// A fluent builder for programmatically creating new <see cref="NwcDocument"/> instances.
 /// </summary>
-public sealed class NwcDocumentBuilder
+public sealed partial class NwcDocumentBuilder
 {
     private readonly NwcFileInfo _fileInfo = new();
     private readonly List<NwcMesh> _meshes = [];
@@ -15,7 +15,6 @@ public sealed class NwcDocumentBuilder
     private readonly List<NwcPropertyRecord> _propertyRecords = [];
     private readonly List<NwcMaterial> _materials = [];
     private readonly List<Model.Sets.NwcSetItem> _selectionSets = [];
-    private readonly List<Model.Clash.NwcClashTest> _clashTests = [];
     private Model.TimeLiner.NwcTimeLinerSchedule? _timeLiner;
     private Model.Appearance.NwcAppearanceProfiler? _appearanceProfiler;
     private NwcNode? _rootNode;
@@ -152,16 +151,6 @@ public sealed class NwcDocumentBuilder
     }
 
     /// <summary>
-    /// Adds a Clash Detective test to the document.
-    /// </summary>
-    public NwcDocumentBuilder AddClashTest(Model.Clash.NwcClashTest test)
-    {
-        ArgumentNullException.ThrowIfNull(test);
-        _clashTests.Add(test);
-        return this;
-    }
-
-    /// <summary>
     /// Builds and returns the constructed <see cref="NwcDocument"/>.
     /// </summary>
     public NwcDocument Build()
@@ -178,7 +167,9 @@ public sealed class NwcDocumentBuilder
             selectionSets: _selectionSets,
             timeLiner: _timeLiner,
             appearanceProfiler: _appearanceProfiler);
-        doc.ClashTests.AddRange(_clashTests);
+        AddConfiguredClashTests(doc);
         return doc;
     }
+
+    partial void AddConfiguredClashTests(NwcDocument document);
 }

@@ -45,9 +45,6 @@ public sealed partial class NwcAssembly
     /// <summary>Selection Sets and Search Sets defined in the federated assembly.</summary>
     public List<Sets.NwcSetItem> SelectionSets { get; } = [];
 
-    /// <summary>Multi-discipline clash coordination matrix associated with the assembly.</summary>
-    public Clash.NwcClashMatrix? ClashMatrix { get; set; }
-
     /// <summary>Diagnostics from contributing models plus assembly-level issues such as unresolved references.</summary>
     public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
 
@@ -278,85 +275,6 @@ public sealed partial class NwcAssembly
     }
 
     /// <summary>
-    /// Opens a federation manifest (.nwf.xml) and loads the .nwc/.nwd models it lists.
-    /// Relative paths are resolved under the manifest folder; an absolute path is tried as written first
-    /// and then by its trailing segments under the manifest folder. Backslashes in stored paths are read as
-    /// directory separators on every platform. Only the model list is read: viewpoints, sets, appearance
-    /// rules and clash tests of the manifest are not loaded.
-    /// Missing and unsupported entries are recorded on <see cref="UnresolvedXRefs"/>
-    /// and <see cref="SkippedXRefs"/>.
-    /// </summary>
-    /// <exception cref="FileNotFoundException">The manifest is missing, or none of its models could be resolved.</exception>
-    public static NwcAssembly OpenManifest(string manifestPath, NwcReaderOptions? options = null)
-        => OpenManifest(manifestPath, options, null, default);
-
-    /// <summary>
-    /// Opens a federation manifest with cancellation and progress for each listed model.
-    /// </summary>
-    public static NwcAssembly OpenManifest(
-        string manifestPath,
-        NwcReaderOptions? options,
-        IProgress<NwcProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(manifestPath);
-        if (!File.Exists(manifestPath))
-        {
-            throw new FileNotFoundException($"Manifest file not found: {manifestPath}", manifestPath);
-        }
-
-        var manifest = Clash.NwcNwfManifest.Open(manifestPath);
-        var baseDir = Path.GetDirectoryName(Path.GetFullPath(manifestPath)) ?? ".";
-        var loadedDocs = new List<NwcDocument>();
-        var loadedPaths = new HashSet<string>(OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal);
-        var unresolved = new List<NwcXRef>();
-        var skipped = new List<NwcXRef>();
-
-        int processed = 0;
-        foreach (var modelPath in manifest.ModelPaths)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(new NwcProgress("load-models", processed++, manifest.ModelPaths.Count));
-            var xref = new NwcXRef(modelPath.Replace('\\', Path.DirectorySeparatorChar), "");
-            if (!xref.TryResolve(baseDir, out string resolved))
-            {
-                unresolved.Add(xref);
-                continue;
-            }
-
-            if (!resolved.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) &&
-                !resolved.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
-            {
-                skipped.Add(xref);
-                continue;
-            }
-
-            if (loadedPaths.Add(Path.GetFullPath(resolved)))
-            {
-                loadedDocs.Add(NwcDocument.Open(resolved, options, null, cancellationToken));
-            }
-        }
-
-        if (loadedDocs.Count == 0)
-        {
-            throw new FileNotFoundException(
-                $"No .nwc or .nwd models listed in manifest '{manifestPath}' could be resolved.");
-        }
-
-        progress?.Report(new NwcProgress("load-models", manifest.ModelPaths.Count, manifest.ModelPaths.Count));
-        string fileName = Path.GetFileNameWithoutExtension(manifestPath);
-        string assemblyName = fileName.EndsWith(".nwf", StringComparison.OrdinalIgnoreCase)
-            ? Path.GetFileNameWithoutExtension(fileName)
-            : fileName;
-        var assembly = Create(assemblyName, loadedDocs);
-        assembly.UnresolvedXRefs = unresolved;
-        assembly.SkippedXRefs = skipped;
-        return assembly;
-    }
-
-    /// <summary>
     /// Opens a Navisworks File (.nwf) assembly, automatically discovering and loading its external references.
     /// </summary>
     /// <exception cref="InvalidDataException">A file is not an LcUStream container, or its DbCache directory names model segments that break the format.</exception>
@@ -461,47 +379,6 @@ public sealed partial class NwcAssembly
         IProgress<NwcProgress>? progress = null,
         CancellationToken cancellationToken = default)
         => Task.Run(() => OpenNwf(nwfPath, options, progress, cancellationToken), cancellationToken);
-
-    /// <summary>Creates a Navisworks Federated Project Manifest (NWF) representation of this assembly.</summary>
-    public Clash.NwcNwfManifest ToNwfManifest()
-    {
-        var manifest = new Clash.NwcNwfManifest(Name);
-        for (int i = 0; i < Models.Count; i++)
-        {
-            var p = Models[i].GetLoadedPath();
-            if (string.IsNullOrEmpty(p))
-            {
-                p = Models[i].FileInfo.SourcePath;
-            }
-            if (!string.IsNullOrEmpty(p))
-            {
-                manifest.ModelPaths.Add(p);
-            }
-        }
-        manifest.SavedViewpoints.AddRange(SavedViewpoints);
-        manifest.Sets.AddRange(SelectionSets);
-        foreach (var model in Models)
-        {
-            if (model.AppearanceProfiler is not null)
-            {
-                manifest.AppearanceProfiler.Rules.AddRange(model.AppearanceProfiler.Rules);
-            }
-        }
-        manifest.ClashTests.AddRange(ClashTests);
-        return manifest;
-    }
-
-    /// <summary>Saves the assembly coordination manifest as a Navisworks NWF coordination file (.nwf.xml).</summary>
-    public void SaveNwf(string path)
-    {
-        var manifest = ToNwfManifest();
-        var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
-        for (var i = 0; i < manifest.ModelPaths.Count; i++)
-        {
-            manifest.ModelPaths[i] = Path.GetRelativePath(directory, manifest.ModelPaths[i]);
-        }
-        manifest.Save(path);
-    }
 
     /// <summary>
     /// Builds a single document that carries the assembly scene tree, meshes with their transforms,

@@ -89,14 +89,17 @@ public sealed partial class NwcDocument
     /// <summary>Navisworks Appearance Profiler color/transparency rules associated with the document.</summary>
     public Model.Appearance.NwcAppearanceProfiler? AppearanceProfiler { get; set; }
 
-    /// <summary>Configured Clash Detective tests and results for this document.</summary>
-    public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
+    /// <summary>Applies an appearance profiler to colorize the document based on property rules.</summary>
+    /// <returns>The total number of scene nodes and meshes whose appearance was overridden.</returns>
+    public int ApplyAppearanceProfiler(Model.Appearance.NwcAppearanceProfiler profiler)
+    {
+        ArgumentNullException.ThrowIfNull(profiler);
+        AppearanceProfiler = profiler;
+        return profiler.Apply(this);
+    }
 
     /// <summary>Reader diagnostics for data that was skipped or substituted.</summary>
     public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
-
-    /// <summary>Spatial grid system (axes and levels) associated with the document.</summary>
-    public Model.Grids.NwcGridSystem? GridSystem { get; set; }
 
     /// <summary>Gets the total 3D bounding box over all meshes in the document.</summary>
     public BoundingBox3d BoundingBox => SpatialIndex.Bounds;
