@@ -524,10 +524,7 @@ public static partial class NwcSceneReader
             diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "timeliner-skipped", "The TimeLiner schedule is not converted."));
         }
 
-        if (document.ClashTests.Count > 0)
-        {
-            diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "clash-tests-skipped", "Clash tests are not converted."));
-        }
+        ReportLegacyClashTests(document, diagnostics);
 
         if (propertyValuesSkipped > 0)
         {
@@ -547,6 +544,8 @@ public static partial class NwcSceneReader
             MetresPerUnit = metresPerUnit,
         };
     }
+
+    static partial void ReportLegacyClashTests(NwcDocument document, List<SceneDiagnostic> diagnostics);
 
     // OST_Grids (-2000220) in the element's own LcRevitData_Element tab.
     private static bool IsGrid(NwcNode node) =>

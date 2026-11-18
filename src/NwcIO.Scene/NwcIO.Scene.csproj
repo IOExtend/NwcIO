@@ -8,6 +8,14 @@
     <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(BuildNativeCoreOnly)' == 'true'">
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(BuildNativeCoreOnly)' == 'true'">
+    <Compile Remove="Compatibility/**/*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\NwcIO\NwcIO.csproj" />
     <PackageReference Include="IOScene" />

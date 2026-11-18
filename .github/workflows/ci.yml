@@ -32,7 +32,7 @@ jobs:
           path: coverage/**/coverage.cobertura.xml
           if-no-files-found: error
       - run: dotnet pack NwcIO.slnx -c Release --no-build -o artifacts
-      - run: dotnet build src/NwcIO/NwcIO.csproj -c Release -p:BuildNativeCoreOnly=true --artifacts-path native-core-check
+      - run: dotnet build src/NwcIO.Scene/NwcIO.Scene.csproj -c Release -p:BuildNativeCoreOnly=true --artifacts-path native-core-check
       - uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.os }}
