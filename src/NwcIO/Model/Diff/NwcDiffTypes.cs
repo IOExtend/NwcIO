@@ -3,7 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Xml;
-using NwcIO.Internal.Export;
+using NwcIO.Internal;
 
 namespace NwcIO.Model.Diff;
 
