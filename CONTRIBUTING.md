@@ -30,6 +30,8 @@ The frozen convenience methods on `NwcDocument` and `NwcAssembly` are in
 `src/NwcIO/Compatibility`. They keep their existing signatures and assembly
 so applications can continue using them while replacements are developed.
 Keep new native-format operations with the reader or writer.
+The CLI uses the public APIs of NwcIO and NwcIO.Scene. Command-specific
+presentation, such as model labels in raycast output, belongs to the CLI.
 
 ## Test Fixtures
 

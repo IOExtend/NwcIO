@@ -503,23 +503,6 @@ public sealed partial class NwcAssembly
         manifest.Save(path);
     }
 
-    internal string? GetModelLabel(NwcMesh mesh)
-    {
-        int modelIndex = GetModelIndex(mesh);
-        if (modelIndex < 0)
-        {
-            return null;
-        }
-
-        var model = Models[modelIndex];
-        string modelName = Path.GetFileNameWithoutExtension(model.FileInfo.SourcePath ?? string.Empty);
-        if (string.IsNullOrEmpty(modelName))
-        {
-            modelName = $"Model_{modelIndex + 1}";
-        }
-        return $"M{modelIndex + 1}_{modelName}";
-    }
-
     /// <summary>
     /// Builds a single document that carries the assembly scene tree, meshes with their transforms,
     /// viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
