@@ -4,14 +4,11 @@ namespace NwcIO;
 
 public sealed partial class NwcDocument
 {
-    /// <summary>Applies an appearance profiler to colorize the document based on property rules.</summary>
-    /// <returns>The total number of scene nodes and meshes whose appearance was overridden.</returns>
-    public int ApplyAppearanceProfiler(Model.Appearance.NwcAppearanceProfiler profiler)
-    {
-        ArgumentNullException.ThrowIfNull(profiler);
-        AppearanceProfiler = profiler;
-        return profiler.Apply(this);
-    }
+    /// <summary>Configured Clash Detective tests and results for this document.</summary>
+    public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
+
+    /// <summary>Spatial grid system (axes and levels) associated with the document.</summary>
+    public Model.Grids.NwcGridSystem? GridSystem { get; set; }
 
     /// <summary>Exports the document appearance profiler rules to a Navisworks XML format (.xml).</summary>
     public void ExportAppearanceProfilerXml(string path)
