@@ -23,6 +23,14 @@ Report security vulnerabilities privately through the **Security** tab.
 - Warnings are treated as errors (`<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`).
 - Zero native or third-party library dependencies for core reading and exporting functionality.
 
+## Library boundaries
+
+The native reader, writer and JSON output follow the Navisworks file model.
+The frozen convenience methods on `NwcDocument` and `NwcAssembly` are in
+`src/NwcIO/Compatibility`. They keep their existing signatures and assembly
+so applications can continue using them while replacements are developed.
+Keep new native-format operations with the reader or writer.
+
 ## Test Fixtures
 
 Tests requiring real Navisworks files are skipped automatically unless the environment variable `NWCIO_TEST_FILES` is set to a directory containing private test models. The repository ships no proprietary Navisworks models.

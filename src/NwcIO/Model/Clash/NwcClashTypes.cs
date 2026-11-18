@@ -1,5 +1,5 @@
 using System.Globalization;
-using NwcIO.Internal.Export;
+using NwcIO.Internal;
 using NwcIO.Model.Sets;
 
 namespace NwcIO.Model.Clash;
@@ -205,7 +205,7 @@ public sealed class NwcClashObject
         Path = path ?? name;
         if (elementId.HasValue)
         {
-            IfcGuid = Internal.Export.IfcGuid.FromElementId(elementId.Value, "NwcClash");
+            IfcGuid = Internal.IfcGuid.FromElementId(elementId.Value, "NwcClash");
         }
     }
 }

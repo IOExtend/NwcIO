@@ -1,5 +1,5 @@
 using System.Globalization;
-using NwcIO.Internal.Export;
+using NwcIO.Internal;
 using NwcIO.Model;
 
 namespace NwcIO.Internal.Parsing;

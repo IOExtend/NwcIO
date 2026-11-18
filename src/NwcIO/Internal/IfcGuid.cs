@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace NwcIO.Internal.Export;
+namespace NwcIO.Internal;
 
 /// <summary>
 /// IFC GlobalId encoding: 128-bit GUID to 22-character base64-like string.

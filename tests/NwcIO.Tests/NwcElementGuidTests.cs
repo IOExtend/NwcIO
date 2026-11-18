@@ -1,3 +1,4 @@
+using NwcIO.Internal;
 using NwcIO.Internal.Export;
 using NwcIO.Model;
 using Xunit;

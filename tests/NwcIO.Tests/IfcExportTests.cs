@@ -1488,7 +1488,7 @@ public class IfcExportTests
     public void SaveIfc_LinkedNode_SuppliesElementNameAndGuid(bool assembly)
     {
         var guid = Guid.Parse("00112233-4455-6677-8899-aabbccddeeff");
-        string globalId = NwcIO.Internal.Export.IfcGuid.ToIfcGuid(guid);
+        string globalId = NwcIO.Internal.IfcGuid.ToIfcGuid(guid);
         var node = new NwcNode
         {
             Id = 7,
@@ -1521,7 +1521,7 @@ public class IfcExportTests
         }
 
         string ifc = sw.ToString();
-        string expectedGuid = NwcIO.Internal.Export.IfcGuid.FromKey($"{NwcIO.Internal.Export.NwcElementGuid.ModelKey(doc)}:element:{globalId}:mesh:42");
+        string expectedGuid = NwcIO.Internal.IfcGuid.FromKey($"{NwcIO.Internal.Export.NwcElementGuid.ModelKey(doc)}:element:{globalId}:mesh:42");
         Assert.Contains($"IFCWALL('{expectedGuid}',", ifc);
         Assert.Contains("'Concrete Wall 200'", ifc);
         Assert.DoesNotContain("Mesh_42", ifc);
