@@ -86,18 +86,6 @@ public sealed partial class NwcDocument
     /// <summary>4D TimeLiner construction simulation schedule.</summary>
     public Model.TimeLiner.NwcTimeLinerSchedule? TimeLiner { get; set; }
 
-    /// <summary>Navisworks Appearance Profiler color/transparency rules associated with the document.</summary>
-    public Model.Appearance.NwcAppearanceProfiler? AppearanceProfiler { get; set; }
-
-    /// <summary>Applies an appearance profiler to colorize the document based on property rules.</summary>
-    /// <returns>The total number of scene nodes and meshes whose appearance was overridden.</returns>
-    public int ApplyAppearanceProfiler(Model.Appearance.NwcAppearanceProfiler profiler)
-    {
-        ArgumentNullException.ThrowIfNull(profiler);
-        AppearanceProfiler = profiler;
-        return profiler.Apply(this);
-    }
-
     /// <summary>Reader diagnostics for data that was skipped or substituted.</summary>
     public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
 
@@ -368,10 +356,7 @@ public sealed partial class NwcDocument
         return document;
     }
 
-    /// <summary>
-    /// Creates a new <see cref="NwcDocument"/> programmatically from components.
-    /// </summary>
-    public static NwcDocument Create(
+    internal static NwcDocument CreateNative(
         NwcFileInfo? fileInfo = null,
         IEnumerable<NwcMesh>? meshes = null,
         IEnumerable<NwcTransform>? transforms = null,
@@ -383,8 +368,7 @@ public sealed partial class NwcDocument
         NwcXRefTable? xRefs = null,
         NwcDbCacheDirectory? dbCache = null,
         IEnumerable<Model.Sets.NwcSetItem>? selectionSets = null,
-        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null,
-        Model.Appearance.NwcAppearanceProfiler? appearanceProfiler = null)
+        Model.TimeLiner.NwcTimeLinerSchedule? timeLiner = null)
     {
         var fi = fileInfo ?? new NwcFileInfo { SourcePath = "Model.rvt", LoaderPlugin = "LcOpRevitExport", SourceTimestampUtc = DateTime.UtcNow };
         if (fi.LengthUnit == NwcLengthUnit.Unknown)
@@ -407,12 +391,7 @@ public sealed partial class NwcDocument
             TrailingGap = 0,
         };
 
-        var doc = new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
-        if (appearanceProfiler is not null)
-        {
-            doc.ApplyAppearanceProfiler(appearanceProfiler);
-        }
-        return doc;
+        return new NwcDocument(fi, pList, gList, tList, mList, matList, rootNode, xRefs, dbCache, vList, sList, timeLiner, container);
     }
 
     /// <summary>

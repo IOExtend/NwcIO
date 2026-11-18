@@ -26,8 +26,8 @@ Report security vulnerabilities privately through the **Security** tab.
 ## Library boundaries
 
 The native reader, writer and JSON output follow the Navisworks file model.
-The frozen exports, viewer, coordination, spatial index, external schedule
-adapters and XML federation manifest live in `src/NwcIO/Compatibility`. The
+The frozen exports, viewer, coordination, spatial index, appearance profiler,
+external schedule adapters and XML federation manifest live in `src/NwcIO/Compatibility`. The
 regular library keeps their signatures, namespaces and assembly identity.
 Binary NWF reading and the CSV/XML codecs used in native TimeLiner streams stay with the engine.
 Keep new native-format operations with the reader or writer.

@@ -16,7 +16,6 @@ public sealed partial class NwcDocumentBuilder
     private readonly List<NwcMaterial> _materials = [];
     private readonly List<Model.Sets.NwcSetItem> _selectionSets = [];
     private Model.TimeLiner.NwcTimeLinerSchedule? _timeLiner;
-    private Model.Appearance.NwcAppearanceProfiler? _appearanceProfiler;
     private NwcNode? _rootNode;
 
     /// <summary>
@@ -130,32 +129,11 @@ public sealed partial class NwcDocumentBuilder
     }
 
     /// <summary>
-    /// Sets the Navisworks Appearance Profiler for colorizing the model based on rules.
-    /// </summary>
-    public NwcDocumentBuilder SetAppearanceProfiler(Model.Appearance.NwcAppearanceProfiler profiler)
-    {
-        ArgumentNullException.ThrowIfNull(profiler);
-        _appearanceProfiler = profiler;
-        return this;
-    }
-
-    /// <summary>
-    /// Adds an appearance profiler rule to colorize matching scene graph elements.
-    /// </summary>
-    public NwcDocumentBuilder AddAppearanceRule(Model.Appearance.NwcAppearanceRule rule)
-    {
-        ArgumentNullException.ThrowIfNull(rule);
-        _appearanceProfiler ??= new Model.Appearance.NwcAppearanceProfiler();
-        _appearanceProfiler.Rules.Add(rule);
-        return this;
-    }
-
-    /// <summary>
     /// Builds and returns the constructed <see cref="NwcDocument"/>.
     /// </summary>
     public NwcDocument Build()
     {
-        var doc = NwcDocument.Create(
+        var doc = NwcDocument.CreateNative(
             fileInfo: _fileInfo,
             meshes: _meshes,
             transforms: _transforms,
@@ -165,11 +143,10 @@ public sealed partial class NwcDocumentBuilder
             materials: _materials,
             rootNode: _rootNode,
             selectionSets: _selectionSets,
-            timeLiner: _timeLiner,
-            appearanceProfiler: _appearanceProfiler);
-        AddConfiguredClashTests(doc);
+            timeLiner: _timeLiner);
+        ApplyCompatibilityOptions(doc);
         return doc;
     }
 
-    partial void AddConfiguredClashTests(NwcDocument document);
+    partial void ApplyCompatibilityOptions(NwcDocument document);
 }

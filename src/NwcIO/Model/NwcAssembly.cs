@@ -399,7 +399,7 @@ public sealed partial class NwcAssembly
             return copy;
         }
 
-        return NwcDocument.Create(
+        return NwcDocument.CreateNative(
             fileInfo: new NwcFileInfo
             {
                 SourcePath = $"{Name}.nwc",

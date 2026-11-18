@@ -86,8 +86,10 @@ public sealed class AppearanceProfilerTests
         Assert.Null(nodeWall.Material);
     }
 
-    [Fact]
-    public void DocumentBuilderAppliesAppearanceProfiler()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DocumentCreationAppliesAppearanceProfiler(bool useBuilder)
     {
         var mesh = new NwcMesh
         {
@@ -109,11 +111,11 @@ public sealed class AppearanceProfilerTests
             new RgbaColor(0.0f, 0.8f, 0.2f, 1.0f),
             transparency: 0.1f);
 
-        var doc = new NwcDocumentBuilder()
-            .AddMesh(mesh)
-            .SetRootNode(root)
-            .AddAppearanceRule(rule)
-            .Build();
+        var profiler = new NwcAppearanceProfiler();
+        profiler.Rules.Add(rule);
+        var doc = useBuilder
+            ? new NwcDocumentBuilder().AddMesh(mesh).SetRootNode(root).AddAppearanceRule(rule).Build()
+            : NwcDocument.Create(meshes: [mesh], rootNode: root, appearanceProfiler: profiler);
 
         Assert.NotNull(doc.AppearanceProfiler);
         Assert.Single(doc.AppearanceProfiler.Rules);
