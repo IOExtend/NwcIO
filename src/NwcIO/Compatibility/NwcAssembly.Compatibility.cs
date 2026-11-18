@@ -6,6 +6,13 @@ namespace NwcIO.Model;
 
 public sealed partial class NwcAssembly
 {
+    private NwcSpatialIndex? _spatialIndex;
+
+    /// <summary>
+    /// Gets the spatial acceleration index (BVH) over all meshes across all contributing models.
+    /// </summary>
+    public NwcSpatialIndex SpatialIndex => _spatialIndex ??= new NwcSpatialIndex(AllMeshes);
+
     /// <summary>Multi-discipline clash coordination matrix associated with the assembly.</summary>
     public Clash.NwcClashMatrix? ClashMatrix { get; set; }
 

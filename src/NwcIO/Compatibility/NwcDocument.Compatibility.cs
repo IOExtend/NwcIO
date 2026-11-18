@@ -4,6 +4,14 @@ namespace NwcIO;
 
 public sealed partial class NwcDocument
 {
+    private Model.Spatial.NwcSpatialIndex? _spatialIndex;
+
+    /// <summary>3D spatial acceleration index (BVH) over meshes for raycasting and spatial selection.</summary>
+    public Model.Spatial.NwcSpatialIndex SpatialIndex => _spatialIndex ??= new Model.Spatial.NwcSpatialIndex(Meshes);
+
+    // Use the same snapshot as SpatialIndex when both APIs are available.
+    partial void GetIndexedBounds(ref BoundingBox3d? bounds) => bounds = SpatialIndex.Bounds;
+
     /// <summary>Configured Clash Detective tests and results for this document.</summary>
     public List<Model.Clash.NwcClashTest> ClashTests { get; } = [];
 

@@ -102,16 +102,23 @@ public sealed partial class NwcDocument
     public IReadOnlyList<NwcDiagnostic> Diagnostics { get; internal set; } = [];
 
     /// <summary>Gets the total 3D bounding box over all meshes in the document.</summary>
-    public BoundingBox3d BoundingBox => SpatialIndex.Bounds;
+    public BoundingBox3d BoundingBox
+    {
+        get
+        {
+            BoundingBox3d? indexedBounds = null;
+            GetIndexedBounds(ref indexedBounds);
+            return indexedBounds ?? (_bounds ??= Meshes.Aggregate(BoundingBox3d.Empty,
+                static (bounds, mesh) => bounds.Union(mesh.GetWorldBoundingBox())));
+        }
+    }
 
     /// <summary>Gets the primary/default viewpoint of the document.</summary>
     public NwcSavedViewpoint? DefaultViewpoint =>
         SavedViewpoints.Count > 0 ? SavedViewpoints[0] : (!BoundingBox.IsEmpty ? NwcSavedViewpoint.CreateDefault(BoundingBox) : null);
 
-    private Model.Spatial.NwcSpatialIndex? _spatialIndex;
-
-    /// <summary>3D spatial acceleration index (BVH) over meshes for raycasting and spatial selection.</summary>
-    public Model.Spatial.NwcSpatialIndex SpatialIndex => _spatialIndex ??= new Model.Spatial.NwcSpatialIndex(Meshes);
+    private BoundingBox3d? _bounds;
+    partial void GetIndexedBounds(ref BoundingBox3d? bounds);
 
     internal NwcContainer Container { get; }
 
