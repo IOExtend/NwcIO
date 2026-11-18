@@ -202,7 +202,24 @@ public sealed partial class NwcAssembly
     /// <summary>Exports the entire federated assembly to a Wavefront OBJ file.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
     {
-        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name, GetModelLabel);
+        ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name, GetObjModelLabel);
+    }
+
+    private string? GetObjModelLabel(NwcMesh mesh)
+    {
+        int modelIndex = GetModelIndex(mesh);
+        if (modelIndex < 0)
+        {
+            return null;
+        }
+
+        var model = Models[modelIndex];
+        string modelName = Path.GetFileNameWithoutExtension(model.FileInfo.SourcePath ?? string.Empty);
+        if (string.IsNullOrEmpty(modelName))
+        {
+            modelName = $"Model_{modelIndex + 1}";
+        }
+        return $"M{modelIndex + 1}_{modelName}";
     }
 
     /// <summary>Exports the entire federated assembly with geometry, materials, and spatial hierarchy to an IFC2x3 STEP file (.ifc).</summary>

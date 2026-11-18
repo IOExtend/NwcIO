@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using NwcIO;
-using NwcIO.Internal.Json;
 using NwcIO.Model;
 using NwcIO.Model.Spatial;
 using NwcIO.Model.Viewer;
@@ -901,20 +900,20 @@ internal static class Program
                 {
                     if (stdoutStream != null)
                     {
-                        JsonExporter.Write(doc, stdoutStream, exportOptions);
+                        doc.SaveJson(stdoutStream, exportOptions);
                         stdoutStream.Flush();
                     }
                     else
                     {
                         using var stdout = Console.OpenStandardOutput();
-                        JsonExporter.Write(doc, stdout, exportOptions);
+                        doc.SaveJson(stdout, exportOptions);
                         stdout.Flush();
                     }
                 }
                 else
                 {
                     EnsureParentDirectory(outputPath);
-                    JsonExporter.WriteFile(doc, outputPath, exportOptions);
+                    doc.SaveJson(outputPath, exportOptions);
                 }
             }
 
@@ -1701,7 +1700,7 @@ internal static class Program
 
         if (index.Raycast(origin, dir, out var hit))
         {
-            string? modelLabel = assembly?.GetModelLabel(hit.Mesh);
+            string? modelLabel = assembly is null ? null : GetModelLabel(assembly, hit.Mesh);
             string modelSuffix = modelLabel is null ? string.Empty : FormattableString.Invariant($", Model={modelLabel}");
             @out.WriteLine(FormattableString.Invariant(
                 $"Raycast HIT at distance {hit.Distance:F3}: Point={hit.Point}, Normal={hit.Normal}, MeshId={hit.Mesh.Id}, Triangle={hit.TriangleIndex}{modelSuffix}"));
@@ -1710,6 +1709,23 @@ internal static class Program
         {
             @out.WriteLine("Raycast MISS: no intersecting surface found along the ray.");
         }
+    }
+
+    private static string? GetModelLabel(NwcAssembly assembly, NwcMesh mesh)
+    {
+        int modelIndex = assembly.GetModelIndex(mesh);
+        if (modelIndex < 0)
+        {
+            return null;
+        }
+
+        var model = assembly.Models[modelIndex];
+        string modelName = Path.GetFileNameWithoutExtension(model.FileInfo.SourcePath ?? string.Empty);
+        if (string.IsNullOrEmpty(modelName))
+        {
+            modelName = $"Model_{modelIndex + 1}";
+        }
+        return $"M{modelIndex + 1}_{modelName}";
     }
 
     private static void ApplyClashGrouping(Model.Clash.NwcClashTest test, string? mode, double radius, bool printReport, TextWriter? errWriter = null)
