@@ -190,7 +190,10 @@ NwcIO reads and writes its own format. These extras are frozen: they receive bug
 
 JSON export (`NwcDocument.SaveJson`, `nwcio model.nwc model.json`) is not frozen: it is core and grows with the reader.
 
-Viewing will move to [IOViewer](https://github.com/IOExtend/IOViewer) through the `NwcIO.Scene` adapter over the shared `IOScene` model. Coordination features such as clash, measure, diff, and BCF will move to a planned `IOCoord` package, and GLB export to a shared GLB writer in a planned `IOScene.Formats` package. `IOCoord` and `IOScene.Formats` are not published yet. The frozen features stay available and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
+For viewing through [IOViewer](https://github.com/IOExtend/IOViewer), use `NwcIO.Scene` in .NET or export the scene with
+`nwcio model.nwc --scene model.scene.json`. The [IOScene tools source previews](https://github.com/IOExtend/IOScene/blob/main/docs/tools.md)
+provide a shared GLB writer in `IOScene.Formats` and coordination queries and BCF export in `IOCoord`. The existing frozen
+features stay in the regular `NwcIO` package and are removed no earlier than NwcIO 1.0, and only after a published replacement exists.
 
 ## Build from source and tests
 
