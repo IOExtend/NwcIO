@@ -4,11 +4,17 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-18
+
 ### Added
 - `.nwd` scene trees with partition nodes (class 32) are decoded: each appended model is a top-level `LcOaPartition` node named after its source file, with its children, and its trailer is read for length (docs/format-notes.md §2.2). `NwcDocument.Open`, `NwcAssembly` and `NwcIO.Scene` no longer throw `NotSupportedException` for them, and the CLI no longer needs `--no-tree` to open such a file.
 
 ### Fixed
 - Files saved by Navisworks 2026 that broke the strict geometry and fragment readers now open: a fragment without a pose sits at its class-93 centre `c`; triangle records may carry a colour slot (read for length and dropped) and line records may come without one; one of the two quantised UV bit widths may be 0.
+
+### Changed
+- The native Navisworks engine and scene adapter build independently of the frozen viewer, exporters, spatial queries,
+  appearance profiler and external schedule adapters. The regular packages retain their public APIs and CLI commands.
 
 ## [0.13.0] - 2026-11-17
 
