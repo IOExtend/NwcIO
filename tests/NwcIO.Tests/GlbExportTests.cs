@@ -43,7 +43,7 @@ public class GlbExportTests
         var viewpoints = cameraOnly
             ? new[] { NwcSavedViewpoint.CreateDefault(BoundingBox3d.Empty) }
             : Array.Empty<NwcSavedViewpoint>();
-        var document = NwcDocument.Create(savedViewpoints: viewpoints);
+        var document = NwcDocument.Create(fileInfo: new NwcFileInfo { LoaderPlugin = "Source Loader" }, savedViewpoints: viewpoints);
         using var output = new MemoryStream();
 
         document.SaveGlb(output);
@@ -58,6 +58,7 @@ public class GlbExportTests
         using var json = JsonDocument.Parse(glb.AsMemory(20, jsonLength));
         var root = json.RootElement;
         Assert.Equal("2.0", root.GetProperty("asset").GetProperty("version").GetString());
+        Assert.StartsWith("NwcIO", root.GetProperty("asset").GetProperty("generator").GetString());
         Assert.Equal(0, root.GetProperty("scene").GetInt32());
         var scene = Assert.Single(root.GetProperty("scenes").EnumerateArray());
         foreach (var property in new[] { "meshes", "materials", "accessors", "bufferViews", "buffers" })

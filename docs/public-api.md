@@ -33,6 +33,16 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 `NwcDocument.GetLoadedPath()` returns the full path of a document opened by filename. It returns `null` for
 documents opened from a stream or created in memory. `NwcFileInfo.SourcePath` is the source path stored in the file.
 
+`NwcDocument.Open` overloads for paths and streams accept an `IProgress<NwcProgress>` and
+`CancellationToken`. Cancellation is checked during container scanning and between parsing phases.
+A non-seekable input uses a temporary file. With `KeepStreamCatalog = false`, stream payloads
+are inflated on demand during parsing.
+
+`NwcDocument.Save` and `SaveJson` accept cancellation and progress for paths and streams.
+Path saves replace the destination after the output has been written successfully. A cancelled stream
+save can leave partial output in the caller's stream. `OpenAsync`, `SaveAsync` and `SaveJsonAsync`
+run the corresponding synchronous operations on the thread pool.
+
 ## Coordination & Clash Detection (`NwcIO.Model.Clash`)
 
 | Type | Description |

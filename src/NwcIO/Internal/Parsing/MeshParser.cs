@@ -138,7 +138,7 @@ internal static class MeshParser
         int totalBytes = 0;
         for (int i = startChunkIdx; i < endChunkIdx; i++)
         {
-            var chunkLength = container.Streams[i].Data.Length;
+            var chunkLength = container.Streams[i].DecompressedLength;
             if (chunkLength > int.MaxValue - totalBytes)
             {
                 return;
@@ -156,9 +156,9 @@ internal static class MeshParser
         int copyPos = 0;
         for (int i = startChunkIdx; i < endChunkIdx; i++)
         {
-            var s = container.Streams[i];
-            Buffer.BlockCopy(s.Data, 0, combined, copyPos, s.Data.Length);
-            copyPos += s.Data.Length;
+            var data = container.Streams[i].Data;
+            Buffer.BlockCopy(data, 0, combined, copyPos, data.Length);
+            copyPos += data.Length;
         }
 
         int curPos = 0;

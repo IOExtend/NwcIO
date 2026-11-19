@@ -43,15 +43,15 @@ internal sealed class LcUStreamHeader
         }
     }
 
-    public static LcUStreamHeader Parse(byte[] data, int offset)
+    public static LcUStreamHeader Parse(ReadOnlySpan<byte> data, long offset)
     {
-        int end = Array.IndexOf(data, (byte)'\n', offset);
+        int end = data.IndexOf((byte)'\n');
         if (end < 0)
         {
             throw new InvalidDataException($"LcUStream header at offset {offset} is not terminated.");
         }
 
-        var line = System.Text.Encoding.ASCII.GetString(data, offset, end - offset);
+        var line = System.Text.Encoding.ASCII.GetString(data[..end]);
         if (!line.StartsWith("#LcUStream", StringComparison.Ordinal))
         {
             throw new InvalidDataException($"Expected '#LcUStream' header at offset {offset}, found '{line}'.");
@@ -61,7 +61,7 @@ internal sealed class LcUStreamHeader
         return new LcUStreamHeader
         {
             FileOffset = offset,
-            HeaderLength = end - offset + 1,
+            HeaderLength = end + 1,
             Format = parts[0][1..],
             Tokens = parts[1..],
         };

@@ -1,3 +1,4 @@
+using NwcIO.Internal;
 using NwcIO.Internal.Container;
 
 namespace NwcIO;
@@ -13,31 +14,36 @@ namespace NwcIO;
 public static class NwcWriter
 {
     /// <summary>
-    /// Writes the document to the specified file path.
+    /// Writes the document to the specified file path, replacing the destination after the complete file is written.
     /// </summary>
     public static void Write(NwcDocument document, string path, string? header = null)
+        => Write(document, path, header, default);
+
+    internal static void Write(NwcDocument document, string path, string? header, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        // Serialize first, so that a document which can't be written doesn't truncate or create the file
+        cancellationToken.ThrowIfCancellationRequested();
         NwcContainerWriter.ValidateHeader(header);
         var streams = NwcStreamSerializer.SerializeDocument(document);
-        using var fs = File.Create(path);
-        NwcContainerWriter.Write(fs, streams, header);
+        AtomicFileWriter.Write(path, output => NwcContainerWriter.Write(output, streams, header, cancellationToken), cancellationToken);
     }
 
     /// <summary>
     /// Writes the document to the specified output stream.
     /// </summary>
     public static void Write(NwcDocument document, Stream stream, string? header = null)
+        => Write(document, stream, header, default);
+
+    internal static void Write(NwcDocument document, Stream stream, string? header, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(stream);
-
+        cancellationToken.ThrowIfCancellationRequested();
         NwcContainerWriter.ValidateHeader(header);
         var streams = NwcStreamSerializer.SerializeDocument(document);
-        NwcContainerWriter.Write(stream, streams, header);
+        NwcContainerWriter.Write(stream, streams, header, cancellationToken);
     }
 
     /// <summary>

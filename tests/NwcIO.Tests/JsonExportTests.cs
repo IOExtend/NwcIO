@@ -42,6 +42,43 @@ public sealed class JsonExportTests
     }
 
     [Fact]
+    public void SaveJson_CancelledDuringExport_StopsWritingBeforeTheEnd()
+    {
+        var builder = new NwcDocumentBuilder();
+        for (int i = 0; i < 2000; i++)
+        {
+            builder.AddTransform(new NwcTransform { Id = i });
+        }
+
+        var doc = builder.Build();
+        using var cancellation = new CancellationTokenSource();
+        using var output = new CountingStream(cancellation.Cancel);
+
+        Assert.Throws<OperationCanceledException>(() => doc.SaveJson(output, null, null, cancellation.Token));
+        Assert.InRange(output.Length, 1, doc.ToJson().Length / 2);
+    }
+
+    [Fact]
+    public async Task SaveJsonAsync_FileAndStream_WritesTheSameJson()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            var doc = NwcDocument.Create();
+            using var output = new MemoryStream();
+            await doc.SaveJsonAsync(path);
+            await doc.SaveJsonAsync(output);
+            Assert.Equal(File.ReadAllBytes(path), output.ToArray());
+            using var json = JsonDocument.Parse(output.ToArray());
+            Assert.Equal(0, json.RootElement.GetProperty("meshCount").GetInt32());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Json_WriteFile_RemovesPartialFileOnFailure()
     {
         string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.json");
@@ -58,7 +95,7 @@ public sealed class JsonExportTests
         }
     }
 
-    private sealed class CountingStream : MemoryStream
+    private sealed class CountingStream(Action? afterWrite = null) : MemoryStream
     {
         public int LargestWrite { get; private set; }
 
@@ -66,12 +103,14 @@ public sealed class JsonExportTests
         {
             LargestWrite = Math.Max(LargestWrite, count);
             base.Write(buffer, offset, count);
+            afterWrite?.Invoke();
         }
 
         public override void Write(ReadOnlySpan<byte> buffer)
         {
             LargestWrite = Math.Max(LargestWrite, buffer.Length);
             base.Write(buffer);
+            afterWrite?.Invoke();
         }
     }
 

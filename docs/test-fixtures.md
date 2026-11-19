@@ -4,6 +4,20 @@ Some integration tests require sample Navisworks files (`.nwc`, `.nwd`, `.nwf`) 
 
 The repository contains **no proprietary models, customer files, or binary Navisworks caches**.
 
+## Synthetic container measurements
+
+On Windows, with a .NET 10 Release build and one 24 MiB pseudorandom payload (`Random(27)`),
+the median of seven runs was 8.0 ms for the container reader and 0.91 ms for
+`ZLibStream.CopyTo(Stream.Null)`. The container reader measures the exact end of the zlib stream
+and returns its decoded bytes. The second inflate pass still adds cost.
+
+With eight such streams in one in-memory container, the managed heap sample immediately after
+scanning was about 192 MiB above baseline with the catalog retained and 0.13 MiB above baseline
+with `KeepStreamCatalog = false`. The input buffer was already allocated at baseline. Samples
+used `GC.GetTotalMemory(true)` at the `read-container` progress callback, so they measure live
+objects at that phase. A separate test scans a synthetic seekable input with a valid stream
+beyond 2 GiB.
+
 ## What Is Discovered
 
 The per-model tests (`RealFixtureTests`) discover every `*.nwc`, `*.nwd` and `*.nwf` file under the roots below and run each as its own theory case, so one bad fixture does not stop the others. Cases are identified by position in the fixture list, never by path, so no private name reaches the test output. `.nwc` and `.nwd` files are opened with the scene tree; `.nwf` files are opened with `BuildSceneTree = false` and only the checks that apply to the data present run. Without a sidecar file the tests assert only model-independent invariants (valid transforms, mesh and index sanity, export structure and counts, BVH queries, a `.nwc` save/open round trip); no source application, loader plugin, element count or output size is assumed. The multi-model test uses the first two `.nwc`/`.nwd` fixtures and is skipped when fewer than two exist. The other real-file suites (`RealFileInvariantTests`, `RealCorpusTests`) keep reading `.nwc` and `.nwd` only.

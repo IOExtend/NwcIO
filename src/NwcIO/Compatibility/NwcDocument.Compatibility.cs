@@ -261,16 +261,16 @@ public sealed partial class NwcDocument
         Internal.Export.ObjExporter.Write(Meshes, writer, worldCoordinates, FileInfo.SourcePath);
     }
 
-    /// <summary>Exports 3D mesh geometry, materials, and scene hierarchy to a binary glTF 2.0 file (.glb).</summary>
+    /// <summary>Exports 3D mesh geometry, materials, and saved cameras to a binary glTF 2.0 file (.glb).</summary>
     public void SaveGlb(string path, bool worldCoordinates = true)
     {
-        Internal.Export.GlbExporter.WriteFile(Meshes, Materials, path, worldCoordinates, FileInfo.LoaderPlugin, SavedViewpoints);
+        Internal.Export.GlbExporter.WriteFile(Meshes, Materials, path, worldCoordinates, viewpoints: SavedViewpoints);
     }
 
-    /// <summary>Exports 3D mesh geometry, materials, and scene hierarchy to a binary glTF 2.0 stream (.glb).</summary>
+    /// <summary>Exports 3D mesh geometry, materials, and saved cameras to a binary glTF 2.0 stream (.glb).</summary>
     public void SaveGlb(Stream stream, bool worldCoordinates = true)
     {
-        Internal.Export.GlbExporter.Write(Meshes, Materials, stream, worldCoordinates, FileInfo.LoaderPlugin, SavedViewpoints);
+        Internal.Export.GlbExporter.Write(Meshes, Materials, stream, worldCoordinates, viewpoints: SavedViewpoints);
     }
 
     /// <summary>Exports 3D mesh geometry, materials, spatial structure, and properties to an IFC STEP physical file (.ifc).</summary>

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
 using NwcIO.Internal.Container;
 using Xunit;
@@ -116,6 +117,28 @@ public class ContainerReaderTests
     }
 
     [Fact]
+    public void Read_MissingZlibTrailerWithMatchingPayloadSuffix_RejectsStream()
+    {
+        // A final DEFLATE stored block whose payload ends with its own Adler-32 (0x00000100).
+        const ushort payloadLength = 64_249;
+        var compressed = new byte[7 + payloadLength];
+        compressed[0] = 0x78;
+        compressed[1] = 0x01;
+        compressed[2] = 0x01;
+        BinaryPrimitives.WriteUInt16LittleEndian(compressed.AsSpan(3), payloadLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(compressed.AsSpan(5), unchecked((ushort)~payloadLength));
+        compressed[^5] = 254;
+        compressed[^2] = 1;
+
+        var complete = NwcContainerReader.Read(ContainerWith([.. compressed, 0, 0, 1, 0]));
+        Assert.Equal(payloadLength, Assert.Single(complete.Streams).Data.Length);
+
+        var truncated = NwcContainerReader.Read(ContainerWith(compressed));
+        Assert.Empty(truncated.Streams);
+        Assert.Equal(compressed.Length, truncated.TrailingGap);
+    }
+
+    [Fact]
     public void Read_InvalidHeader_ThrowsInvalidDataException()
     {
         var invalid = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
@@ -201,12 +224,60 @@ public class ContainerReaderTests
     }
 
     [Fact]
+    public void Read_SeekableStreamAboveTwoGiB_PreservesLongOffsetsAndGap()
+    {
+        byte[] header = "#LcUStream-V1.1 binary double release C lizlib\n"u8.ToArray();
+        byte[] payload = "after the gap"u8.ToArray();
+        byte[] compressed = CompressZlib(payload);
+        const long gap = (long)int.MaxValue + 16;
+        using var input = new SegmentedInput(header, gap, compressed);
+
+        var container = NwcContainerReader.Read(input);
+
+        var stream = Assert.Single(container.Streams);
+        Assert.Equal(gap + header.Length, stream.FileOffset);
+        Assert.Equal(gap, stream.GapBefore);
+        Assert.Equal(compressed.Length, stream.CompressedLength);
+        Assert.Equal(payload, stream.Data);
+        Assert.Equal(input.Length, container.FileLength);
+        Assert.Equal(input.Length, input.Position);
+        Assert.Equal(0, container.TrailingGap);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Open_WithoutStreamCatalog_ReadsPayloadsBeforeClosingBackingStream(bool seekable)
+    {
+        var document = NwcDocument.Create(fileInfo: new NwcIO.Model.NwcFileInfo { SourcePath = "model.rvt" });
+        using var input = new SegmentedInput(document.ToByteArray(), 0, [], seekable);
+
+        var reopened = NwcDocument.Open(input, new NwcReaderOptions { KeepStreamCatalog = false });
+
+        Assert.Equal("model.rvt", reopened.FileInfo.SourcePath);
+        Assert.Empty(reopened.Container.Streams);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Open_CancelledWhileReadingContainer_ThrowsBeforeReadingAnotherBlock(bool seekable)
+    {
+        byte[] payload = new byte[256 * 1024];
+        new Random(42).NextBytes(payload);
+        using var cancellation = new CancellationTokenSource();
+        using var input = new SegmentedInput(ContainerWith(CompressZlib(payload)), 0, [], seekable, cancellation.Cancel);
+
+        Assert.Throws<OperationCanceledException>(() => NwcDocument.Open(input, null, null, null, cancellation.Token));
+        Assert.Equal(1, input.ReadCount);
+    }
+
+    [Fact]
     public void Read_MemoryStreamAtEnd_DoesNotReadFromTheStart()
     {
         var compressed = CompressZlib(System.Text.Encoding.UTF8.GetBytes("payload"));
         var file = ContainerWith(compressed);
-        // publiclyVisible: true makes TryGetBuffer succeed, so only the Position guard keeps it off the fast path.
-        using var stream = new MemoryStream(file, 0, file.Length, false, true);
+        using var stream = new MemoryStream(file);
         stream.Position = stream.Length;
 
         Assert.Throws<InvalidDataException>(() => NwcContainerReader.Read(stream));
@@ -366,5 +437,48 @@ public class ContainerReaderTests
         }
 
         return outMs.ToArray();
+    }
+
+    private sealed class SegmentedInput(
+        byte[] prefix, long gap, byte[] suffix, bool seekable = true, Action? afterRead = null) : Stream
+    {
+        public int ReadCount { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => seekable;
+        public override bool CanWrite => false;
+        public override long Length => seekable ? prefix.Length + gap + suffix.Length : throw new NotSupportedException();
+        public override long Position { get; set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            ReadCount++;
+            long suffixStart = prefix.Length + gap;
+            int read;
+            if (Position < prefix.Length)
+            {
+                read = Math.Min(count, prefix.Length - (int)Position);
+                prefix.AsSpan((int)Position, read).CopyTo(buffer.AsSpan(offset));
+            }
+            else if (Position < suffixStart)
+            {
+                read = (int)Math.Min(count, suffixStart - Position);
+                buffer.AsSpan(offset, read).Clear();
+            }
+            else
+            {
+                int start = (int)(Position - suffixStart);
+                read = Math.Min(count, suffix.Length - start);
+                suffix.AsSpan(start, read).CopyTo(buffer.AsSpan(offset));
+            }
+
+            Position += read;
+            afterRead?.Invoke();
+            return read;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() => throw new NotSupportedException();
     }
 }
