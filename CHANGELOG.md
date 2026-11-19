@@ -17,6 +17,8 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - Eager container reads of mixed DEFLATE streams with a large stored prefix and a short coded tail inflate directly into the final payload on replay, reducing buffer copies.
 - Document saves to an NWC or JSON path replace the destination only after the write succeeds. The container reader and both document exporters check cancellation during processing.
 - GLB identifies NwcIO as the generator when exporting a document.
+- GLB geometry export packs the BIN chunk in bounded batches into a temporary file. It checks the
+  aligned chunk and container sizes, and a failed path-based export preserves the destination.
 
 ### Changed
 - The container reader scans seekable inputs in blocks with 64-bit offsets. Non-seekable inputs are spooled to a temporary file. With `KeepStreamCatalog = false`, parsers inflate payloads on demand.

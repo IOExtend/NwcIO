@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Text.Json;
 using NwcIO.Model;
@@ -14,6 +15,7 @@ internal static class GlbExporter
     private const uint GlbVersion = 2;
     private const uint ChunkTypeJson = 0x4E4F534A; // "JSON"
     private const uint ChunkTypeBin = 0x004E4942;  // "BIN\0"
+    private const uint MaxAlignedLength = uint.MaxValue - 3;
 
     private const int TargetArrayBuffer = 34962;        // Vertex attributes
     private const int TargetElementArrayBuffer = 34963; // Indices
@@ -34,16 +36,7 @@ internal static class GlbExporter
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(path);
 
-        try
-        {
-            using var fs = File.Create(path);
-            Write(meshes, materials, fs, worldCoordinates, generatorName, viewpoints);
-        }
-        catch
-        {
-            File.Delete(path);
-            throw;
-        }
+        AtomicFileWriter.Write(path, output => Write(meshes, materials, output, worldCoordinates, generatorName, viewpoints), default);
     }
 
     public static void Write(
@@ -58,9 +51,7 @@ internal static class GlbExporter
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(output);
 
-        // 1. Pack binary buffer (positions, normals, indices) into a temporary file, so the BIN payload
-        // is not held in a single managed array.
-        using Stream binMs = CreateBinBuffer();
+        using var bin = new BinChunk();
         var bufferViews = new List<BufferViewDef>();
         var accessors = new List<AccessorDef>();
         var gltfMeshes = new List<MeshDef>();
@@ -136,18 +127,18 @@ internal static class GlbExporter
             }
 
             // A. Vertex Positions
-            AlignStream(binMs, 4);
-            long posOffset = binMs.Position;
+            long posLength = (long)vCount * 12;
+            long posOffset = bin.BeginView(posLength);
             double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
             double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
 
-            var posSpan = new byte[vCount * 12];
             for (int v = 0; v < vCount; v++)
             {
                 var pt = vertices[v];
-                BitConverter.TryWriteBytes(posSpan.AsSpan(v * 12), (float)pt.X);
-                BitConverter.TryWriteBytes(posSpan.AsSpan(v * 12 + 4), (float)pt.Y);
-                BitConverter.TryWriteBytes(posSpan.AsSpan(v * 12 + 8), (float)pt.Z);
+                var packed = bin.Reserve(12);
+                BinaryPrimitives.WriteSingleLittleEndian(packed, (float)pt.X);
+                BinaryPrimitives.WriteSingleLittleEndian(packed[4..], (float)pt.Y);
+                BinaryPrimitives.WriteSingleLittleEndian(packed[8..], (float)pt.Z);
 
                 if (double.IsFinite(pt.X) && double.IsFinite(pt.Y) && double.IsFinite(pt.Z))
                 {
@@ -166,9 +157,8 @@ internal static class GlbExporter
                 maxX = 0; maxY = 0; maxZ = 0;
             }
 
-            binMs.Write(posSpan);
             int posViewIdx = bufferViews.Count;
-            bufferViews.Add(new BufferViewDef(posOffset, posSpan.Length, TargetArrayBuffer));
+            bufferViews.Add(new BufferViewDef(posOffset, posLength, TargetArrayBuffer));
 
             int posAccessorIdx = accessors.Count;
             accessors.Add(new AccessorDef(
@@ -184,21 +174,19 @@ internal static class GlbExporter
             int? normAccessorIdx = null;
             if (indices.Count > 0)
             {
+                long normOffset = bin.BeginView(posLength);
                 var normals = ComputeNormals(vertices, indices);
-                AlignStream(binMs, 4);
-                long normOffset = binMs.Position;
-                var normSpan = new byte[vCount * 12];
                 for (int v = 0; v < vCount; v++)
                 {
                     var n = normals[v];
-                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12), n.X);
-                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 4), n.Y);
-                    BitConverter.TryWriteBytes(normSpan.AsSpan(v * 12 + 8), n.Z);
+                    var packed = bin.Reserve(12);
+                    BinaryPrimitives.WriteSingleLittleEndian(packed, n.X);
+                    BinaryPrimitives.WriteSingleLittleEndian(packed[4..], n.Y);
+                    BinaryPrimitives.WriteSingleLittleEndian(packed[8..], n.Z);
                 }
 
-                binMs.Write(normSpan);
                 int normViewIdx = bufferViews.Count;
-                bufferViews.Add(new BufferViewDef(normOffset, normSpan.Length, TargetArrayBuffer));
+                bufferViews.Add(new BufferViewDef(normOffset, posLength, TargetArrayBuffer));
 
                 normAccessorIdx = accessors.Count;
                 accessors.Add(new AccessorDef(
@@ -218,21 +206,20 @@ internal static class GlbExporter
             int? colAccessorIdx = null;
             if (lineColors is not null)
             {
-                AlignStream(binMs, 4);
-                long colOffset = binMs.Position;
-                var colSpan = new byte[vCount * 16];
+                long colLength = (long)vCount * 16;
+                long colOffset = bin.BeginView(colLength);
                 for (int v = 0; v < vCount; v++)
                 {
                     var c = lineColors[v];
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16), ColorComponent(c.R));
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 4), ColorComponent(c.G));
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 8), ColorComponent(c.B));
-                    BitConverter.TryWriteBytes(colSpan.AsSpan(v * 16 + 12), ColorComponent(c.A));
+                    var packed = bin.Reserve(16);
+                    BinaryPrimitives.WriteSingleLittleEndian(packed, ColorComponent(c.R));
+                    BinaryPrimitives.WriteSingleLittleEndian(packed[4..], ColorComponent(c.G));
+                    BinaryPrimitives.WriteSingleLittleEndian(packed[8..], ColorComponent(c.B));
+                    BinaryPrimitives.WriteSingleLittleEndian(packed[12..], ColorComponent(c.A));
                 }
 
-                binMs.Write(colSpan);
                 int colViewIdx = bufferViews.Count;
-                bufferViews.Add(new BufferViewDef(colOffset, colSpan.Length, TargetArrayBuffer));
+                bufferViews.Add(new BufferViewDef(colOffset, colLength, TargetArrayBuffer));
 
                 colAccessorIdx = accessors.Count;
                 accessors.Add(new AccessorDef(
@@ -245,89 +232,8 @@ internal static class GlbExporter
                     null));
             }
 
-            // D. Triangle Indices
-            int? triIdxAccessor = null;
-            if (indices.Count > 0)
-            {
-                AlignStream(binMs, 4);
-                long idxOffset = binMs.Position;
-                int idxCount = indices.Count;
-                bool useShort = vCount <= 65535;
-
-                byte[] idxSpan;
-                if (useShort)
-                {
-                    idxSpan = new byte[idxCount * 2];
-                    for (int i = 0; i < idxCount; i++)
-                    {
-                        BinaryPrimitives.WriteUInt16LittleEndian(idxSpan.AsSpan(i * 2), (ushort)indices[i]);
-                    }
-                }
-                else
-                {
-                    idxSpan = new byte[idxCount * 4];
-                    for (int i = 0; i < idxCount; i++)
-                    {
-                        BinaryPrimitives.WriteUInt32LittleEndian(idxSpan.AsSpan(i * 4), (uint)indices[i]);
-                    }
-                }
-
-                binMs.Write(idxSpan);
-                int idxViewIdx = bufferViews.Count;
-                bufferViews.Add(new BufferViewDef(idxOffset, idxSpan.Length, TargetElementArrayBuffer));
-
-                triIdxAccessor = accessors.Count;
-                accessors.Add(new AccessorDef(
-                    idxViewIdx,
-                    0,
-                    useShort ? ComponentTypeUnsignedShort : ComponentTypeUnsignedInt,
-                    idxCount,
-                    "SCALAR",
-                    null,
-                    null));
-            }
-
-            // E. Line Indices
-            int? lineIdxAccessor = null;
-            if (lineIndices.Count > 0)
-            {
-                AlignStream(binMs, 4);
-                long idxOffset = binMs.Position;
-                int idxCount = lineIndices.Count;
-                bool useShort = vCount <= 65535;
-
-                byte[] idxSpan;
-                if (useShort)
-                {
-                    idxSpan = new byte[idxCount * 2];
-                    for (int i = 0; i < idxCount; i++)
-                    {
-                        BinaryPrimitives.WriteUInt16LittleEndian(idxSpan.AsSpan(i * 2), (ushort)lineIndices[i]);
-                    }
-                }
-                else
-                {
-                    idxSpan = new byte[idxCount * 4];
-                    for (int i = 0; i < idxCount; i++)
-                    {
-                        BinaryPrimitives.WriteUInt32LittleEndian(idxSpan.AsSpan(i * 4), (uint)lineIndices[i]);
-                    }
-                }
-
-                binMs.Write(idxSpan);
-                int idxViewIdx = bufferViews.Count;
-                bufferViews.Add(new BufferViewDef(idxOffset, idxSpan.Length, TargetElementArrayBuffer));
-
-                lineIdxAccessor = accessors.Count;
-                accessors.Add(new AccessorDef(
-                    idxViewIdx,
-                    0,
-                    useShort ? ComponentTypeUnsignedShort : ComponentTypeUnsignedInt,
-                    idxCount,
-                    "SCALAR",
-                    null,
-                    null));
-            }
+            int? triIdxAccessor = WriteIndexAccessor(bin, indices, vCount, bufferViews, accessors);
+            int? lineIdxAccessor = WriteIndexAccessor(bin, lineIndices, vCount, bufferViews, accessors);
 
             // Material assignment
             int? matIdx = null;
@@ -403,34 +309,30 @@ internal static class GlbExporter
             gltfMeshes.Add(new MeshDef(mesh.Name, primitives));
         }
 
-        // Align BIN chunk to 4 bytes
-        AlignStream(binMs, 4);
-        long binLength = binMs.Position;
-        if (binLength > uint.MaxValue)
-        {
-            throw new InvalidOperationException($"The glTF binary payload is {binLength} bytes; the GLB format supports at most {uint.MaxValue} bytes.");
-        }
-
-        // 2. Build JSON chunk
-        byte[] jsonData = BuildJsonChunk(
+        var binFile = bin.Complete();
+        var jsonData = BuildJsonChunk(
             materialTable,
             gltfMeshes,
             accessors,
             bufferViews,
-            binLength,
+            GetBinChunkLength(binFile?.Length ?? 0),
             generatorName ?? "NwcIO glTF 2.0 Exporter",
             viewpoints,
             materialsWithBlend);
 
-        // Align JSON chunk to 4 bytes with 0x20 spaces as per glTF spec
-        int jsonPadding = (4 - (jsonData.Length % 4)) % 4;
-        int jsonChunkLength = jsonData.Length + jsonPadding;
+        WriteContainer(output, jsonData.Span, binFile);
+    }
 
-        // 3. Write binary GLB container
-        long totalLength = 12 + (8 + jsonChunkLength) + (binLength > 0 ? 8 + binLength : 0);
-        if (totalLength > uint.MaxValue)
+    internal static void WriteContainer(Stream output, ReadOnlySpan<byte> jsonData, Stream? bin)
+    {
+        long binLength = bin?.Length ?? 0;
+        long binChunkLength = GetBinChunkLength(binLength);
+        long jsonChunkLength = Align4(jsonData.Length);
+        long totalLength = 12 + 8 + jsonChunkLength + (binChunkLength > 0 ? 8 + binChunkLength : 0);
+        if (totalLength > MaxAlignedLength)
         {
-            throw new InvalidOperationException($"The GLB file would be {totalLength} bytes; the format supports at most {uint.MaxValue} bytes.");
+            throw new InvalidOperationException(
+                $"The GLB file would be {totalLength} bytes including headers and padding. The 4-byte-aligned limit is {MaxAlignedLength} bytes.");
         }
 
         using var bw = new BinaryWriter(output, System.Text.Encoding.UTF8, leaveOpen: true);
@@ -444,25 +346,29 @@ internal static class GlbExporter
         bw.Write((uint)jsonChunkLength);
         bw.Write(ChunkTypeJson);
         bw.Write(jsonData);
-        for (int p = 0; p < jsonPadding; p++)
+        for (long p = jsonData.Length; p < jsonChunkLength; p++)
         {
             bw.Write((byte)0x20); // space padding
         }
 
         // Chunk 1: BIN, copied from the temporary file without a managed array copy
-        if (binLength > 0)
+        if (bin is not null && binChunkLength > 0)
         {
-            bw.Write((uint)binLength);
+            bw.Write((uint)binChunkLength);
             bw.Write(ChunkTypeBin);
             bw.Flush();
-            binMs.Position = 0;
-            binMs.CopyTo(output);
+            bin.Position = 0;
+            bin.CopyTo(output);
+            for (long p = binLength; p < binChunkLength; p++)
+            {
+                bw.Write((byte)0);
+            }
         }
 
         bw.Flush();
     }
 
-    private static byte[] BuildJsonChunk(
+    private static ReadOnlyMemory<byte> BuildJsonChunk(
         List<NwcMaterial> materials,
         List<MeshDef> meshes,
         List<AccessorDef> accessors,
@@ -472,8 +378,8 @@ internal static class GlbExporter
         IReadOnlyList<NwcSavedViewpoint>? viewpoints = null,
         HashSet<int>? materialsWithBlend = null)
     {
-        using var ms = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = false }))
+        var json = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(json))
         {
             writer.WriteStartObject();
 
@@ -706,7 +612,7 @@ internal static class GlbExporter
             writer.WriteEndObject();
         }
 
-        return ms.ToArray();
+        return json.WrittenMemory;
     }
 
     private static (float X, float Y, float Z)[] ComputeNormals(IReadOnlyList<Vector3d> vertices, List<int> indices)
@@ -785,35 +691,127 @@ internal static class GlbExporter
         writer.WriteNumber(propertyName, float.IsFinite(val) ? val : 0.0f);
     }
 
-    private static void AlignStream(Stream stream, int alignment)
+    private static int? WriteIndexAccessor(
+        BinChunk bin,
+        List<int> indices,
+        int vertexCount,
+        List<BufferViewDef> bufferViews,
+        List<AccessorDef> accessors)
     {
-        long rem = stream.Position % alignment;
-        if (rem != 0)
+        if (indices.Count == 0)
         {
-            int pad = alignment - (int)rem;
-            for (int i = 0; i < pad; i++)
+            return null;
+        }
+
+        bool useShort = vertexCount <= ushort.MaxValue;
+        int stride = useShort ? sizeof(ushort) : sizeof(uint);
+        long byteLength = (long)indices.Count * stride;
+        long offset = bin.BeginView(byteLength);
+        foreach (int index in indices)
+        {
+            var packed = bin.Reserve(stride);
+            if (useShort)
             {
-                stream.WriteByte(0);
+                BinaryPrimitives.WriteUInt16LittleEndian(packed, (ushort)index);
+            }
+            else
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(packed, (uint)index);
             }
         }
+
+        int viewIndex = bufferViews.Count;
+        bufferViews.Add(new BufferViewDef(offset, byteLength, TargetElementArrayBuffer));
+        int accessorIndex = accessors.Count;
+        accessors.Add(new AccessorDef(
+            viewIndex, 0, useShort ? ComponentTypeUnsignedShort : ComponentTypeUnsignedInt, indices.Count, "SCALAR", null, null));
+        return accessorIndex;
     }
 
-    // Falls back to memory when TEMP is not writable (sandboxes, read-only containers), as before the spill.
-    private static Stream CreateBinBuffer()
+    private static long Align4(long length) => (length + 3) & ~3L;
+
+    private static long GetBinChunkLength(long length)
     {
-        try
+        if (length > MaxAlignedLength)
         {
-            string tempPath = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.bin");
-            return new FileStream(
-                tempPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose);
+            throw new InvalidOperationException(
+                $"The GLB BIN chunk payload is {length} bytes. The 4-byte-aligned chunk limit is {MaxAlignedLength} bytes.");
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException)
-        {
-            return new MemoryStream();
-        }
+
+        return Align4(length);
     }
 
-    private readonly record struct BufferViewDef(long ByteOffset, int ByteLength, int Target);
+    internal static FileStream CreateBinBuffer(string directory)
+    {
+        string path = Path.Combine(directory, $"nwcio-{Guid.NewGuid():N}.bin");
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.ReadWrite,
+            Share = FileShare.None,
+            BufferSize = 0, // BinChunk already batches writes.
+            Options = FileOptions.DeleteOnClose,
+        };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        return new FileStream(path, options);
+    }
+
+    private sealed class BinChunk : IDisposable
+    {
+        private FileStream? _file;
+        private byte[]? _packed;
+        private int _used;
+
+        public long BeginView(long length)
+        {
+            var file = _file ??= CreateBinBuffer(Path.GetTempPath());
+            long position = file.Position + _used;
+            long offset = Align4(position);
+            GetBinChunkLength(offset + length);
+            if (offset > position)
+            {
+                Reserve((int)(offset - position)).Clear();
+            }
+
+            return offset;
+        }
+
+        public Span<byte> Reserve(int length)
+        {
+            var packed = _packed ??= new byte[64 * 1024];
+            if (_used + length > packed.Length)
+            {
+                FlushPacked();
+            }
+
+            var slice = packed.AsSpan(_used, length);
+            _used += length;
+            return slice;
+        }
+
+        public FileStream? Complete()
+        {
+            FlushPacked();
+            return _file;
+        }
+
+        private void FlushPacked()
+        {
+            if (_used > 0)
+            {
+                _file!.Write(_packed.AsSpan(0, _used));
+                _used = 0;
+            }
+        }
+
+        public void Dispose() => _file?.Dispose();
+    }
+
+    private readonly record struct BufferViewDef(long ByteOffset, long ByteLength, int Target);
 
     private readonly record struct AccessorDef(
         int BufferView,
