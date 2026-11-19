@@ -40,7 +40,8 @@ internal static class BcfExporter
     /// <summary>
     /// Writes the saved viewpoints list as a BCF 2.1 (.bcfzip) file to disk.
     /// </summary>
-    public static void WriteViewpointsFile(IReadOnlyList<NwcSavedViewpoint> viewpoints, string path, string? assemblyName = null)
+    public static void WriteViewpointsFile(
+        IReadOnlyList<NwcSavedViewpoint> viewpoints, string path, string? assemblyName = null, double metresPerUnit = 1.0)
     {
         ArgumentNullException.ThrowIfNull(viewpoints);
         ArgumentNullException.ThrowIfNull(path);
@@ -52,7 +53,7 @@ internal static class BcfExporter
         }
 
         using var fs = File.Create(path);
-        WriteViewpoints(viewpoints, fs, assemblyName);
+        WriteViewpoints(viewpoints, fs, assemblyName, metresPerUnit);
     }
 
     /// <summary>
@@ -60,7 +61,7 @@ internal static class BcfExporter
     /// </summary>
     public static void WriteViewpoints(
         IReadOnlyList<NwcSavedViewpoint> viewpoints, Stream stream, string? assemblyName = null,
-        CancellationToken cancellationToken = default)
+        double metresPerUnit = 1.0, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(viewpoints);
         ArgumentNullException.ThrowIfNull(stream);
@@ -97,7 +98,7 @@ internal static class BcfExporter
             using (var s = viewpointEntry.Open())
             using (var xml = XmlWriter.Create(s, XmlSettings))
             {
-                WriteCameraViewpointXml(xml, vp.Camera, viewpointGuid);
+                WriteCameraViewpointXml(xml, vp.Camera, viewpointGuid, metresPerUnit);
             }
         }
     }
@@ -184,7 +185,7 @@ internal static class BcfExporter
         xml.WriteElementString("CreationAuthor", "NwcIO");
 
         string desc = FormattableString.Invariant(
-            $"Geometric clash detected between {clash.ModelAName} (Mesh #{clash.MeshA.Id}, {clash.IfcGuidA}) and {clash.ModelBName} (Mesh #{clash.MeshB.Id}, {clash.IfcGuidB}). Overlap volume: {clash.Volume:F4} m³ at center ({clash.Center.X:F3}, {clash.Center.Y:F3}, {clash.Center.Z:F3}).");
+            $"Geometric clash detected between {clash.ModelAName} (Mesh #{clash.MeshA.Id}, {clash.IfcGuidA}) and {clash.ModelBName} (Mesh #{clash.MeshB.Id}, {clash.IfcGuidB}). Overlap volume: {clash.Volume:F4} cubic document units at center ({clash.Center.X:F3}, {clash.Center.Y:F3}, {clash.Center.Z:F3}).");
         xml.WriteElementString("Description", desc);
         xml.WriteEndElement(); // Topic
 
@@ -244,8 +245,9 @@ internal static class BcfExporter
         xml.WriteEndElement(); // Components
 
         // Camera Calculation
-        var center = clash.Center;
-        var size = clash.IntersectionBox.Size;
+        double scale = clash.ModelA.LengthUnit == clash.ModelB.LengthUnit ? clash.ModelA.MetresPerUnit ?? 1.0 : 1.0;
+        var center = clash.Center * scale;
+        var size = clash.IntersectionBox.Size * scale;
         double maxDim = Math.Max(size.X, Math.Max(size.Y, size.Z));
         double viewDistance = maxDim > 0.05 ? Math.Max(3.0, maxDim * 4.0) : 5.0;
 
@@ -331,7 +333,7 @@ internal static class BcfExporter
         xml.WriteEndDocument();
     }
 
-    private static void WriteCameraViewpointXml(XmlWriter xml, NwcCamera cam, string viewpointGuid)
+    private static void WriteCameraViewpointXml(XmlWriter xml, NwcCamera cam, string viewpointGuid, double metresPerUnit)
     {
         xml.WriteStartDocument();
         xml.WriteStartElement("VisualizationInfo");
@@ -343,9 +345,9 @@ internal static class BcfExporter
         {
             xml.WriteStartElement("OrthogonalCamera");
             xml.WriteStartElement("CameraViewPoint");
-            xml.WriteElementString("X", cam.Position.X.ToString("F4", CultureInfo.InvariantCulture));
-            xml.WriteElementString("Y", cam.Position.Y.ToString("F4", CultureInfo.InvariantCulture));
-            xml.WriteElementString("Z", cam.Position.Z.ToString("F4", CultureInfo.InvariantCulture));
+            xml.WriteElementString("X", (cam.Position.X * metresPerUnit).ToString("F4", CultureInfo.InvariantCulture));
+            xml.WriteElementString("Y", (cam.Position.Y * metresPerUnit).ToString("F4", CultureInfo.InvariantCulture));
+            xml.WriteElementString("Z", (cam.Position.Z * metresPerUnit).ToString("F4", CultureInfo.InvariantCulture));
             xml.WriteEndElement();
 
             xml.WriteStartElement("CameraDirection");
@@ -360,16 +362,16 @@ internal static class BcfExporter
             xml.WriteElementString("Z", cam.Up.Z.ToString("F4", CultureInfo.InvariantCulture));
             xml.WriteEndElement();
 
-            xml.WriteElementString("ViewToWorldScale", cam.FocalDistance.ToString("F4", CultureInfo.InvariantCulture));
+            xml.WriteElementString("ViewToWorldScale", (cam.FocalDistance * metresPerUnit).ToString("F4", CultureInfo.InvariantCulture));
             xml.WriteEndElement();
         }
         else
         {
             xml.WriteStartElement("PerspectiveCamera");
             xml.WriteStartElement("CameraViewPoint");
-            xml.WriteElementString("X", cam.Position.X.ToString("F4", CultureInfo.InvariantCulture));
-            xml.WriteElementString("Y", cam.Position.Y.ToString("F4", CultureInfo.InvariantCulture));
-            xml.WriteElementString("Z", cam.Position.Z.ToString("F4", CultureInfo.InvariantCulture));
+            xml.WriteElementString("X", (cam.Position.X * metresPerUnit).ToString("F4", CultureInfo.InvariantCulture));
+            xml.WriteElementString("Y", (cam.Position.Y * metresPerUnit).ToString("F4", CultureInfo.InvariantCulture));
+            xml.WriteElementString("Z", (cam.Position.Z * metresPerUnit).ToString("F4", CultureInfo.InvariantCulture));
             xml.WriteEndElement();
 
             xml.WriteStartElement("CameraDirection");

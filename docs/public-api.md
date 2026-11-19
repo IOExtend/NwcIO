@@ -58,6 +58,17 @@ synchronous counterparts. Directory discovery and reference resolution use synch
 The `load-models` phase reports each folder model, or the primary NWF and each of its reference entries,
 including missing, duplicate and unsupported references.
 
+`NwcDocument.LengthUnit` and `MetresPerUnit` describe the original coordinates. Set
+`NwcReaderOptions.LengthUnit` to override inference. Clash detection, proximity grouping,
+clash matrix cells and revision diff all interpret tolerances in the input coordinate units.
+Grid locations and length measurements keep these values and display the corresponding unit
+symbol. The measurement overloads accept a unit when their input is a standalone point or mesh.
+IFC converts known coordinates to its selected output unit. BCF camera positions and orthogonal
+view scales are exported in metres, using the original coordinates when the unit is unknown.
+Viewpoint XML labels default to the document's unit when known and accept an explicit label.
+`NwcAssembly.HasMixedLengthUnits` and the `MixedLengthUnits` diagnostic report mixed units.
+Assembly geometry retains its original coordinates.
+
 ## Coordination & Clash Detection (`NwcIO.Model.Clash`)
 
 | Type | Description |

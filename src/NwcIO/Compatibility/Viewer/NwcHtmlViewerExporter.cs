@@ -95,7 +95,7 @@ public static class NwcHtmlViewerExporter
         options.GridSystem ??= doc.GridSystem;
         options.TimeLiner ??= doc.TimeLiner;
         options.SelectionSets ??= doc.SelectionSets;
-        return WriteWithResult(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options, cancellationToken);
+        return WriteWithResult(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options, doc.LengthUnit, cancellationToken);
     }
 
     /// <summary>
@@ -123,7 +123,8 @@ public static class NwcHtmlViewerExporter
         options.SelectionSets ??= assembly.SelectionSets;
         using var fs = File.Create(path);
         using var writer = new StreamWriter(fs, Encoding.UTF8);
-        return WriteWithResult(writer, assembly.AllMeshes, assembly.SavedViewpoints, assembly.ClashTests, assembly.BoundingBox, options);
+        return WriteWithResult(writer, assembly.AllMeshes, assembly.SavedViewpoints, assembly.ClashTests, assembly.BoundingBox,
+            options, assembly.CommonLengthUnit, default);
     }
 
     /// <summary>
@@ -175,7 +176,7 @@ public static class NwcHtmlViewerExporter
         IReadOnlyList<NwcClashTest> clashTests,
         BoundingBox3d bounds,
         NwcHtmlViewerOptions options)
-        => WriteWithResult(writer, meshes, viewpoints, clashTests, bounds, options, default);
+        => WriteWithResult(writer, meshes, viewpoints, clashTests, bounds, options, NwcLengthUnit.Unknown, default);
 
     private static NwcHtmlViewerExportResult WriteWithResult(
         TextWriter writer,
@@ -184,13 +185,14 @@ public static class NwcHtmlViewerExporter
         IReadOnlyList<NwcClashTest> clashTests,
         BoundingBox3d bounds,
         NwcHtmlViewerOptions options,
+        NwcLengthUnit lengthUnit,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(meshes);
         options ??= new NwcHtmlViewerOptions();
 
-        var (jsonPayload, result) = BuildJsonPayload(meshes, viewpoints, clashTests, bounds, options, cancellationToken);
+        var (jsonPayload, result) = BuildJsonPayload(meshes, viewpoints, clashTests, bounds, options, lengthUnit, cancellationToken);
 
         writer.WriteLine("<!DOCTYPE html>");
         writer.WriteLine("<html lang=\"en\">");
@@ -311,8 +313,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       <div class="title"><span>3D Measure</span><button type="button" id="measure-clear" aria-label="Clear measurement">&times;</button></div>
       <div id="measure-status" aria-live="polite" style="color:#aaa;margin-bottom:4px;">Click 2 points to measure</div>
       <div id="measure-results" style="display:none;">
-        <div class="row"><span>Distance:</span><span class="val" id="m-dist">0.00 m</span></div>
-        <div class="row"><span>Horiz Dist:</span><span class="val" id="m-horiz">0.00 m</span></div>
+        <div class="row"><span>Distance:</span><span class="val" id="m-dist">0.00</span></div>
+        <div class="row"><span>Horiz Dist:</span><span class="val" id="m-horiz">0.00</span></div>
         <div class="row"><span>dX / dY / dZ:</span><span class="val" id="m-deltas">0 / 0 / 0</span></div>
         <div class="row"><span>Pitch:</span><span class="val" id="m-pitch">0.0°</span></div>
       </div>
@@ -1117,8 +1119,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
         document.getElementById('measure-status').textContent = 'Measurement complete:';
         document.getElementById('measure-results').style.display = 'block';
-        document.getElementById('m-dist').textContent = `${dist.toFixed(3)} m`;
-        document.getElementById('m-horiz').textContent = `${horiz.toFixed(3)} m`;
+        document.getElementById('m-dist').textContent = `${dist.toFixed(3)} ${modelData.lengthUnit}`;
+        document.getElementById('m-horiz').textContent = `${horiz.toFixed(3)} ${modelData.lengthUnit}`;
         document.getElementById('m-deltas').textContent = `${dx.toFixed(2)} / ${dy.toFixed(2)} / ${dz.toFixed(2)} m`;
         document.getElementById('m-pitch').textContent = `${pitch.toFixed(1)}°`;
       }
@@ -1809,6 +1811,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         IReadOnlyList<NwcClashTest> clashTests,
         BoundingBox3d bounds,
         NwcHtmlViewerOptions options,
+        NwcLengthUnit lengthUnit,
         CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream();
@@ -1816,6 +1819,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
         writer.WriteStartObject();
         writer.WriteString("title", options.Title);
+        writer.WriteString("lengthUnit", lengthUnit.GetSymbol() ?? "units");
 
         // Bounding Box: left out when it isn't finite (a document without geometry), so the viewer uses its default
         if (IsFinite(bounds.Min) && IsFinite(bounds.Max))

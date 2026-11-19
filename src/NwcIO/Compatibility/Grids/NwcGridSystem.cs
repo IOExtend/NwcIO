@@ -15,6 +15,9 @@ public sealed class NwcGridSystem
 {
     public string Name { get; set; } = "Grids";
 
+    /// <summary>Unit of the grid coordinates and location offsets.</summary>
+    public NwcLengthUnit LengthUnit { get; set; }
+
     public List<NwcGridLine> Lines { get; } = [];
 
     public NwcGridSystem() { }
@@ -133,10 +136,14 @@ public sealed class NwcGridSystem
     /// <summary>
     /// Formats a human-readable grid location descriptor for a 3D coordinate (e.g. "A / 1", "A (+1.20m) / 2 (-0.50m)").
     /// </summary>
-    public string FormatLocation(Vector3d point, double snapTolerance = 0.05)
+    public string FormatLocation(Vector3d point, double snapTolerance = 0.05) =>
+        FormatLocation(point, snapTolerance, LengthUnit);
+
+    private string FormatLocation(Vector3d point, double snapTolerance, NwcLengthUnit lengthUnit)
     {
         if (Lines.Count == 0) return string.Empty;
 
+        string suffix = lengthUnit.GetSymbol() ?? " units";
         var inter = FindNearestIntersection(point, out double interDist);
         if (inter is not null)
         {
@@ -156,8 +163,8 @@ public sealed class NwcGridSystem
                     return $"{l1.Name} / {l2.Name}";
                 }
 
-                string part1 = snap1 ? l1.Name : string.Create(CultureInfo.InvariantCulture, $"{l1.Name} ({off1:+0.00;-0.00;0.00}m)");
-                string part2 = snap2 ? l2.Name : string.Create(CultureInfo.InvariantCulture, $"{l2.Name} ({off2:+0.00;-0.00;0.00}m)");
+                string part1 = snap1 ? l1.Name : string.Create(CultureInfo.InvariantCulture, $"{l1.Name} ({off1:+0.00;-0.00;0.00}{suffix})");
+                string part2 = snap2 ? l2.Name : string.Create(CultureInfo.InvariantCulture, $"{l2.Name} ({off2:+0.00;-0.00;0.00}{suffix})");
                 return $"{part1} / {part2}";
             }
 
@@ -172,7 +179,7 @@ public sealed class NwcGridSystem
             {
                 return $"Grid {nearestLine.Name}";
             }
-            return string.Create(CultureInfo.InvariantCulture, $"Grid {nearestLine.Name} ({off:+0.00;-0.00;0.00}m)");
+            return string.Create(CultureInfo.InvariantCulture, $"Grid {nearestLine.Name} ({off:+0.00;-0.00;0.00}{suffix})");
         }
 
         return string.Empty;
@@ -181,23 +188,25 @@ public sealed class NwcGridSystem
     /// <summary>
     /// Automatically populates <see cref="NwcClashResult.GridLocation"/> for all clash results in a test.
     /// </summary>
-    public int AssignGridLocations(NwcClashTest test)
+    public int AssignGridLocations(NwcClashTest test) => AssignGridLocations(test, LengthUnit);
+
+    internal int AssignGridLocations(NwcClashTest test, NwcLengthUnit lengthUnit)
     {
         ArgumentNullException.ThrowIfNull(test);
         int count = 0;
 
         foreach (var clash in test.Results)
         {
-            clash.GridLocation = FormatLocation(clash.ClashPoint);
+            clash.GridLocation = FormatLocation(clash.ClashPoint, 0.05, lengthUnit);
             count++;
         }
 
         foreach (var group in test.Groups)
         {
-            group.GridLocation = FormatLocation(group.ClashPoint);
+            group.GridLocation = FormatLocation(group.ClashPoint, 0.05, lengthUnit);
             foreach (var c in group.Clashes)
             {
-                c.GridLocation = FormatLocation(c.ClashPoint);
+                c.GridLocation = FormatLocation(c.ClashPoint, 0.05, lengthUnit);
                 count++;
             }
         }
@@ -212,9 +221,10 @@ public sealed class NwcGridSystem
     {
         ArgumentNullException.ThrowIfNull(doc);
         int count = 0;
+        var lengthUnit = LengthUnit == NwcLengthUnit.Unknown ? doc.LengthUnit : LengthUnit;
         foreach (var test in doc.ClashTests)
         {
-            count += AssignGridLocations(test);
+            count += AssignGridLocations(test, lengthUnit);
         }
         return count;
     }
@@ -225,7 +235,7 @@ public sealed class NwcGridSystem
     public static NwcGridSystem ExtractFromDocument(NwcDocument doc)
     {
         ArgumentNullException.ThrowIfNull(doc);
-        var system = new NwcGridSystem("Model Grids");
+        var system = new NwcGridSystem("Model Grids") { LengthUnit = doc.LengthUnit };
 
         if (doc.RootNode is null) return system;
 
@@ -313,6 +323,10 @@ public sealed class NwcGridSystem
         xml.WriteStartElement("grids");
         xml.WriteStartElement("grid_system");
         xml.WriteAttributeString("name", Name);
+        if (LengthUnit.GetMetresPerUnit().HasValue)
+        {
+            xml.WriteAttributeString("units", LengthUnit.ToString());
+        }
 
         foreach (var line in Lines)
         {
@@ -367,6 +381,11 @@ public sealed class NwcGridSystem
         string sysName = sysElem?.Attribute("name")?.Value ?? "Grids";
 
         var system = new NwcGridSystem(sysName);
+        if (Enum.TryParse(sysElem?.Attribute("units")?.Value, ignoreCase: true, out NwcLengthUnit unit) &&
+            unit.GetMetresPerUnit().HasValue)
+        {
+            system.LengthUnit = unit;
+        }
 
         var lineElems = doc.Descendants("grid_line");
         foreach (var elem in lineElems)

@@ -78,7 +78,7 @@ public static class NwcClashDetector
         }
 
         RunWithCancellation(test, itemsA.Count, progress,
-            () => RunCoreMultiModel(itemsA, itemsB, test, progress, cancellationToken), cancellationToken);
+            () => RunCoreMultiModel(itemsA, itemsB, test, assembly.CommonLengthUnit, progress, cancellationToken), cancellationToken);
         return test;
     }
 
@@ -196,6 +196,7 @@ public static class NwcClashDetector
 
                     var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
+                        LengthUnit = document.LengthUnit,
                         Description = test.TestType switch
                         {
                             NwcClashTestType.Clearance => $"Clearance between {item1Name} and {item2Name}",
@@ -221,6 +222,7 @@ public static class NwcClashDetector
         List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsA,
         List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsB,
         NwcClashTest test,
+        NwcLengthUnit lengthUnit,
         IProgress<NwcProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -298,6 +300,7 @@ public static class NwcClashDetector
 
                     var result = new NwcClashResult(clashName, obj1, obj2, clashPoint, distance, NwcClashStatus.New)
                     {
+                        LengthUnit = lengthUnit,
                         Description = test.TestType switch
                         {
                             NwcClashTestType.Clearance => $"Clearance between {itemA.ModelName} ({name1}) and {itemB.ModelName} ({name2})",
