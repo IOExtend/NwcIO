@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using NwcIO.Model;
 
@@ -132,16 +133,17 @@ internal static class GlbExporter
             double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
             double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
 
-            for (int v = 0; v < vCount; v++)
+            for (int v = 0; v < vCount;)
             {
-                var pt = vertices[v];
-                var packed = bin.Reserve(12);
-                BinaryPrimitives.WriteSingleLittleEndian(packed, (float)pt.X);
-                BinaryPrimitives.WriteSingleLittleEndian(packed[4..], (float)pt.Y);
-                BinaryPrimitives.WriteSingleLittleEndian(packed[8..], (float)pt.Z);
-
-                if (double.IsFinite(pt.X) && double.IsFinite(pt.Y) && double.IsFinite(pt.Z))
+                var batch = bin.ReserveRecords(vCount - v, 12, out int count);
+                for (int i = 0; i < count; i++, v++)
                 {
+                    var pt = vertices[v];
+                    var packed = batch[(i * 12)..];
+                    BinaryPrimitives.WriteSingleLittleEndian(packed, (float)pt.X);
+                    BinaryPrimitives.WriteSingleLittleEndian(packed[4..], (float)pt.Y);
+                    BinaryPrimitives.WriteSingleLittleEndian(packed[8..], (float)pt.Z);
+
                     if (pt.X < minX) minX = pt.X;
                     if (pt.Y < minY) minY = pt.Y;
                     if (pt.Z < minZ) minZ = pt.Z;
@@ -149,12 +151,6 @@ internal static class GlbExporter
                     if (pt.Y > maxY) maxY = pt.Y;
                     if (pt.Z > maxZ) maxZ = pt.Z;
                 }
-            }
-
-            if (!double.IsFinite(minX))
-            {
-                minX = 0; minY = 0; minZ = 0;
-                maxX = 0; maxY = 0; maxZ = 0;
             }
 
             int posViewIdx = bufferViews.Count;
@@ -175,14 +171,22 @@ internal static class GlbExporter
             if (indices.Count > 0)
             {
                 long normOffset = bin.BeginView(posLength);
-                var normals = ComputeNormals(vertices, indices);
-                for (int v = 0; v < vCount; v++)
+                var normals = AccumulateNormals(vertices, indices);
+                for (int v = 0; v < vCount;)
                 {
-                    var n = normals[v];
-                    var packed = bin.Reserve(12);
-                    BinaryPrimitives.WriteSingleLittleEndian(packed, n.X);
-                    BinaryPrimitives.WriteSingleLittleEndian(packed[4..], n.Y);
-                    BinaryPrimitives.WriteSingleLittleEndian(packed[8..], n.Z);
+                    var batch = bin.ReserveRecords(vCount - v, 12, out int count);
+                    for (int i = 0; i < count; i++, v++)
+                    {
+                        var n = normals[v];
+                        double len = Math.Sqrt(n.X * n.X + n.Y * n.Y + n.Z * n.Z);
+                        var (x, y, z) = len > 1e-6
+                            ? ((float)(n.X / len), (float)(n.Y / len), (float)(n.Z / len))
+                            : (0.0f, 0.0f, 1.0f);
+                        var packed = batch[(i * 12)..];
+                        BinaryPrimitives.WriteSingleLittleEndian(packed, x);
+                        BinaryPrimitives.WriteSingleLittleEndian(packed[4..], y);
+                        BinaryPrimitives.WriteSingleLittleEndian(packed[8..], z);
+                    }
                 }
 
                 int normViewIdx = bufferViews.Count;
@@ -208,14 +212,18 @@ internal static class GlbExporter
             {
                 long colLength = (long)vCount * 16;
                 long colOffset = bin.BeginView(colLength);
-                for (int v = 0; v < vCount; v++)
+                for (int v = 0; v < vCount;)
                 {
-                    var c = lineColors[v];
-                    var packed = bin.Reserve(16);
-                    BinaryPrimitives.WriteSingleLittleEndian(packed, ColorComponent(c.R));
-                    BinaryPrimitives.WriteSingleLittleEndian(packed[4..], ColorComponent(c.G));
-                    BinaryPrimitives.WriteSingleLittleEndian(packed[8..], ColorComponent(c.B));
-                    BinaryPrimitives.WriteSingleLittleEndian(packed[12..], ColorComponent(c.A));
+                    var batch = bin.ReserveRecords(vCount - v, 16, out int count);
+                    for (int i = 0; i < count; i++, v++)
+                    {
+                        var c = lineColors[v];
+                        var packed = batch[(i * 16)..];
+                        BinaryPrimitives.WriteSingleLittleEndian(packed, ColorComponent(c.R));
+                        BinaryPrimitives.WriteSingleLittleEndian(packed[4..], ColorComponent(c.G));
+                        BinaryPrimitives.WriteSingleLittleEndian(packed[8..], ColorComponent(c.B));
+                        BinaryPrimitives.WriteSingleLittleEndian(packed[12..], ColorComponent(c.A));
+                    }
                 }
 
                 int colViewIdx = bufferViews.Count;
@@ -615,7 +623,7 @@ internal static class GlbExporter
         return json.WrittenMemory;
     }
 
-    private static (float X, float Y, float Z)[] ComputeNormals(IReadOnlyList<Vector3d> vertices, List<int> indices)
+    private static (double X, double Y, double Z)[] AccumulateNormals(IReadOnlyList<Vector3d> vertices, List<int> indices)
     {
         var normals = new (double X, double Y, double Z)[vertices.Count];
 
@@ -651,22 +659,7 @@ internal static class GlbExporter
             normals[i2].X += nx; normals[i2].Y += ny; normals[i2].Z += nz;
         }
 
-        var result = new (float X, float Y, float Z)[vertices.Count];
-        for (int i = 0; i < vertices.Count; i++)
-        {
-            var n = normals[i];
-            double len = Math.Sqrt(n.X * n.X + n.Y * n.Y + n.Z * n.Z);
-            if (len > 1e-6)
-            {
-                result[i] = ((float)(n.X / len), (float)(n.Y / len), (float)(n.Z / len));
-            }
-            else
-            {
-                result[i] = (0.0f, 0.0f, 1.0f);
-            }
-        }
-
-        return result;
+        return normals;
     }
 
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
@@ -707,17 +700,26 @@ internal static class GlbExporter
         int stride = useShort ? sizeof(ushort) : sizeof(uint);
         long byteLength = (long)indices.Count * stride;
         long offset = bin.BeginView(byteLength);
-        foreach (int index in indices)
+        var values = CollectionsMarshal.AsSpan(indices);
+        while (!values.IsEmpty)
         {
-            var packed = bin.Reserve(stride);
+            var batch = bin.ReserveRecords(values.Length, stride, out int count);
             if (useShort)
             {
-                BinaryPrimitives.WriteUInt16LittleEndian(packed, (ushort)index);
+                for (int i = 0; i < count; i++)
+                {
+                    BinaryPrimitives.WriteUInt16LittleEndian(batch[(i * sizeof(ushort))..], (ushort)values[i]);
+                }
             }
             else
             {
-                BinaryPrimitives.WriteUInt32LittleEndian(packed, (uint)index);
+                for (int i = 0; i < count; i++)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(batch[(i * sizeof(uint))..], (uint)values[i]);
+                }
             }
+
+            values = values[count..];
         }
 
         int viewIndex = bufferViews.Count;
@@ -762,6 +764,7 @@ internal static class GlbExporter
 
     private sealed class BinChunk : IDisposable
     {
+        private const int BatchCapacity = 64 * 1024;
         private FileStream? _file;
         private byte[]? _packed;
         private int _used;
@@ -780,9 +783,15 @@ internal static class GlbExporter
             return offset;
         }
 
-        public Span<byte> Reserve(int length)
+        public Span<byte> ReserveRecords(int remaining, int stride, out int count)
         {
-            var packed = _packed ??= new byte[64 * 1024];
+            count = Math.Min(remaining, BatchCapacity / stride);
+            return Reserve(count * stride);
+        }
+
+        private Span<byte> Reserve(int length)
+        {
+            var packed = _packed ??= new byte[BatchCapacity];
             if (_used + length > packed.Length)
             {
                 FlushPacked();

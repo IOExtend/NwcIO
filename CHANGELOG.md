@@ -19,6 +19,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 - GLB identifies NwcIO as the generator when exporting a document.
 - GLB geometry export packs the BIN chunk in bounded batches into a temporary file. It checks the
   aligned chunk and container sizes, and a failed path-based export preserves the destination.
+- GLB packing reserves space for a batch of vertices or indices at a time and normalizes triangle normals as it writes them.
 
 ### Changed
 - The container reader scans seekable inputs in blocks with 64-bit offsets. Non-seekable inputs are spooled to a temporary file. With `KeepStreamCatalog = false`, parsers inflate payloads on demand.

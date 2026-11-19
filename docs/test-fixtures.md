@@ -40,6 +40,14 @@ peak was 366.4 MiB with the catalog disabled and 183.4 MiB with it enabled. Thes
 collectible allocations. At return, the corresponding live heap deltas were 0.0 MiB and 183.2 MiB.
 A separate test scans a synthetic seekable input with a valid stream beyond 2 GiB.
 
+## Synthetic GLB measurements
+
+Create 12 meshes of 60,000 vertices each. Triangle `i` uses `(i, 0, 0)`, `(i, 1, 0)` and
+`(i, 0, 1)`. Round-trip the document through NWC, then time `SaveGlb(Stream.Null, worldCoordinates: false)`.
+On Windows with .NET 10.0.12 Release, four warm-up rounds and 15 measured rounds rotated the three
+exporters. The medians were 19.84 ms before PR #264, 20.27 ms after it and 18.04 ms with batched packing.
+All three exporters returned the same 18,727,900 bytes when written to a comparison stream.
+
 ## What Is Discovered
 
 The per-model tests (`RealFixtureTests`) discover every `*.nwc`, `*.nwd` and `*.nwf` file under the roots below and run each as its own theory case, so one bad fixture does not stop the others. Cases are identified by position in the fixture list, never by path, so no private name reaches the test output. `.nwc` and `.nwd` files are opened with the scene tree; `.nwf` files are opened with `BuildSceneTree = false` and only the checks that apply to the data present run. Without a sidecar file the tests assert only model-independent invariants (valid transforms, mesh and index sanity, export structure and counts, BVH queries, a `.nwc` save/open round trip); no source application, loader plugin, element count or output size is assumed. The multi-model test uses the first two `.nwc`/`.nwd` fixtures and is skipped when fewer than two exist. The other real-file suites (`RealFileInvariantTests`, `RealCorpusTests`) keep reading `.nwc` and `.nwd` only.

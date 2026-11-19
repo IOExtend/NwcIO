@@ -88,6 +88,78 @@ public class GlbExportTests
         Assert.False(bin.CopyRequested);
     }
 
+    [Theory]
+    [InlineData(32_769)]
+    [InlineData(65_541)]
+    public void GlbExporter_PacksCompleteBinAcrossBatches(int vertexCount)
+    {
+        var vertices = Enumerable.Range(0, vertexCount).Select(i =>
+            new Vector3d(i / 3, i % 3 == 1 ? 1 : 0, i % 3 == 2 ? 1 : 0)).ToArray();
+        var indices = Enumerable.Range(0, vertexCount).ToArray();
+        var colors = Enumerable.Range(0, vertexCount).Select(i => new RgbaColor(i % 2, 0.25f, 0.5f, 1f)).ToArray();
+        var glb = ExportGlb([new NwcMesh
+        {
+            Id = 1,
+            Name = "Batched",
+            Vertices = vertices,
+            Indices = indices,
+            LineIndices = indices[..^1],
+            LineColors = colors,
+        }]);
+
+        using var expected = new MemoryStream();
+        using var writer = new BinaryWriter(expected);
+        foreach (var vertex in vertices)
+        {
+            writer.Write((float)vertex.X);
+            writer.Write((float)vertex.Y);
+            writer.Write((float)vertex.Z);
+        }
+
+        for (int i = 0; i < vertexCount; i++)
+        {
+            writer.Write(1f);
+            writer.Write(0f);
+            writer.Write(0f);
+        }
+
+        foreach (var color in colors)
+        {
+            writer.Write(color.R);
+            writer.Write(color.G);
+            writer.Write(color.B);
+            writer.Write(color.A);
+        }
+
+        WriteIndices(indices);
+        WriteIndices(indices.AsSpan(0, vertexCount - 1));
+        writer.Flush();
+
+        int jsonLength = (int)BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(12));
+        Assert.Equal((uint)expected.Length, BinaryPrimitives.ReadUInt32LittleEndian(glb.AsSpan(20 + jsonLength)));
+        Assert.Equal(expected.ToArray(), glb[(28 + jsonLength)..]);
+
+        void WriteIndices(ReadOnlySpan<int> values)
+        {
+            foreach (int index in values)
+            {
+                if (vertexCount <= ushort.MaxValue)
+                {
+                    writer.Write((ushort)index);
+                }
+                else
+                {
+                    writer.Write((uint)index);
+                }
+            }
+
+            while (expected.Length % 4 != 0)
+            {
+                writer.Write((byte)0);
+            }
+        }
+    }
+
     private sealed class HeaderOnlyBin(long length) : MemoryStream
     {
         public bool CopyRequested { get; private set; }
