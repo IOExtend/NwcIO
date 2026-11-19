@@ -1180,6 +1180,166 @@ public sealed class ClashDetectiveTests
         Assert.True(NwcClashDetector.IsDuplicate(a, shifted, 0.001));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClashDetection_PreCancelled_DoesNotReportOrRegisterTest(bool federated)
+    {
+        var doc = NwcDocument.Create(meshes: [CreateBoxMesh(1, new(0, 0, 0), new(1, 1, 1))]);
+        var assembly = NwcAssembly.Create("Federation", doc);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var reports = new List<NwcProgress>();
+        var progress = new ClashProgress(reports.Add);
+
+        var error = Assert.Throws<OperationCanceledException>(() => federated
+            ? assembly.RunClashDetection("Cancelled", 0.001, progress, cts.Token)
+            : doc.RunClashDetection(null, progress, cts.Token));
+
+        Assert.Equal(cts.Token, error.CancellationToken);
+        Assert.Empty(reports);
+        Assert.Empty(doc.ClashTests);
+        Assert.Empty(assembly.ClashTests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClashDetection_CancelledAfterFirstMesh_PreservesPriorResultsAndCanBeRetried(bool federated)
+    {
+        var first = NwcDocument.Create(meshes:
+        [
+            CreateBoxMesh(1, new(0, 0, 0), new(2, 2, 2)),
+            new NwcMesh { Id = 2, Vertices = [], Indices = [] },
+        ]);
+        NwcMesh[] otherMeshes =
+        [
+            CreateBoxMesh(3, new(0, 0, 0), new(2, 2, 2)),
+            CreateBoxMesh(4, new(0, 0, 0), new(2, 2, 2)),
+        ];
+        var doc = NwcDocument.Create(meshes: [.. first.Meshes, .. otherMeshes]);
+        var assembly = NwcAssembly.Create("Federation", first, NwcDocument.Create(meshes: otherMeshes));
+        var test = new NwcClashTest("Progress", NwcClashTestType.Conservative);
+        var prior = new NwcClashResult();
+        var group = new NwcClashGroup("Previous run");
+        test.Results.Add(prior);
+        test.Groups.Add(group);
+        using var cts = new CancellationTokenSource();
+        var reports = new List<NwcProgress>();
+        var cancelAfterFirstMesh = new ClashProgress(value =>
+        {
+            reports.Add(value);
+            if (value.Completed == 1)
+            {
+                Assert.Equal(3, test.Results.Count);
+                cts.Cancel();
+            }
+        });
+
+        var error = Assert.Throws<OperationCanceledException>(() => Run(cancelAfterFirstMesh, cts.Token));
+        Assert.Equal(cts.Token, error.CancellationToken);
+        Assert.Equal([0, 1], reports.Select(value => value.Completed));
+        Assert.Same(prior, Assert.Single(test.Results));
+        Assert.Same(group, Assert.Single(test.Groups));
+        Assert.Empty(doc.ClashTests);
+
+        reports.Clear();
+        Assert.Same(test, Run(new ClashProgress(reports.Add), default));
+
+        Assert.Equal([0, 1, 2, 3, 4], reports.Select(value => value.Completed));
+        Assert.All(reports, value =>
+        {
+            Assert.Equal("clash-detection", value.Phase);
+            Assert.Equal(4, value.Total);
+        });
+        Assert.Equal(4, test.Results.Count);
+        Assert.Same(prior, test.Results[0]);
+        if (!federated) Assert.Same(test, Assert.Single(doc.ClashTests));
+
+        NwcClashTest Run(IProgress<NwcProgress> progress, CancellationToken token) => federated
+            ? NwcClashDetector.Run(assembly, test, progress, token)
+            : doc.RunClashDetection(test, progress, token);
+    }
+
+    [Theory]
+    [InlineData(NwcClashTestType.Hard)]
+    [InlineData(NwcClashTestType.Clearance)]
+    [InlineData(NwcClashTestType.Duplicates)]
+    public void ClashDetection_CancelledDuringGeometryComparison_StopsInsideMeshPair(NwcClashTestType type)
+    {
+        using var cts = new CancellationTokenSource();
+        var indices = new CancelOnIndexRead(cts);
+        bool duplicates = type == NwcClashTestType.Duplicates;
+        var a = new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(2, 0, 0), new(0, 2, 0)],
+            Indices = duplicates ? Enumerable.Range(0, indices.Count).Select(i => i % 3).ToArray() : [0, 1, 2],
+        };
+        var b = new NwcMesh
+        {
+            Id = 2,
+            Vertices = duplicates ? a.Vertices : [new(1.5, 1.5, 0), new(2, 1.5, 0), new(1.5, 2, 0)],
+            Indices = indices,
+        };
+        var report = new List<NwcProgress>();
+        var doc = NwcDocument.Create(meshes: [a, b]);
+        var test = new NwcClashTest("One pair", type);
+        test.SelectionA.ExplicitNodeIds.Add(1);
+        test.SelectionB.ExplicitNodeIds.Add(2);
+
+        var error = Assert.Throws<OperationCanceledException>(() =>
+            NwcClashDetector.Run(doc, test, new ClashProgress(report.Add), cts.Token));
+
+        Assert.Equal(cts.Token, error.CancellationToken);
+        Assert.InRange(indices.Reads, 1, 3 * 256);
+        Assert.Equal(new NwcProgress("clash-detection", 0, 1), Assert.Single(report));
+        Assert.Empty(test.Results);
+    }
+
+    [Fact]
+    public void ClashDetection_EmptySelection_ReportsCompletionOnce()
+    {
+        var reports = new List<NwcProgress>();
+        var doc = NwcDocument.Create();
+        var assembly = NwcAssembly.Create("Empty", doc);
+
+        var test = assembly.RunClashDetection("Empty", 0.001, new ClashProgress(reports.Add), default);
+
+        Assert.Equal(new NwcProgress("clash-detection", 0, 0), Assert.Single(reports));
+        Assert.Empty(test.Results);
+        Assert.Same(test, Assert.Single(assembly.ClashTests));
+    }
+
+    private sealed class ClashProgress(Action<NwcProgress> report) : IProgress<NwcProgress>
+    {
+        public void Report(NwcProgress value) => report(value);
+    }
+
+    private sealed class CancelOnIndexRead(CancellationTokenSource cancellation) : IReadOnlyList<int>
+    {
+        public int Count => 2048 * 3;
+        public int Reads { get; private set; }
+        public int this[int index]
+        {
+            get
+            {
+                if (++Reads == 1) cancellation.Cancel();
+                return index % 3;
+            }
+        }
+
+        public IEnumerator<int> GetEnumerator()
+        {
+            for (int i = 0; i < Count; i++)
+            {
+                yield return this[i];
+            }
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private static NwcMesh CreateBoxMesh(int id, Vector3d min, Vector3d max)
     {
         var vertices = new Vector3d[]

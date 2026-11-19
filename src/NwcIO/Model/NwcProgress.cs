@@ -1,6 +1,6 @@
 namespace NwcIO.Model;
 
-/// <summary>Progress reported by long-running reader operations.</summary>
+/// <summary>Progress reported by long-running operations.</summary>
 /// <param name="Phase">Operation phase, for example "load-models".</param>
 /// <param name="Completed">Completed units, such as mesh pairs or model files.</param>
 /// <param name="Total">Total units for the phase, or 0 when unknown.</param>
