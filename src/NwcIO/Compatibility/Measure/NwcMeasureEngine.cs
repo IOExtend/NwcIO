@@ -279,7 +279,7 @@ public static class NwcMeasureEngine
         NwcMesh meshA, NwcMesh meshB, bool useWorldCoordinates, NwcLengthUnit lengthUnit) =>
         MeasureMeshToMesh(meshA, meshB, useWorldCoordinates, cancellationToken: default) with { LengthUnit = lengthUnit };
 
-    internal static NwcMeshToMeshMeasurement MeasureMeshToMesh(
+    private static NwcMeshToMeshMeasurement MeasureMeshToMesh(
         NwcMesh meshA, NwcMesh meshB, bool useWorldCoordinates, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(meshA);
@@ -287,7 +287,12 @@ public static class NwcMeasureEngine
 
         var vertsA = useWorldCoordinates ? meshA.GetWorldVertices() : meshA.Vertices;
         var vertsB = useWorldCoordinates ? meshB.GetWorldVertices() : meshB.Vertices;
+        return MeasureMeshToMesh(meshA, meshB, vertsA, vertsB, cancellationToken);
+    }
 
+    internal static NwcMeshToMeshMeasurement MeasureMeshToMesh(NwcMesh meshA, NwcMesh meshB,
+        IReadOnlyList<Vector3d> vertsA, IReadOnlyList<Vector3d> vertsB, CancellationToken cancellationToken)
+    {
         var indicesA = meshA.Indices;
         var indicesB = meshB.Indices;
 

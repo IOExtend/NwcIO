@@ -88,6 +88,7 @@ public class ClashMatrixTests
     [InlineData(0.0, 0.001, NwcClashTestType.Hard, 0)] // touching boxes are not a Hard clash with a positive tolerance
     [InlineData(0.0, 0.0, NwcClashTestType.Hard, 1)]
     [InlineData(0.0005, 0.001, NwcClashTestType.Clearance, 1)]
+    [InlineData(0.5, 0.5, NwcClashTestType.Clearance, 1)]
     [InlineData(0.002, 0.001, NwcClashTestType.Clearance, 0)]
     public void Matrix_Tolerance_AppliesToTestType(double gap, double tolerance, NwcClashTestType type, int expected)
     {

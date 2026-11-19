@@ -91,6 +91,10 @@ and during triangle comparisons, including clearance tests. If cancelled, the ru
 `OperationCanceledException` and discards the results it added, preserving prior results and groups.
 The convenience methods register a test only after it completes.
 
+Clash tests and matrix cells use a spatial index to find candidate pairs in selection order.
+Each run reuses transformed vertices, and hard clash tests cull triangles outside the shared
+region before testing for intersection. Proximity grouping finds nearby clashes with a spatial grid.
+
 ## 4D TimeLiner, Selection Sets & Appearance (`NwcIO.Model.TimeLiner`, `.Sets`, `.Appearance`)
 
 | Type | Description |

@@ -17,7 +17,10 @@ public sealed class NwcSpatialIndex
     public int MaxDepth { get; private set; }
     public BoundingBox3d Bounds => _root?.Bounds ?? BoundingBox3d.Empty;
 
-    public NwcSpatialIndex(IReadOnlyList<NwcMesh> meshes)
+    public NwcSpatialIndex(IReadOnlyList<NwcMesh> meshes) : this(meshes, null, default) { }
+
+    internal NwcSpatialIndex(IReadOnlyList<NwcMesh> meshes, Func<NwcMesh, BoundingBox3d>? getBounds,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(meshes);
 
@@ -25,8 +28,11 @@ public sealed class NwcSpatialIndex
         for (int i = 0; i < meshes.Count; i++)
         {
             var m = meshes[i];
-            var b = m.GetWorldBoundingBox();
-            _entries[i] = new MeshEntry(m, b, b.Center);
+            cancellationToken.ThrowIfCancellationRequested();
+            var b = getBounds is null ? m.GetWorldBoundingBox() : getBounds(m);
+            // A NaN box cannot intersect a clash query and would poison its BVH's parent bounds.
+            if (getBounds is not null && !b.Intersects(b)) b = BoundingBox3d.Empty;
+            _entries[i] = new MeshEntry(m, b, b.Center, i);
         }
 
         if (_entries.Length > 0)
@@ -35,7 +41,7 @@ public sealed class NwcSpatialIndex
             int leafCount = 0;
             int maxDepth = 0;
 
-            _root = BuildNode(0, _entries.Length, 1, ref nodeCount, ref leafCount, ref maxDepth);
+            _root = BuildNode(0, _entries.Length, 1, ref nodeCount, ref leafCount, ref maxDepth, cancellationToken);
 
             NodeCount = nodeCount;
             LeafCount = leafCount;
@@ -54,12 +60,24 @@ public sealed class NwcSpatialIndex
         }
 
         var results = new List<NwcMesh>();
-        QueryBoxRecursive(_root, box, results);
+        QueryBoxRecursive(_root, box, results, static entry => entry.Mesh, default);
         return results;
     }
 
-    private void QueryBoxRecursive(BvhNode node, BoundingBox3d box, List<NwcMesh> results)
+    internal void QueryBoxIndices(BoundingBox3d box, List<int> results, CancellationToken cancellationToken = default)
     {
+        results.Clear();
+        if (_root is not null && !box.IsEmpty)
+        {
+            QueryBoxRecursive(_root, box, results, static entry => entry.Index, cancellationToken);
+            results.Sort();
+        }
+    }
+
+    private void QueryBoxRecursive<T>(BvhNode node, BoundingBox3d box, List<T> results,
+        Func<MeshEntry, T> select, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!node.Bounds.Intersects(box))
         {
             return;
@@ -69,16 +87,16 @@ public sealed class NwcSpatialIndex
         {
             for (int i = node.StartIndex; i < node.StartIndex + node.Count; i++)
             {
-                if (_entries[i].Bounds.Intersects(box))
+                if (!_entries[i].Bounds.IsEmpty && _entries[i].Bounds.Intersects(box))
                 {
-                    results.Add(_entries[i].Mesh);
+                    results.Add(select(_entries[i]));
                 }
             }
             return;
         }
 
-        if (node.Left is not null) QueryBoxRecursive(node.Left, box, results);
-        if (node.Right is not null) QueryBoxRecursive(node.Right, box, results);
+        if (node.Left is not null) QueryBoxRecursive(node.Left, box, results, select, cancellationToken);
+        if (node.Right is not null) QueryBoxRecursive(node.Right, box, results, select, cancellationToken);
     }
 
     /// <summary>
@@ -355,8 +373,10 @@ public sealed class NwcSpatialIndex
         int depth,
         ref int totalNodes,
         ref int totalLeaves,
-        ref int maxDepth)
+        ref int maxDepth,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         totalNodes++;
         if (depth > maxDepth) maxDepth = depth;
 
@@ -389,8 +409,8 @@ public sealed class NwcSpatialIndex
         int mid = start + count / 2;
         Array.Sort(_entries, start, count, new CentroidComparer(axis));
 
-        var left = BuildNode(start, mid - start, depth + 1, ref totalNodes, ref totalLeaves, ref maxDepth);
-        var right = BuildNode(mid, start + count - mid, depth + 1, ref totalNodes, ref totalLeaves, ref maxDepth);
+        var left = BuildNode(start, mid - start, depth + 1, ref totalNodes, ref totalLeaves, ref maxDepth, cancellationToken);
+        var right = BuildNode(mid, start + count - mid, depth + 1, ref totalNodes, ref totalLeaves, ref maxDepth, cancellationToken);
 
         return new BvhNode
         {
@@ -402,7 +422,7 @@ public sealed class NwcSpatialIndex
         };
     }
 
-    private readonly record struct MeshEntry(NwcMesh Mesh, BoundingBox3d Bounds, Vector3d Centroid);
+    private readonly record struct MeshEntry(NwcMesh Mesh, BoundingBox3d Bounds, Vector3d Centroid, int Index);
 
     private sealed class CentroidComparer : IComparer<MeshEntry>
     {
