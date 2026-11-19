@@ -35,7 +35,8 @@ internal static class ObjExporter
         TextWriter writer,
         bool worldCoordinates = true,
         string? sourceDocument = null,
-        Func<NwcMesh, string?>? objectNamePrefix = null)
+        Func<NwcMesh, string?>? objectNamePrefix = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(writer);
@@ -54,6 +55,7 @@ internal static class ObjExporter
 
         for (int m = 0; m < meshes.Count; m++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var mesh = meshes[m];
             var vertices = worldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
             if (vertices.Count == 0 || (mesh.Indices.Count == 0 && mesh.LineIndices.Count == 0))

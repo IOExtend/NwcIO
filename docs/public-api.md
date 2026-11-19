@@ -45,6 +45,13 @@ use asynchronous reads and writes for file and stream overloads and pass the can
 to the underlying I/O. Parsing, serialization and compression perform synchronous CPU work between I/O operations.
 Stream overloads leave the supplied stream open.
 
+The document's `SaveObjAsync`, `SaveGlbAsync`, `SaveIfcAsync`, `SaveViewpointsBcfAsync`,
+`SaveViewpointsXmlAsync` and `SaveHtmlViewerAsync` accept file paths or streams and a
+`CancellationToken`. OBJ and IFC also accept a `TextWriter`. The compatibility formatters
+run on a worker thread and forward writes and flushes to the destination's async methods with
+the token. Successful path exports replace the destination atomically. Cancellation may leave
+partial output in a caller-owned stream or writer, which remains open.
+
 `NwcAssembly.LoadFromDirectoryAsync` and `NwcAssembly.OpenNwfAsync` read model files asynchronously
 and pass cancellation through to each read. They load models sequentially in the same order as their
 synchronous counterparts. Directory discovery and reference resolution use synchronous filesystem metadata.
