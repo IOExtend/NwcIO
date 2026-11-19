@@ -1,5 +1,6 @@
 using NwcIO.Internal.Export;
 using NwcIO.Model.Sets;
+using NwcIO.Model.Spatial;
 
 namespace NwcIO.Model.Clash;
 
@@ -133,18 +134,25 @@ public static class NwcClashDetector
             meshesInB = new HashSet<NwcMesh>(meshesB, ReferenceEqualityComparer.Instance);
         }
 
+        var geometry = new ClashGeometry(cancellationToken);
+        NwcSpatialIndex? index = null;
+        var candidates = new List<int>();
+        double tol = Math.Max(0.0, test.Tolerance);
         for (int i = 0; i < meshesA.Count; i++)
         {
             ReportProgress(progress, i, meshesA.Count, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             var meshA = meshesA[i];
-            var boxA = meshA.GetWorldBoundingBox();
+            var boxA = geometry.GetBounds(meshA);
             if (boxA.IsEmpty) continue;
             bool canVisitReverse = !sameSelection && meshesInB!.Contains(meshA);
 
-            for (var j = sameSelection ? i + 1 : 0; j < meshesB.Count; j++)
+            index ??= new NwcSpatialIndex(meshesB, geometry.GetBounds, cancellationToken);
+            index.QueryBoxIndices(ClashGeometry.Expand(boxA, tol), candidates, cancellationToken);
+            foreach (int j in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (sameSelection && j <= i) continue;
                 var meshB = meshesB[j];
                 if (ReferenceEquals(meshA, meshB) || meshA.Id == meshB.Id || IsSameElement(meshA, meshB)) continue;
                 // The reverse pair was already visited from the earlier mesh in A.
@@ -153,19 +161,10 @@ public static class NwcClashDetector
                     continue;
                 }
 
-                var boxB = meshB.GetWorldBoundingBox();
-                if (boxB.IsEmpty) continue;
-
-                // Broad phase AABB
-                double tol = Math.Max(0.0, test.Tolerance);
-                var expandedA = tol > 0
-                    ? new BoundingBox3d(boxA.Min - new Vector3d(tol, tol, tol), boxA.Max + new Vector3d(tol, tol, tol))
-                    : boxA;
-
-                if (!expandedA.Intersects(boxB)) continue;
+                var boxB = geometry.GetBounds(meshB);
 
                 // Narrow phase: triangle intersection (Hard) or mesh distance (Clearance)
-                if (TryGetClash(test, meshA, meshB, cancellationToken, out var clashPoint, out double distance))
+                if (TryGetClash(test, meshA, meshB, boxA, boxB, geometry, cancellationToken, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -239,18 +238,25 @@ public static class NwcClashDetector
             }
             meshesInB = new HashSet<NwcMesh>(itemsB.Select(item => item.Mesh), ReferenceEqualityComparer.Instance);
         }
+        var geometry = new ClashGeometry(cancellationToken);
+        NwcSpatialIndex? index = null;
+        var candidates = new List<int>();
+        double tol = Math.Max(0.0, test.Tolerance);
         for (int i = 0; i < itemsA.Count; i++)
         {
             ReportProgress(progress, i, itemsA.Count, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             var itemA = itemsA[i];
-            var boxA = itemA.Mesh.GetWorldBoundingBox();
+            var boxA = geometry.GetBounds(itemA.Mesh);
             if (boxA.IsEmpty) continue;
             bool canVisitReverse = !sameSelection && meshesInB!.Contains(itemA.Mesh);
 
-            for (var j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
+            index ??= new NwcSpatialIndex(itemsB.Select(item => item.Mesh).ToArray(), geometry.GetBounds, cancellationToken);
+            index.QueryBoxIndices(ClashGeometry.Expand(boxA, tol), candidates, cancellationToken);
+            foreach (int j in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (sameSelection && j <= i) continue;
                 var itemB = itemsB[j];
                 if (ReferenceEquals(itemA.Mesh, itemB.Mesh) || IsSameElement(itemA.Mesh, itemB.Mesh)) continue;
                 // Mesh IDs can repeat across models; only references identify pairs.
@@ -259,17 +265,9 @@ public static class NwcClashDetector
                     continue;
                 }
 
-                var boxB = itemB.Mesh.GetWorldBoundingBox();
-                if (boxB.IsEmpty) continue;
+                var boxB = geometry.GetBounds(itemB.Mesh);
 
-                double tol = Math.Max(0.0, test.Tolerance);
-                var expandedA = tol > 0
-                    ? new BoundingBox3d(boxA.Min - new Vector3d(tol, tol, tol), boxA.Max + new Vector3d(tol, tol, tol))
-                    : boxA;
-
-                if (!expandedA.Intersects(boxB)) continue;
-
-                if (TryGetClash(test, itemA.Mesh, itemB.Mesh, cancellationToken, out var clashPoint, out double distance))
+                if (TryGetClash(test, itemA.Mesh, itemB.Mesh, boxA, boxB, geometry, cancellationToken, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -331,6 +329,9 @@ public static class NwcClashDetector
         NwcClashTest test,
         NwcMesh meshA,
         NwcMesh meshB,
+        BoundingBox3d boxA,
+        BoundingBox3d boxB,
+        ClashGeometry geometry,
         CancellationToken cancellationToken,
         out Vector3d clashPoint,
         out double distance)
@@ -348,26 +349,27 @@ public static class NwcClashDetector
                         return false;
                     }
 
-                    var measurement = Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB, useWorldCoordinates: true, cancellationToken);
+                    var measurement = Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB,
+                        geometry.GetVertices(meshA), geometry.GetVertices(meshB), cancellationToken);
                     clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
                     distance = measurement.Distance;
                     return measurement.Distance <= tolerance;
                 }
 
             case NwcClashTestType.Duplicates:
-                if (!IsDuplicate(meshA, meshB, tolerance, cancellationToken))
+                if (!IsDuplicate(meshA, meshB, tolerance, geometry, cancellationToken))
                 {
                     distance = 0;
                     return false;
                 }
 
-                clashPoint = (meshA.GetWorldBoundingBox().Center + meshB.GetWorldBoundingBox().Center) * 0.5;
+                clashPoint = (boxA.Center + boxB.Center) * 0.5;
                 distance = 0;
                 return true;
 
             case NwcClashTestType.Conservative:
                 {
-                    var overlap = meshA.GetWorldBoundingBox().Intersect(meshB.GetWorldBoundingBox());
+                    var overlap = boxA.Intersect(boxB);
                     if (overlap.IsEmpty)
                     {
                         distance = 0;
@@ -380,7 +382,7 @@ public static class NwcClashDetector
                 }
 
             default:
-                if (CheckMeshIntersection(meshA, meshB, cancellationToken, out clashPoint, out double penetration))
+                if (CheckMeshIntersection(meshA, meshB, boxA, boxB, geometry, cancellationToken, out clashPoint, out double penetration))
                 {
                     // A zero-depth AABB overlap is a coplanar or touching surface; it is kept rather than
                     // classified as a below-tolerance penetration.
@@ -404,7 +406,7 @@ public static class NwcClashDetector
     /// Transform, name, id and material are ignored.
     /// </summary>
     internal static bool IsDuplicate(
-        NwcMesh meshA, NwcMesh meshB, double tolerance, CancellationToken cancellationToken = default)
+        NwcMesh meshA, NwcMesh meshB, double tolerance, ClashGeometry? geometry = null, CancellationToken cancellationToken = default)
     {
         if (ReferenceEquals(meshA, meshB))
         {
@@ -417,8 +419,9 @@ public static class NwcClashDetector
             return false;
         }
 
-        var verticesA = meshA.GetWorldVertices();
-        var verticesB = meshB.GetWorldVertices();
+        geometry ??= new ClashGeometry(cancellationToken);
+        var verticesA = geometry.GetVertices(meshA);
+        var verticesB = geometry.GetVertices(meshB);
         if (verticesA.Count != verticesB.Count)
         {
             return false;
@@ -460,6 +463,9 @@ public static class NwcClashDetector
     private static bool CheckMeshIntersection(
         NwcMesh a,
         NwcMesh b,
+        BoundingBox3d boxA,
+        BoundingBox3d boxB,
+        ClashGeometry geometry,
         CancellationToken cancellationToken,
         out Vector3d clashPoint,
         out double penetrationDepth)
@@ -473,14 +479,12 @@ public static class NwcClashDetector
             return false;
         }
 
-        var vertsA = a.GetWorldVertices();
-        var vertsB = b.GetWorldVertices();
+        var vertsA = geometry.GetVertices(a);
+        var vertsB = geometry.GetVertices(b);
 
         if (vertsA.Count < 3 || vertsB.Count < 3)
         {
             // Fallback to bounding box overlap
-            var boxA = a.GetWorldBoundingBox();
-            var boxB = b.GetWorldBoundingBox();
             if (boxA.Intersects(boxB))
             {
                 var overlap = new BoundingBox3d(
@@ -495,29 +499,34 @@ public static class NwcClashDetector
 
         var indicesA = a.Indices.Count >= 3 ? a.Indices : CreateDefaultIndices(vertsA.Count);
         var indicesB = b.Indices.Count >= 3 ? b.Indices : CreateDefaultIndices(vertsB.Count);
+        var geometryBoxA = geometry.GetVertexBounds(a, vertsA);
+        var geometryBoxB = geometry.GetVertexBounds(b, vertsB);
+        double planeTolerance = NwcTriangleIntersection.Epsilon * Math.Max(geometryBoxA.Size.Length, geometryBoxB.Size.Length);
+        var trianglesA = FilterTriangles(vertsA, indicesA, geometryBoxB, planeTolerance, cancellationToken);
+        using var remainingB = FilterTriangles(vertsB, indicesB, geometryBoxA, planeTolerance, cancellationToken).GetEnumerator();
+        var trianglesB = new List<(int A, int B, int C)>();
+        bool moreB = true;
 
         var intersectionPoints = new List<Vector3d>();
 
-        for (int i = 0; i + 2 < indicesA.Count; i += 3)
+        foreach (var (ia0, ia1, ia2) in trianglesA)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            int ia0 = indicesA[i];
-            int ia1 = indicesA[i + 1];
-            int ia2 = indicesA[i + 2];
-            if (ia0 >= vertsA.Count || ia1 >= vertsA.Count || ia2 >= vertsA.Count) continue;
-
             var v0 = vertsA[ia0];
             var v1 = vertsA[ia1];
             var v2 = vertsA[ia2];
 
-            for (int j = 0; j + 2 < indicesB.Count; j += 3)
+            for (int j = 0; j < trianglesB.Count || moreB; j++)
             {
-                if (j % (3 * 256) == 0) cancellationToken.ThrowIfCancellationRequested();
-                int ib0 = indicesB[j];
-                int ib1 = indicesB[j + 1];
-                int ib2 = indicesB[j + 2];
-                if (ib0 >= vertsB.Count || ib1 >= vertsB.Count || ib2 >= vertsB.Count) continue;
-
+                if ((j & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+                if (j == trianglesB.Count)
+                {
+                    // Keep candidates already read for the next triangle, while allowing the tenth hit to stop the scan.
+                    moreB = remainingB.MoveNext();
+                    if (!moreB) break;
+                    trianglesB.Add(remainingB.Current);
+                }
+                var (ib0, ib1, ib2) = trianglesB[j];
                 var u0 = vertsB[ib0];
                 var u1 = vertsB[ib1];
                 var u2 = vertsB[ib2];
@@ -528,7 +537,7 @@ public static class NwcClashDetector
                     if (intersectionPoints.Count >= 10) break; // Limit sampling for performance
                 }
             }
-            if (intersectionPoints.Count >= 10) break;
+            if (intersectionPoints.Count >= 10 || trianglesB.Count == 0) break;
         }
 
         if (intersectionPoints.Count > 0)
@@ -537,8 +546,6 @@ public static class NwcClashDetector
             for (int p = 0; p < intersectionPoints.Count; p++) sum += intersectionPoints[p];
             clashPoint = sum / (double)intersectionPoints.Count;
 
-            var boxA = a.GetWorldBoundingBox();
-            var boxB = b.GetWorldBoundingBox();
             var overlapSize = new Vector3d(
                 Math.Max(0.0, Math.Min(boxA.Max.X, boxB.Max.X) - Math.Max(boxA.Min.X, boxB.Min.X)),
                 Math.Max(0.0, Math.Min(boxA.Max.Y, boxB.Max.Y) - Math.Max(boxA.Min.Y, boxB.Min.Y)),
@@ -548,6 +555,44 @@ public static class NwcClashDetector
         }
 
         return false;
+    }
+
+    private static IEnumerable<(int A, int B, int C)> FilterTriangles(IReadOnlyList<Vector3d> vertices, IReadOnlyList<int> indices,
+        BoundingBox3d otherBounds, double planeTolerance, CancellationToken cancellationToken)
+    {
+        for (int i = 0; i + 2 < indices.Count; i += 3)
+        {
+            if (i % (3 * 256) == 0) cancellationToken.ThrowIfCancellationRequested();
+            int a = indices[i];
+            int b = indices[i + 1];
+            int c = indices[i + 2];
+            if ((uint)a >= (uint)vertices.Count || (uint)b >= (uint)vertices.Count || (uint)c >= (uint)vertices.Count)
+            {
+                continue;
+            }
+
+            var v0 = vertices[a];
+            var v1 = vertices[b];
+            var v2 = vertices[c];
+            var bounds = new BoundingBox3d(v0, v0).Union(v1).Union(v2);
+            if (!bounds.Intersects(otherBounds))
+            {
+                var ab = v1 - v0;
+                var ac = v2 - v0;
+                double twiceArea = Vector3d.Cross(ab, ac).Length;
+                if (twiceArea == 0) continue;
+                double lengthAB = ab.Length, lengthAC = ac.Length, lengthBC = (v2 - v1).Length;
+                double longestEdge = Math.Max(lengthAB, Math.Max(lengthAC, lengthBC));
+                double inradius = twiceArea / (lengthAB + lengthAC + lengthBC);
+                // The coplanar test allows a gap along each projected edge normal. Expanding the
+                // triangle about its incenter bounds that gap, including at narrow corners.
+                // Dominant-axis projection and lifting back to 3D cost at most 8x, plus plane separation.
+                double padding = planeTolerance * (8 * longestEdge / inradius + 2);
+                if (double.IsFinite(padding) && otherBounds.Intersects(otherBounds) &&
+                    !ClashGeometry.Expand(bounds, padding).Intersects(otherBounds)) continue;
+            }
+            yield return (a, b, c);
+        }
     }
 
     // Fragments of one element are separate meshes and never clash with each other. The element key works without

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using NwcIO.Internal.Export;
 using NwcIO.Model.Sets;
+using NwcIO.Model.Spatial;
 
 namespace NwcIO.Model.Clash;
 
@@ -203,6 +204,8 @@ public sealed class NwcClashMatrix
             keyByDocument[assembly.Models[i]] = modelKeys[i];
         }
 
+        var geometry = new ClashGeometry();
+        var candidates = new List<int>();
         foreach (var cell in Cells)
         {
             if (!cell.Enabled) continue;
@@ -228,20 +231,42 @@ public sealed class NwcClashMatrix
             var test = new NwcClashTest(testName, cell.TestType, cell.Tolerance);
             test.Rules.AddRange(GlobalRules);
 
-            // Execute pair detection with spatial pruning
+            var selectionB = meshesB.Select(item => item.mesh).ToArray();
+            bool clearance = cell.TestType == NwcClashTestType.Clearance;
+            bool duplicates = cell.TestType == NwcClashTestType.Duplicates;
+            double tolerance = Math.Max(0.0, cell.Tolerance);
+            // BoxGap squares the axis differences. Round outward so underflow or rounding
+            // at the clearance threshold cannot exclude a pair before that test.
+            double searchRadius = clearance
+                ? Math.BitIncrement(Math.Sqrt(Math.BitIncrement(tolerance * tolerance)))
+                : duplicates ? tolerance : 0;
+            bool unboundedClearance = clearance && (!double.IsFinite(searchRadius) ||
+                selectionB.Any(mesh => HasNonFiniteBounds(geometry.GetBounds(mesh))));
+            var index = unboundedClearance ? null : new NwcSpatialIndex(selectionB, geometry.GetBounds, default);
             int clashId = 1;
             for (int i = 0; i < meshesA.Count; i++)
             {
                 var (mA, docA) = meshesA[i];
-                var boxA = mA.GetWorldBoundingBox();
+                var boxA = geometry.GetBounds(mA);
 
                 int startJ = (cell.DisciplineA == cell.DisciplineB) ? i + 1 : 0;
-                for (int j = startJ; j < meshesB.Count; j++)
+                if (unboundedClearance || clearance && HasNonFiniteBounds(boxA))
                 {
+                    candidates.Clear();
+                    for (int j = startJ; j < meshesB.Count; j++) candidates.Add(j);
+                }
+                else
+                {
+                    index!.QueryBoxIndices(ClashGeometry.Expand(boxA, searchRadius), candidates);
+                }
+
+                foreach (int j in candidates)
+                {
+                    if (j < startJ) continue;
                     var (mB, docB) = meshesB[j];
                     if ((mA.Id == mB.Id && docA == docB) || NwcClashDetector.IsSameElement(mA, mB)) continue;
 
-                    var boxB = mB.GetWorldBoundingBox();
+                    var boxB = geometry.GetBounds(mB);
                     var interBox = boxA.Intersect(boxB);
 
                     double penetration;
@@ -265,9 +290,7 @@ public sealed class NwcClashMatrix
                             continue;
                         }
 
-                        double dupTol = Math.Max(0.0, cell.Tolerance);
-                        var expandedA = new BoundingBox3d(boxA.Min - new Vector3d(dupTol, dupTol, dupTol), boxA.Max + new Vector3d(dupTol, dupTol, dupTol));
-                        if (!expandedA.Intersects(boxB) || !NwcClashDetector.IsDuplicate(mA, mB, dupTol))
+                        if (double.IsNaN(tolerance) || !NwcClashDetector.IsDuplicate(mA, mB, tolerance, geometry))
                         {
                             continue;
                         }
@@ -450,6 +473,10 @@ public sealed class NwcClashMatrix
         writer.WriteEndObject();
         writer.Flush();
     }
+
+    private static bool HasNonFiniteBounds(BoundingBox3d box) => !box.IsEmpty &&
+        (!double.IsFinite(box.Min.X) || !double.IsFinite(box.Min.Y) || !double.IsFinite(box.Min.Z) ||
+         !double.IsFinite(box.Max.X) || !double.IsFinite(box.Max.Y) || !double.IsFinite(box.Max.Z));
 
     /// <summary>Shortest distance between two axis-aligned boxes (zero when they intersect).</summary>
     private static double BoxGap(BoundingBox3d a, BoundingBox3d b)

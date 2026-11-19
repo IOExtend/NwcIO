@@ -77,7 +77,10 @@ public sealed class NwcMesh
     /// <summary>
     /// Gets the axis-aligned bounding box of the mesh in world space coordinates.
     /// </summary>
-    public BoundingBox3d GetWorldBoundingBox()
+    public BoundingBox3d GetWorldBoundingBox() => GetWorldBoundingBox(null);
+
+    internal BoundingBox3d GetWorldBoundingBox(Func<NwcMesh, IReadOnlyList<Vector3d>>? getVertices,
+        CancellationToken cancellationToken = default)
     {
         if (_cachedWorldBounds.HasValue)
         {
@@ -93,7 +96,7 @@ public sealed class NwcMesh
             }
         }
 
-        var worldVerts = GetWorldVertices();
+        var worldVerts = getVertices is null ? GetWorldVertices() : getVertices(this);
         if (worldVerts.Count == 0)
         {
             _cachedWorldBounds = BoundingBox3d.Empty;
@@ -105,6 +108,7 @@ public sealed class NwcMesh
 
         for (int i = 0; i < worldVerts.Count; i++)
         {
+            if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
             var v = worldVerts[i];
             if (v.X < minX) minX = v.X;
             if (v.Y < minY) minY = v.Y;
@@ -123,7 +127,9 @@ public sealed class NwcMesh
     /// Returns vertices transformed into world space coordinates by <see cref="Transform"/>.
     /// If no transform is assigned, returns <see cref="Vertices"/>.
     /// </summary>
-    public IReadOnlyList<Vector3d> GetWorldVertices()
+    public IReadOnlyList<Vector3d> GetWorldVertices() => TransformVertices(default);
+
+    internal IReadOnlyList<Vector3d> TransformVertices(CancellationToken cancellationToken)
     {
         if (Transform is null)
         {
@@ -134,6 +140,7 @@ public sealed class NwcMesh
         var world = new Vector3d[Vertices.Count];
         for (int i = 0; i < Vertices.Count; i++)
         {
+            if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
             var v = Vertices[i];
             double wx = v.X * m[0] + v.Y * m[4] + v.Z * m[8] + m[12];
             double wy = v.X * m[1] + v.Y * m[5] + v.Z * m[9] + m[13];
