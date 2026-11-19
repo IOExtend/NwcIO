@@ -398,8 +398,10 @@ public class AssemblyTests
         NwcIO.Internal.Container.NwcContainerWriter.Write(fs, [xrefStream]);
     }
 
-    [Fact]
-    public void OpenNwf_ResolvesSubfoldersDeduplicatesAndReportsMissing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenNwf_ResolvesSubfoldersDeduplicatesAndReportsMissing(bool asynchronous)
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-nwf-" + Guid.NewGuid().ToString("N"));
         string archDir = Path.Combine(tempDir, "Arch");
@@ -423,7 +425,7 @@ public class AssemblyTests
                 nowhere + "/Mech/D.nwc",            // nowhere to be found: unresolved
                 "Textures/tex.png");                // resolves but unsupported: skipped
 
-            var assembly = NwcAssembly.OpenNwf(nwfPath);
+            var assembly = asynchronous ? await NwcAssembly.OpenNwfAsync(nwfPath) : NwcAssembly.OpenNwf(nwfPath);
 
             // nwf doc + A, B, C — B must appear once despite two references.
             Assert.Equal(4, assembly.Models.Count);
