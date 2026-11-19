@@ -46,7 +46,7 @@ public class PartitionPropsTests
     [InlineData("rootClass52", "LcOaPartitionProps stream 0 at byte ", ": class 52, which this slot does not allow")]
     [InlineData("rootNull", "LcOaPartitionProps stream 0 at byte ", ": null pointer in a slot that needs an object")]
     [InlineData("name66", "LcOaPartitionProps stream 0 at byte ", ": class-66 name is not null")]
-    [InlineData("flags66", "LcOaPartitionProps stream 0 at byte ", ": class-66 flags 00000001 are not 01000000")]
+    [InlineData("flags66", "LcOaPartitionProps stream 0 at byte ", ": class-66 flags 00000001 are not 01000000 or 00020000")]
     [InlineData("value66", "LcOaPartitionProps stream 0 at byte ", ": class-66 value 0 is outside 1..2147483647")]
     [InlineData("rootPad", "LcOaPartitionProps stream 0 at byte ", ": end pad is not zero")]
     [InlineData("rootTrailing", "LcOaPartitionProps stream 0 at byte ", ": data does not end at the zero pad to a multiple of 8")]
@@ -107,6 +107,19 @@ public class PartitionPropsTests
     [Fact]
     public void Open_ModelFile_AttachesTheProps() =>
         Assert.Equal(3, NwcDocument.Open(new MemoryStream(File(null))).RootNode!.Children[0].Children[0].PropertyTabs.Count);
+
+    [Theory]
+    [InlineData(0x01000000)]
+    [InlineData(0x00020000)]
+    public void Open_Class66Flags_KeepTheElementId(int flags)
+    {
+        byte[] file = SyntheticNwcFile.Build(H([1], 1), null, [], [], partitionProps: [P(p => Id66(p, flags: flags))]);
+        var doc = NwcDocument.Open(new MemoryStream(file));
+        var tab = Assert.Single(doc.RootNode!.Children[0].Children[0].PropertyTabs);
+        var property = Assert.Single(tab.Properties);
+        Assert.Equal("LcRevitId", tab.InternalName);
+        Assert.Equal("1001", property.Value);
+    }
 
     [Theory]
     [InlineData(0, 3, "LcOaPartitionProps: the table of contents names 3 streams, not 2")]

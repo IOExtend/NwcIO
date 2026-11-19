@@ -46,8 +46,8 @@ internal static class FragmentParser
 
     private sealed class Parser
     {
-        // A fragment takes at least [id][13], D, four ints, a new class-14 pose and two back-references.
-        private const int MinFragmentBytes = 8 + 8 + 16 + 8 + 24 + 8 + 8;
+        // The shortest fragment has a null pose and back-references for appearance and geometry.
+        private const int MinFragmentBytes = 8 + 8 + 16 + 4 + 8 + 8;
 
         private readonly LcObjectReader _reader;
         private readonly Func<int, object> _readBody;
@@ -93,9 +93,7 @@ internal static class FragmentParser
             _reader.ReadInt32();
             int seq = _reader.ReadInt32();
 
-            // A pose is never shared, so it is always a new object. It may be null (seen in .nwd files saved by Navisworks 2026): the
-            // record then sits at its class-93 centre, unrotated and unscaled (docs/format-notes.md §2.4).
-            var pose = (Pose?)_reader.ReadPointer(PoseClasses, _readBody, allowBackReference: false);
+            var pose = (Pose?)_reader.ReadPointer(PoseClasses, _readBody);
             var look = (FragmentLook)_reader.ReadPointer(AppearanceClasses, _readBody, allowNull: false)!;
             var geometry = (GeometryReference)_reader.ReadPointer(GeometryClasses, _readBody, allowNull: false)!;
             pose ??= new Pose(geometry.Centre, Quaterniond.Identity, 1.0);

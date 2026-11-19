@@ -78,7 +78,7 @@ ZTOC    := [int32 k] [k x int32 compressed length of ZSTREAM i] zero pad to 8   
 HIERARCHY HEADER := [int32 k >= 1] [k x int32 n_i]          n_i = number of roots in ZSTREAM i
 ZSTREAM i := ROOT{n_i} zero pad to 8                          ids from 100 per stream, no implicit root
 ROOT      := a new object (never null, never a back-reference) of class 86, 79 or 66; nested objects are class 52
-66        := [str name = null] [ptr 52 key, internal "LcRevitId"] [i32 flags = 0x01000000] PAD8 [i64 value in 1..2^31-1]
+66        := [str name = null] [ptr 52 key, internal "LcRevitId"] [i32 flags = 0x01000000 or 0x00020000] PAD8 [i64 value in 1..2^31-1]
 LINK      := the n-th null attribute slot of a hierarchy node, in byte order, takes the n-th root of ZSTREAM 0 ‖ ZSTREAM 1 ‖ ...
 ```
 
@@ -116,7 +116,7 @@ The nesting is therefore independent of the exporter UI language for the marker 
   - `93` geometry reference: `[6 x f32 bbox][3 x f64 c][f32][i32 key][i32 rec]`. `rec` is the 1-based index of a geometry record (§2.5). The box equals the bounding box of the record's positions, and `c` is the offset of those positions: for a posed fragment it is the pose translation in the partition's frame, and it places a fragment without a pose.
 - **Placement**: the fragment pose is the full world transform of the record's positions: `world = s·R(q)·v + t`, with `s = 1` for classes 14 and 15 and `R(q)` the identity for class 14. `R(q)` is the usual rotation matrix of the normalised quaternion. No unit conversion is applied.
 - **Mirroring**: a pose with `s < 0` mirrors the geometry, so triangle winding must be reversed to keep faces outward in world space. Local vertices and indices are not changed.
-- **Sharing**: several fragments may reference one geometry record, directly or through back-referenced class 93 objects. The pose is never shared.
+- **Sharing**: several fragments may reference one geometry record, directly or through back-referenced class 93 objects. A pose slot may reference an earlier class-14, class-15 or class-16 pose in the stream.
 
 #### Spatial hierarchy (`LcOpNwdSpatialHierarchy`)
 
