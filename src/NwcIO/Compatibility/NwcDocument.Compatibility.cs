@@ -197,10 +197,16 @@ public sealed partial class NwcDocument
     /// <summary>
     /// Executes clash detection across the document using the specified or default test configuration.
     /// </summary>
-    public Model.Clash.NwcClashTest RunClashDetection(Model.Clash.NwcClashTest? test = null)
+    public Model.Clash.NwcClashTest RunClashDetection(Model.Clash.NwcClashTest? test = null) =>
+        RunClashDetection(test, null, default);
+
+    /// <summary>Runs the specified or default clash test with cancellation and progress.</summary>
+    /// <exception cref="OperationCanceledException">The cancellation token was cancelled.</exception>
+    public Model.Clash.NwcClashTest RunClashDetection(
+        Model.Clash.NwcClashTest? test, IProgress<NwcProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         test ??= new Model.Clash.NwcClashTest("Clash Test");
-        Model.Clash.NwcClashDetector.Run(this, test);
+        Model.Clash.NwcClashDetector.Run(this, test, progress, cancellationToken);
         if (!ClashTests.Contains(test)) ClashTests.Add(test);
         return test;
     }

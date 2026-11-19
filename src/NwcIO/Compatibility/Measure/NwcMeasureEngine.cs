@@ -253,7 +253,11 @@ public static class NwcMeasureEngine
     /// <summary>
     /// Measures the clearance (minimum distance) between two 3D polygon meshes.
     /// </summary>
-    public static NwcMeshToMeshMeasurement MeasureMeshToMesh(NwcMesh meshA, NwcMesh meshB, bool useWorldCoordinates = true)
+    public static NwcMeshToMeshMeasurement MeasureMeshToMesh(NwcMesh meshA, NwcMesh meshB, bool useWorldCoordinates = true) =>
+        MeasureMeshToMesh(meshA, meshB, useWorldCoordinates, default);
+
+    internal static NwcMeshToMeshMeasurement MeasureMeshToMesh(
+        NwcMesh meshA, NwcMesh meshB, bool useWorldCoordinates, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(meshA);
         ArgumentNullException.ThrowIfNull(meshB);
@@ -277,6 +281,7 @@ public static class NwcMeasureEngine
 
         for (var i = 0; i + 2 < indicesA.Count; i += 3)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!ReadTriangle(vertsA, indicesA, i, a))
             {
                 continue;
@@ -284,6 +289,7 @@ public static class NwcMeasureEngine
 
             for (var j = 0; j + 2 < indicesB.Count; j += 3)
             {
+                if (j % (3 * 256) == 0) cancellationToken.ThrowIfCancellationRequested();
                 if (!ReadTriangle(vertsB, indicesB, j, b))
                 {
                     continue;

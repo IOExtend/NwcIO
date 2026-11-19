@@ -243,10 +243,16 @@ public sealed partial class NwcAssembly
     /// <summary>
     /// Executes full mesh-level triangle collision detection across all contributing models of the assembly.
     /// </summary>
-    public Clash.NwcClashTest RunClashDetection(string testName = "Federated Clash Test", double tolerance = 0.001)
+    public Clash.NwcClashTest RunClashDetection(string testName = "Federated Clash Test", double tolerance = 0.001) =>
+        RunClashDetection(testName, tolerance, null, default);
+
+    /// <summary>Runs a hard clash test across all models with cancellation and progress.</summary>
+    /// <exception cref="OperationCanceledException">The cancellation token was cancelled.</exception>
+    public Clash.NwcClashTest RunClashDetection(
+        string testName, double tolerance, IProgress<NwcProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         var test = new Clash.NwcClashTest(testName, Clash.NwcClashTestType.Hard, tolerance);
-        Clash.NwcClashDetector.Run(this, test);
+        Clash.NwcClashDetector.Run(this, test, progress, cancellationToken);
         ClashTests.Add(test);
         return test;
     }

@@ -49,7 +49,7 @@ Stream overloads leave the supplied stream open.
 
 | Type | Description |
 |---|---|
-| `NwcClashDetector` | Broad-phase BVH and narrow-phase 3D triangle-to-triangle collision engine (`Run` over a document or federated assembly, driven by an `NwcClashTest`). Frozen: bug fixes only. |
+| `NwcClashDetector` | Broad-phase bounding-box checks and narrow-phase 3D triangle-to-triangle collision detection (`Run` over a document or federated assembly, driven by an `NwcClashTest`). Frozen: bug fixes only. |
 | `NwcClashTest`, `NwcClashSelection`, `NwcClashResult`, `NwcClashObject` | Clash test definition (type, tolerance, per-side selections), results, and the involved elements. Frozen: bug fixes only. |
 | `NwcClashBatch`, `NwcClashRule`, `NwcClashComment` | Batch test container, filtering rules (ignore thresholds, custom predicates), and review comments. Frozen: bug fixes only. |
 | `NwcClashGroup` | Grouped clash clusters produced by `NwcClashGrouper`. Frozen: bug fixes only. |
@@ -58,6 +58,14 @@ Stream overloads leave the supplied stream open.
 | `NwcClashBcfExporter` | buildingSMART BCF 2.1 export of clash tests and results. Frozen: bug fixes only. |
 | `NwcXmlClashSerializer` | Roundtrip Navisworks Clash Report XML (`nw-clashreport-11.0.xsd`) reader and writer. Frozen: bug fixes only. |
 | `NwcNwfManifest` | Federation manifest used by `NwcAssembly` tooling. |
+
+`NwcClashDetector.Run` and the `RunClashDetection` methods on `NwcDocument` and `NwcAssembly`
+offer overloads with `IProgress<NwcProgress>` and `CancellationToken`. The `clash-detection` phase
+reports the number of meshes processed in the first selection, starting at zero and reaching the
+total on completion. An empty selection reports `0/0` once. Cancellation is checked between meshes
+and during triangle comparisons, including clearance tests. If cancelled, the run throws
+`OperationCanceledException` and discards the results it added, preserving prior results and groups.
+The convenience methods register a test only after it completes.
 
 ## 4D TimeLiner, Selection Sets & Appearance (`NwcIO.Model.TimeLiner`, `.Sets`, `.Appearance`)
 

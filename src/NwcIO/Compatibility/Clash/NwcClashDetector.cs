@@ -13,16 +13,26 @@ public static class NwcClashDetector
     /// Executes clash detection across an individual Navisworks document according to the specified test configuration.
     /// </summary>
     /// <exception cref="ArgumentException">An active set selection names a set that the document doesn't contain.</exception>
-    public static NwcClashTest Run(NwcDocument document, NwcClashTest test)
+    public static NwcClashTest Run(NwcDocument document, NwcClashTest test) =>
+        Run(document, test, null, default);
+
+    /// <summary>Runs clash detection across a document with cancellation and progress.</summary>
+    /// <exception cref="OperationCanceledException">The cancellation token was cancelled.</exception>
+    public static NwcClashTest Run(
+        NwcDocument document, NwcClashTest test, IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(test);
+        cancellationToken.ThrowIfCancellationRequested();
         ThrowIfSetIsMissing([document], test);
 
-        var meshesA = ResolveSelection(document, test.SelectionA);
-        var meshesB = ResolveSelection(document, test.SelectionB);
+        var meshesA = ResolveSelection(document, test.SelectionA, cancellationToken);
+        var meshesB = ResolveSelection(document, test.SelectionB, cancellationToken);
 
-        RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model", document);
+        RunWithCancellation(test, meshesA.Count, progress,
+            () => RunCore(meshesA, meshesB, test, document.FileInfo.SourcePath ?? "Model", document, progress, cancellationToken),
+            cancellationToken);
         return test;
     }
 
@@ -30,10 +40,18 @@ public static class NwcClashDetector
     /// Executes clash detection across all contributing models of a federated Navisworks assembly.
     /// </summary>
     /// <exception cref="ArgumentException">An active set selection names a set that none of the models contains.</exception>
-    public static NwcClashTest Run(NwcAssembly assembly, NwcClashTest test)
+    public static NwcClashTest Run(NwcAssembly assembly, NwcClashTest test) =>
+        Run(assembly, test, null, default);
+
+    /// <summary>Runs clash detection across a federated assembly with cancellation and progress.</summary>
+    /// <exception cref="OperationCanceledException">The cancellation token was cancelled.</exception>
+    public static NwcClashTest Run(
+        NwcAssembly assembly, NwcClashTest test, IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(assembly);
         ArgumentNullException.ThrowIfNull(test);
+        cancellationToken.ThrowIfCancellationRequested();
         ThrowIfSetIsMissing(assembly.Models, test);
 
         var itemsA = new List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)>();
@@ -42,24 +60,54 @@ public static class NwcClashDetector
 
         for (int m = 0; m < assembly.Models.Count; m++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var doc = assembly.Models[m];
             string docName = Path.GetFileNameWithoutExtension(doc.FileInfo.SourcePath ?? $"Model_{m + 1}");
 
-            var selA = ResolveSelection(doc, test.SelectionA);
+            var selA = ResolveSelection(doc, test.SelectionA, cancellationToken);
             for (int i = 0; i < selA.Count; i++)
             {
                 itemsA.Add((selA[i], docName, selA[i].Node?.Parent?.Name, modelKeys[m]));
             }
 
-            var selB = ResolveSelection(doc, test.SelectionB);
+            var selB = ResolveSelection(doc, test.SelectionB, cancellationToken);
             for (int i = 0; i < selB.Count; i++)
             {
                 itemsB.Add((selB[i], docName, selB[i].Node?.Parent?.Name, modelKeys[m]));
             }
         }
 
-        RunCoreMultiModel(itemsA, itemsB, test);
+        RunWithCancellation(test, itemsA.Count, progress,
+            () => RunCoreMultiModel(itemsA, itemsB, test, progress, cancellationToken), cancellationToken);
         return test;
+    }
+
+    private static void RunWithCancellation(
+        NwcClashTest test, int total, IProgress<NwcProgress>? progress, Action run, CancellationToken cancellationToken)
+    {
+        int firstNewResult = test.Results.Count;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            run();
+            ReportProgress(progress, total, total, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (test.Results.Count > firstNewResult)
+            {
+                test.Results.RemoveRange(firstNewResult, test.Results.Count - firstNewResult);
+            }
+
+            throw;
+        }
+    }
+
+    private static void ReportProgress(
+        IProgress<NwcProgress>? progress, int completed, int total, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("clash-detection", completed, total));
     }
 
     private static void RunCore(
@@ -67,7 +115,9 @@ public static class NwcClashDetector
         IReadOnlyList<NwcMesh> meshesB,
         NwcClashTest test,
         string modelName,
-        NwcDocument document)
+        NwcDocument document,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         bool sameSelection = ReferenceEquals(meshesA, meshesB) ||
             meshesA.SequenceEqual(meshesB, ReferenceEqualityComparer.Instance);
@@ -85,6 +135,8 @@ public static class NwcClashDetector
 
         for (int i = 0; i < meshesA.Count; i++)
         {
+            ReportProgress(progress, i, meshesA.Count, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var meshA = meshesA[i];
             var boxA = meshA.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
@@ -92,6 +144,7 @@ public static class NwcClashDetector
 
             for (var j = sameSelection ? i + 1 : 0; j < meshesB.Count; j++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var meshB = meshesB[j];
                 if (ReferenceEquals(meshA, meshB) || meshA.Id == meshB.Id || IsSameElement(meshA, meshB)) continue;
                 // The reverse pair was already visited from the earlier mesh in A.
@@ -112,7 +165,7 @@ public static class NwcClashDetector
                 if (!expandedA.Intersects(boxB)) continue;
 
                 // Narrow phase: triangle intersection (Hard) or mesh distance (Clearance)
-                if (TryGetClash(test, meshA, meshB, out var clashPoint, out double distance))
+                if (TryGetClash(test, meshA, meshB, cancellationToken, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -167,7 +220,9 @@ public static class NwcClashDetector
     private static void RunCoreMultiModel(
         List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsA,
         List<(NwcMesh Mesh, string ModelName, string? Layer, string ModelKey)> itemsB,
-        NwcClashTest test)
+        NwcClashTest test,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
     {
         bool sameSelection = itemsA.Select(item => item.Mesh)
             .SequenceEqual(itemsB.Select(item => item.Mesh), ReferenceEqualityComparer.Instance);
@@ -184,6 +239,8 @@ public static class NwcClashDetector
         }
         for (int i = 0; i < itemsA.Count; i++)
         {
+            ReportProgress(progress, i, itemsA.Count, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var itemA = itemsA[i];
             var boxA = itemA.Mesh.GetWorldBoundingBox();
             if (boxA.IsEmpty) continue;
@@ -191,6 +248,7 @@ public static class NwcClashDetector
 
             for (var j = sameSelection ? i + 1 : 0; j < itemsB.Count; j++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var itemB = itemsB[j];
                 if (ReferenceEquals(itemA.Mesh, itemB.Mesh) || IsSameElement(itemA.Mesh, itemB.Mesh)) continue;
                 // Mesh IDs can repeat across models; only references identify pairs.
@@ -209,7 +267,7 @@ public static class NwcClashDetector
 
                 if (!expandedA.Intersects(boxB)) continue;
 
-                if (TryGetClash(test, itemA.Mesh, itemB.Mesh, out var clashPoint, out double distance))
+                if (TryGetClash(test, itemA.Mesh, itemB.Mesh, cancellationToken, out var clashPoint, out double distance))
                 {
                     int clashIndex = test.Results.Count + 1;
                     string clashName = $"Clash{clashIndex}";
@@ -270,6 +328,7 @@ public static class NwcClashDetector
         NwcClashTest test,
         NwcMesh meshA,
         NwcMesh meshB,
+        CancellationToken cancellationToken,
         out Vector3d clashPoint,
         out double distance)
     {
@@ -286,14 +345,14 @@ public static class NwcClashDetector
                         return false;
                     }
 
-                    var measurement = NwcIO.Model.Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB);
+                    var measurement = Measure.NwcMeasureEngine.MeasureMeshToMesh(meshA, meshB, useWorldCoordinates: true, cancellationToken);
                     clashPoint = (measurement.PointA + measurement.PointB) * 0.5;
                     distance = measurement.Distance;
                     return measurement.Distance <= tolerance;
                 }
 
             case NwcClashTestType.Duplicates:
-                if (!IsDuplicate(meshA, meshB, tolerance))
+                if (!IsDuplicate(meshA, meshB, tolerance, cancellationToken))
                 {
                     distance = 0;
                     return false;
@@ -318,7 +377,7 @@ public static class NwcClashDetector
                 }
 
             default:
-                if (CheckMeshIntersection(meshA, meshB, out clashPoint, out double penetration))
+                if (CheckMeshIntersection(meshA, meshB, cancellationToken, out clashPoint, out double penetration))
                 {
                     // A zero-depth AABB overlap is a coplanar or touching surface; it is kept rather than
                     // classified as a below-tolerance penetration.
@@ -341,7 +400,8 @@ public static class NwcClashDetector
     /// Duplicate geometry: same world vertices within the tolerance and the same triangle/line topology.
     /// Transform, name, id and material are ignored.
     /// </summary>
-    internal static bool IsDuplicate(NwcMesh meshA, NwcMesh meshB, double tolerance)
+    internal static bool IsDuplicate(
+        NwcMesh meshA, NwcMesh meshB, double tolerance, CancellationToken cancellationToken = default)
     {
         if (ReferenceEquals(meshA, meshB))
         {
@@ -364,6 +424,7 @@ public static class NwcClashDetector
         double toleranceSquared = tolerance * tolerance;
         for (int i = 0; i < verticesA.Count; i++)
         {
+            if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
             Vector3d delta = verticesA[i] - verticesB[i];
             // Negated form so a NaN tolerance fails closed.
             if (!(Vector3d.Dot(delta, delta) <= toleranceSquared))
@@ -374,6 +435,7 @@ public static class NwcClashDetector
 
         for (int i = 0; i < meshA.Indices.Count; i++)
         {
+            if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
             if (meshA.Indices[i] != meshB.Indices[i])
             {
                 return false;
@@ -382,6 +444,7 @@ public static class NwcClashDetector
 
         for (int i = 0; i < meshA.LineIndices.Count; i++)
         {
+            if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
             if (meshA.LineIndices[i] != meshB.LineIndices[i])
             {
                 return false;
@@ -394,6 +457,7 @@ public static class NwcClashDetector
     private static bool CheckMeshIntersection(
         NwcMesh a,
         NwcMesh b,
+        CancellationToken cancellationToken,
         out Vector3d clashPoint,
         out double penetrationDepth)
     {
@@ -433,6 +497,7 @@ public static class NwcClashDetector
 
         for (int i = 0; i + 2 < indicesA.Count; i += 3)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int ia0 = indicesA[i];
             int ia1 = indicesA[i + 1];
             int ia2 = indicesA[i + 2];
@@ -444,6 +509,7 @@ public static class NwcClashDetector
 
             for (int j = 0; j + 2 < indicesB.Count; j += 3)
             {
+                if (j % (3 * 256) == 0) cancellationToken.ThrowIfCancellationRequested();
                 int ib0 = indicesB[j];
                 int ib1 = indicesB[j + 1];
                 int ib2 = indicesB[j + 2];
@@ -494,8 +560,10 @@ public static class NwcClashDetector
         return indices;
     }
 
-    private static IReadOnlyList<NwcMesh> ResolveSelection(NwcDocument document, NwcClashSelection sel)
+    private static IReadOnlyList<NwcMesh> ResolveSelection(
+        NwcDocument document, NwcClashSelection sel, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (sel.ExplicitNodeIds.Count > 0)
         {
             var idSet = new HashSet<int>(sel.ExplicitNodeIds);
@@ -515,6 +583,7 @@ public static class NwcClashDetector
             var matchedMeshes = new List<NwcMesh>();
             for (int s = 0; s < sel.SetNames.Count; s++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var set = document.FindSet(sel.SetNames[s]);
                 if (set is NwcSelectionSet selSet)
                 {
