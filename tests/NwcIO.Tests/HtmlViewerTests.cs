@@ -466,6 +466,21 @@ public sealed class HtmlViewerTests
     }
 
     [Fact]
+    public void ExportHtml_NamesKeyboardControls()
+    {
+        using var output = new StringWriter();
+        NwcHtmlViewerExporter.Write(output, [], [], [], BoundingBox3d.Empty, new NwcHtmlViewerOptions());
+
+        string html = output.ToString();
+        Assert.Contains("<canvas id=\"glcanvas\" tabindex=\"0\" role=\"region\" aria-label=\"3D model view\" aria-describedby=\"camera-keys\"",
+            html, StringComparison.Ordinal);
+        Assert.Contains("id=\"camera-keys\"", html, StringComparison.Ordinal);
+        Assert.Contains("<button type=\"button\" id=\"measure-clear\" aria-label=\"Clear measurement\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"tl-slider\" aria-label=\"TimeLiner position\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"tl-speed\" aria-label=\"TimeLiner playback speed\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SaveHtmlViewer_Document_GeneratesSelfContainedHtmlViewer()
     {
         var node = new NwcNode
@@ -551,7 +566,7 @@ public sealed class HtmlViewerTests
             string html = File.ReadAllText(tempPath);
             Assert.Contains("<!DOCTYPE html>", html, StringComparison.Ordinal);
             Assert.Contains("<title>Test Building Viewer</title>", html, StringComparison.Ordinal);
-            Assert.Contains("<canvas id=\"glcanvas\">", html, StringComparison.Ordinal);
+            Assert.Contains("<canvas id=\"glcanvas\" tabindex=\"0\"", html, StringComparison.Ordinal);
             Assert.Contains("id=\"nwc-data\"", html, StringComparison.Ordinal);
             Assert.Contains("Overview Entrance", html, StringComparison.Ordinal);
             Assert.Contains("Pipe Penetrations", html, StringComparison.Ordinal);
@@ -645,7 +660,7 @@ public sealed class HtmlViewerTests
             Assert.True(File.Exists(viewerPath));
             string html = File.ReadAllText(viewerPath);
             Assert.Contains("<!DOCTYPE html>", html, StringComparison.Ordinal);
-            Assert.Contains("<canvas id=\"glcanvas\">", html, StringComparison.Ordinal);
+            Assert.Contains("<canvas id=\"glcanvas\" tabindex=\"0\"", html, StringComparison.Ordinal);
         }
         finally
         {
