@@ -46,7 +46,8 @@ internal static class GlbExporter
         Stream output,
         bool worldCoordinates = true,
         string? generatorName = null,
-        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
+        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(materials);
@@ -73,6 +74,7 @@ internal static class GlbExporter
 
         for (int m = 0; m < meshes.Count; m++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var mesh = meshes[m];
             var vertices = worldCoordinates ? mesh.GetWorldVertices() : mesh.Vertices;
             int vCount = vertices.Count;
@@ -94,6 +96,7 @@ internal static class GlbExporter
             var indices = new List<int>();
             for (int i = 0; i <= faces.Count - 3; i += 3)
             {
+                if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
                 int i0 = faces[i];
                 int i1 = faces[i + 1];
                 int i2 = faces[i + 2];
@@ -111,6 +114,7 @@ internal static class GlbExporter
             var lineIndices = new List<int>();
             for (int i = 0; i <= mesh.LineIndices.Count - 2; i += 2)
             {
+                if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
                 int i0 = mesh.LineIndices[i];
                 int i1 = mesh.LineIndices[i + 1];
                 if (i0 < 0 || i0 >= vCount || i1 < 0 || i1 >= vCount)
@@ -135,6 +139,7 @@ internal static class GlbExporter
 
             for (int v = 0; v < vCount;)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var batch = bin.ReserveRecords(vCount - v, 12, out int count);
                 for (int i = 0; i < count; i++, v++)
                 {
@@ -174,6 +179,7 @@ internal static class GlbExporter
                 var normals = AccumulateNormals(vertices, indices);
                 for (int v = 0; v < vCount;)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var batch = bin.ReserveRecords(vCount - v, 12, out int count);
                     for (int i = 0; i < count; i++, v++)
                     {
@@ -214,6 +220,7 @@ internal static class GlbExporter
                 long colOffset = bin.BeginView(colLength);
                 for (int v = 0; v < vCount;)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var batch = bin.ReserveRecords(vCount - v, 16, out int count);
                     for (int i = 0; i < count; i++, v++)
                     {
@@ -326,7 +333,8 @@ internal static class GlbExporter
             GetBinChunkLength(binFile?.Length ?? 0),
             generatorName ?? "NwcIO glTF 2.0 Exporter",
             viewpoints,
-            materialsWithBlend);
+            materialsWithBlend,
+            cancellationToken);
 
         WriteContainer(output, jsonData.Span, binFile);
     }
@@ -383,8 +391,9 @@ internal static class GlbExporter
         List<BufferViewDef> bufferViews,
         long binByteLength,
         string generator,
-        IReadOnlyList<NwcSavedViewpoint>? viewpoints = null,
-        HashSet<int>? materialsWithBlend = null)
+        IReadOnlyList<NwcSavedViewpoint>? viewpoints,
+        HashSet<int>? materialsWithBlend,
+        CancellationToken cancellationToken)
     {
         var json = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(json))
@@ -422,6 +431,7 @@ internal static class GlbExporter
             if (totalNodes > 0) writer.WriteStartArray("nodes");
             for (int i = 0; i < meshes.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 writer.WriteStartObject();
                 writer.WriteString("name", meshes[i].Name);
                 writer.WriteNumber("mesh", i);
@@ -432,6 +442,7 @@ internal static class GlbExporter
             {
                 for (int i = 0; i < cameras.Count; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var vp = cameras[i];
                     var cam = vp.Camera;
                     writer.WriteStartObject();
@@ -463,6 +474,7 @@ internal static class GlbExporter
                 writer.WriteStartArray("cameras");
                 for (int i = 0; i < cameras.Count; i++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var vp = cameras[i];
                     var cam = vp.Camera;
                     writer.WriteStartObject();
@@ -500,6 +512,7 @@ internal static class GlbExporter
             if (meshes.Count > 0) writer.WriteStartArray("meshes");
             for (int i = 0; i < meshes.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var m = meshes[i];
                 writer.WriteStartObject();
                 writer.WriteString("name", m.Name);
@@ -538,6 +551,7 @@ internal static class GlbExporter
             if (materials.Count > 0) writer.WriteStartArray("materials");
             for (int i = 0; i < materials.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var mat = materials[i];
                 writer.WriteStartObject();
                 writer.WriteString("name", mat.Name);
@@ -568,6 +582,7 @@ internal static class GlbExporter
             if (accessors.Count > 0) writer.WriteStartArray("accessors");
             for (int i = 0; i < accessors.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var acc = accessors[i];
                 writer.WriteStartObject();
                 writer.WriteNumber("bufferView", acc.BufferView);
@@ -596,6 +611,7 @@ internal static class GlbExporter
             if (bufferViews.Count > 0) writer.WriteStartArray("bufferViews");
             for (int i = 0; i < bufferViews.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var bv = bufferViews[i];
                 writer.WriteStartObject();
                 writer.WriteNumber("buffer", 0);

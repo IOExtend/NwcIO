@@ -80,16 +80,22 @@ public static class NwcHtmlViewerExporter
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(doc);
 
-        options ??= new NwcHtmlViewerOptions { Title = Path.GetFileNameWithoutExtension(path) };
-        // Fill in document defaults on a copy: the caller's options instance must stay
-        // untouched so it can be reused for other documents without leaking state.
+        using var fs = File.Create(path);
+        using var writer = new StreamWriter(fs, Encoding.UTF8);
+        return WriteDocument(writer, doc, options, Path.GetFileNameWithoutExtension(path), default);
+    }
+
+    internal static NwcHtmlViewerExportResult WriteDocument(
+        TextWriter writer, NwcDocument doc, NwcHtmlViewerOptions? options, string title, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        options ??= new NwcHtmlViewerOptions { Title = title };
+        // Default on a copy so callers can reuse their options for other documents.
         options = ShallowCopy(options);
         options.GridSystem ??= doc.GridSystem;
         options.TimeLiner ??= doc.TimeLiner;
         options.SelectionSets ??= doc.SelectionSets;
-        using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, Encoding.UTF8);
-        return WriteWithResult(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options);
+        return WriteWithResult(writer, doc.Meshes, doc.SavedViewpoints, doc.ClashTests, doc.BoundingBox, options, cancellationToken);
     }
 
     /// <summary>
@@ -169,12 +175,22 @@ public static class NwcHtmlViewerExporter
         IReadOnlyList<NwcClashTest> clashTests,
         BoundingBox3d bounds,
         NwcHtmlViewerOptions options)
+        => WriteWithResult(writer, meshes, viewpoints, clashTests, bounds, options, default);
+
+    private static NwcHtmlViewerExportResult WriteWithResult(
+        TextWriter writer,
+        IReadOnlyList<NwcMesh> meshes,
+        IReadOnlyList<NwcSavedViewpoint> viewpoints,
+        IReadOnlyList<NwcClashTest> clashTests,
+        BoundingBox3d bounds,
+        NwcHtmlViewerOptions options,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(meshes);
         options ??= new NwcHtmlViewerOptions();
 
-        var (jsonPayload, result) = BuildJsonPayload(meshes, viewpoints, clashTests, bounds, options);
+        var (jsonPayload, result) = BuildJsonPayload(meshes, viewpoints, clashTests, bounds, options, cancellationToken);
 
         writer.WriteLine("<!DOCTYPE html>");
         writer.WriteLine("<html lang=\"en\">");
@@ -1578,12 +1594,12 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
 
     // WebGL1 supports unsigned short indices without requiring an extension.
-    private static IEnumerable<(IReadOnlyList<Vector3d> Vertices, IReadOnlyList<int> Indices)> SplitMesh(NwcMesh mesh)
+    private static IEnumerable<(IReadOnlyList<Vector3d> Vertices, IReadOnlyList<int> Indices)> SplitMesh(NwcMesh mesh, CancellationToken cancellationToken)
     {
         const int maxVertices = 65535;
         if (mesh.Vertices.Count <= maxVertices)
         {
-            yield return (mesh.Vertices, ValidTriangles(mesh));
+            yield return (mesh.Vertices, ValidTriangles(mesh, cancellationToken));
             yield break;
         }
 
@@ -1592,6 +1608,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         var indices = new List<int>();
         for (var i = 0; i + 2 < mesh.Indices.Count; i += 3)
         {
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
             // Reject the whole triangle before adding vertices or splitting a chunk.
             var a = mesh.Indices[i];
             var b = mesh.Indices[i + 1];
@@ -1633,11 +1650,15 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 
     // Indices are written as unsigned integers, so a triangle that references a
     // missing vertex (or a trailing partial triangle) is dropped, as SplitMesh does.
-    private static IReadOnlyList<int> ValidTriangles(NwcMesh mesh)
+    private static IReadOnlyList<int> ValidTriangles(NwcMesh mesh, CancellationToken cancellationToken)
     {
         var count = mesh.Vertices.Count;
         var indices = mesh.Indices;
-        if (indices.Count % 3 == 0 && indices.All(i => i >= 0 && i < count))
+        if (indices.Count % 3 == 0 && indices.All(i =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return i >= 0 && i < count;
+        }))
         {
             return indices;
         }
@@ -1645,6 +1666,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         var valid = new List<int>(indices.Count);
         for (var i = 0; i + 2 < indices.Count; i += 3)
         {
+            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
             int a = indices[i], b = indices[i + 1], c = indices[i + 2];
             if (a >= 0 && a < count && b >= 0 && b < count && c >= 0 && c < count)
             {
@@ -1731,7 +1753,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         IReadOnlyList<NwcSavedViewpoint> viewpoints,
         IReadOnlyList<NwcClashTest> clashTests,
         BoundingBox3d bounds,
-        NwcHtmlViewerOptions options)
+        NwcHtmlViewerOptions options,
+        CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream();
         using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false });
@@ -1767,9 +1790,10 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
         long skippedVertices = 0;
         foreach (var mesh in meshes)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // The budget counts the vertices actually written, which chunk splitting can
             // raise above the source count.
-            var chunks = SplitMesh(mesh).ToList();
+            var chunks = SplitMesh(mesh, cancellationToken).ToList();
             var meshVertexCount = chunks.Sum(c => c.Vertices.Count);
             totalVertices += meshVertexCount;
 
@@ -1822,6 +1846,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteStartArray("chunks");
             foreach (var chunk in chunks)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 WriteChunk(writer, chunk, ref meshBounds);
             }
             writer.WriteEndArray();
@@ -1870,6 +1895,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteStartArray("viewpoints");
             foreach (var vp in viewpoints)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 writer.WriteStartObject();
                 writer.WriteString("name", vp.Name);
 
@@ -1906,6 +1932,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteStartArray("clashTests");
             foreach (var test in clashTests)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 writer.WriteStartObject();
                 writer.WriteString("name", test.Name);
                 writer.WriteNumber("tolerance", test.Tolerance);
@@ -1931,6 +1958,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 writer.WriteStartArray("allClashes");
                 foreach (var clash in test.AllClashes)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     writer.WriteStartObject();
                     writer.WriteString("name", clash.Name);
                     writer.WriteString("status", clash.Status.ToString());
@@ -1965,6 +1993,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteStartArray("grids");
             foreach (var line in options.GridSystem.Lines)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 writer.WriteStartObject();
                 writer.WriteString("name", line.Name);
                 writer.WriteStartArray("start");
@@ -1988,6 +2017,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             writer.WriteStartArray("selectionSets");
             foreach (var item in options.SelectionSets)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 WriteSetItem(writer, item);
             }
             writer.WriteEndArray();
@@ -2007,6 +2037,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
                 writer.WriteStartArray("tasks");
                 foreach (var task in options.TimeLiner.FlattenTasks())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     writer.WriteStartObject();
                     writer.WriteString("id", task.Id);
                     writer.WriteString("name", task.Name);

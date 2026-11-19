@@ -58,7 +58,9 @@ internal static class BcfExporter
     /// <summary>
     /// Writes the saved viewpoints list as a BCF 2.1 (.bcfzip) archive into the provided stream.
     /// </summary>
-    public static void WriteViewpoints(IReadOnlyList<NwcSavedViewpoint> viewpoints, Stream stream, string? assemblyName = null)
+    public static void WriteViewpoints(
+        IReadOnlyList<NwcSavedViewpoint> viewpoints, Stream stream, string? assemblyName = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(viewpoints);
         ArgumentNullException.ThrowIfNull(stream);
@@ -79,6 +81,7 @@ internal static class BcfExporter
         // 2. Per-viewpoint topic folder
         for (int i = 0; i < viewpoints.Count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var vp = viewpoints[i];
             string topicGuid = (vp.Id ?? Guid.NewGuid()).ToString("D");
             string viewpointGuid = Guid.NewGuid().ToString("D");

@@ -38,7 +38,8 @@ internal static class IfcExporter
         NwcDocument doc,
         TextWriter writer,
         NwcIfcExportOptions? options = null,
-        string? fileName = null)
+        string? fileName = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(doc);
         ArgumentNullException.ThrowIfNull(writer);
@@ -147,6 +148,7 @@ internal static class IfcExporter
 
         for (int m = 0; m < doc.Meshes.Count; m++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var mesh = doc.Meshes[m];
             if (activePlanes.Count > 0 && options.ClipGeometryWithSectionPlanes)
             {
