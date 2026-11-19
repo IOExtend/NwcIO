@@ -22,6 +22,10 @@ public sealed partial class NwcAssembly
             .Skip(1)
             .Any();
 
+    internal NwcLengthUnit CommonLengthUnit => HasMixedLengthUnits
+        ? NwcLengthUnit.Unknown
+        : Models.Select(model => model.LengthUnit).FirstOrDefault(unit => unit.GetMetresPerUnit().HasValue);
+
     /// <summary>
     /// Synthetic assembly root. Its id is negative so it cannot collide with the
     /// document roots (id 0); node ids are otherwise unique only within a document.
@@ -184,7 +188,13 @@ public sealed partial class NwcAssembly
         rootNode.Children.AddRange(rootChildren);
 
         var assembly = new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints, meshModelIndexes);
-        assembly.Diagnostics = modelList.SelectMany(m => m.Diagnostics).ToList();
+        var diagnostics = modelList.SelectMany(m => m.Diagnostics).ToList();
+        if (assembly.HasMixedLengthUnits)
+        {
+            diagnostics.Add(new NwcDiagnostic(NwcDiagnosticSeverity.Warning, "MixedLengthUnits",
+                "The assembly contains models with different length units. Their original coordinates were retained."));
+        }
+        assembly.Diagnostics = diagnostics;
         return assembly;
     }
 

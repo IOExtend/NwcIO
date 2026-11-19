@@ -68,19 +68,19 @@ public sealed partial class NwcDocument
 
     private void WriteViewpointsBcf(Stream output, CancellationToken cancellationToken) =>
         BcfExporter.WriteViewpoints(SavedViewpoints, output, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"),
-            cancellationToken);
+            MetresPerUnit ?? 1.0, cancellationToken);
 
     /// <summary>Exports saved viewpoints to a Navisworks XML file asynchronously.</summary>
-    public Task SaveViewpointsXmlAsync(string path, string units = "m", CancellationToken cancellationToken = default) =>
+    public Task SaveViewpointsXmlAsync(string path, string? units = null, CancellationToken cancellationToken = default) =>
         CompatibilityExport.WriteFileAsync(path, output => WriteViewpointsXml(output, units, cancellationToken), cancellationToken);
 
     /// <summary>Exports saved viewpoints to a Navisworks XML stream asynchronously.</summary>
-    public Task SaveViewpointsXmlAsync(Stream stream, string units = "m", CancellationToken cancellationToken = default) =>
+    public Task SaveViewpointsXmlAsync(Stream stream, string? units = null, CancellationToken cancellationToken = default) =>
         CompatibilityExport.WriteAsync(stream, output => WriteViewpointsXml(output, units, cancellationToken), cancellationToken);
 
-    private void WriteViewpointsXml(Stream output, string units, CancellationToken cancellationToken) =>
+    private void WriteViewpointsXml(Stream output, string? units, CancellationToken cancellationToken) =>
         CompatibilityExport.WriteText(output, Encoding.UTF8,
-            writer => writer.Write(NwcXmlViewpointSerializer.Serialize(SavedViewpoints, units, cancellationToken)));
+            writer => writer.Write(NwcXmlViewpointSerializer.Serialize(SavedViewpoints, units ?? LengthUnit.GetSymbol() ?? "m", cancellationToken)));
 
     /// <summary>Exports a standalone HTML viewer to a file asynchronously.</summary>
     public Task SaveHtmlViewerAsync(string path, NwcHtmlViewerOptions? options = null, CancellationToken cancellationToken = default) =>

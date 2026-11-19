@@ -17,6 +17,7 @@ public static class NwcDiffEngine
         public Guid? ElementGuid { get; init; }
         public NwcNode? Node { get; init; }
         public NwcMesh? Mesh { get; init; }
+        public NwcLengthUnit LengthUnit { get; init; }
         public NwcTransform? Transform { get; init; }
         public IReadOnlyList<NwcPropertyRecord> Properties { get; init; } = [];
         public BoundingBox3d WorldBounds { get; set; } = BoundingBox3d.Empty;
@@ -119,6 +120,7 @@ public static class NwcDiffEngine
                     ChangeKind = NwcChangeKind.Added,
                     RevisionNode = rev.Node,
                     RevisionMesh = rev.Mesh,
+                    LengthUnit = rev.LengthUnit,
                 });
             }
             else
@@ -181,6 +183,7 @@ public static class NwcDiffEngine
                     RevisionNode = rev.Node,
                     BaselineMesh = baseItem.Mesh,
                     RevisionMesh = rev.Mesh,
+                    LengthUnit = rev.Mesh is not null || baseItem.Mesh is null ? rev.LengthUnit : baseItem.LengthUnit,
                 };
                 diff.PropertyChanges.AddRange(propChanges);
 
@@ -211,6 +214,7 @@ public static class NwcDiffEngine
                     ChangeKind = NwcChangeKind.Deleted,
                     BaselineNode = b.Node,
                     BaselineMesh = b.Mesh,
+                    LengthUnit = b.LengthUnit,
                 });
             }
         }
@@ -367,6 +371,7 @@ public static class NwcDiffEngine
                         ElementGuid = node.ElementGuid,
                         Node = node,
                         Mesh = node.Mesh,
+                        LengthUnit = doc.LengthUnit,
                         Transform = node.Transform,
                         Properties = node.Properties,
                         WorldBounds = bounds,
@@ -401,6 +406,7 @@ public static class NwcDiffEngine
                     Name = name,
                     ClassName = "MeshGeometry",
                     Mesh = m,
+                    LengthUnit = doc.LengthUnit,
                     Transform = m.Transform,
                     WorldBounds = m.GetWorldBoundingBox(),
                     MatchKey = matchKey,

@@ -243,6 +243,8 @@ public sealed class NwcClashResult
     public NwcClashObject Item1 { get; set; } = new();
     public NwcClashObject Item2 { get; set; } = new();
     public Vector3d ClashPoint { get; set; }
+    internal NwcLengthUnit LengthUnit { get; init; }
+
     public double Distance { get; set; } // Negative for hard clash penetration, positive for clearance
     public string? GridLocation { get; set; }
     public DateTimeOffset CreatedDate { get; set; } = DateTimeOffset.UtcNow;

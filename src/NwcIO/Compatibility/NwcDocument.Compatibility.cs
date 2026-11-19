@@ -235,7 +235,7 @@ public sealed partial class NwcDocument
         var tests = string.IsNullOrEmpty(testName)
             ? ClashTests
             : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
-        Model.Clash.NwcClashBcfExporter.SaveTests(path, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Model.Clash.NwcClashBcfExporter.SaveTests(path, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), LengthUnit);
     }
 
     /// <summary>Exports detected clash results to a BCF 2.1 stream.</summary>
@@ -244,7 +244,7 @@ public sealed partial class NwcDocument
         var tests = string.IsNullOrEmpty(testName)
             ? ClashTests
             : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
-        Model.Clash.NwcClashBcfExporter.WriteTests(stream, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Model.Clash.NwcClashBcfExporter.WriteTests(stream, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), LengthUnit);
     }
 
     /// <summary>Loads clash detective tests and results from a Navisworks Clash Report XML file.</summary>
@@ -302,25 +302,25 @@ public sealed partial class NwcDocument
     /// <summary>Exports saved viewpoints to a buildingSMART BCF 2.1 zip archive (.bcfzip).</summary>
     public void SaveViewpointsBcf(string path)
     {
-        Internal.Export.BcfExporter.WriteViewpointsFile(SavedViewpoints, path, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Internal.Export.BcfExporter.WriteViewpointsFile(SavedViewpoints, path, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), MetresPerUnit ?? 1.0);
     }
 
     /// <summary>Exports saved viewpoints to a buildingSMART BCF 2.1 zip stream.</summary>
     public void SaveViewpointsBcf(Stream stream)
     {
-        Internal.Export.BcfExporter.WriteViewpoints(SavedViewpoints, stream, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Internal.Export.BcfExporter.WriteViewpoints(SavedViewpoints, stream, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), MetresPerUnit ?? 1.0);
     }
 
     /// <summary>Exports saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints file.</summary>
-    public void SaveViewpointsXml(string path, string units = "m")
+    public void SaveViewpointsXml(string path, string? units = null)
     {
-        Model.Sectioning.NwcXmlViewpointSerializer.Save(path, SavedViewpoints, units);
+        Model.Sectioning.NwcXmlViewpointSerializer.Save(path, SavedViewpoints, units ?? LengthUnit.GetSymbol() ?? "m");
     }
 
     /// <summary>Serializes saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints string.</summary>
-    public string ToViewpointsXml(string units = "m")
+    public string ToViewpointsXml(string? units = null)
     {
-        return Model.Sectioning.NwcXmlViewpointSerializer.Serialize(SavedViewpoints, units);
+        return Model.Sectioning.NwcXmlViewpointSerializer.Serialize(SavedViewpoints, units ?? LengthUnit.GetSymbol() ?? "m");
     }
 
     /// <summary>

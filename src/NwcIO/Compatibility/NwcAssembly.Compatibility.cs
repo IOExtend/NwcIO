@@ -266,7 +266,7 @@ public sealed partial class NwcAssembly
     /// <summary>Exports detected clash results to a buildingSMART BCF 2.1 zip archive (.bcfzip).</summary>
     public void ExportClashBcf(string path)
     {
-        Clash.NwcClashBcfExporter.SaveTests(path, ClashTests, Name);
+        Clash.NwcClashBcfExporter.SaveTests(path, ClashTests, Name, CommonLengthUnit);
     }
 
     /// <summary>Exports the 4D TimeLiner schedule to Navisworks XML exchange format (.xml).</summary>
@@ -398,7 +398,7 @@ public sealed partial class NwcAssembly
     public void SaveViewpointsBcf(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
     {
         viewpoints ??= SavedViewpoints;
-        BcfExporter.WriteViewpointsFile(viewpoints, path, Name);
+        BcfExporter.WriteViewpointsFile(viewpoints, path, Name, CommonLengthUnit.GetMetresPerUnit() ?? 1.0);
     }
 
     /// <summary>
@@ -407,25 +407,25 @@ public sealed partial class NwcAssembly
     public void SaveViewpointsBcf(Stream stream, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null)
     {
         viewpoints ??= SavedViewpoints;
-        BcfExporter.WriteViewpoints(viewpoints, stream, Name);
+        BcfExporter.WriteViewpoints(viewpoints, stream, Name, CommonLengthUnit.GetMetresPerUnit() ?? 1.0);
     }
 
     /// <summary>
     /// Exports saved viewpoints of the assembly to an Autodesk Navisworks XML viewpoints file.
     /// </summary>
-    public void SaveViewpointsXml(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null, string units = "m")
+    public void SaveViewpointsXml(string path, IReadOnlyList<NwcSavedViewpoint>? viewpoints = null, string? units = null)
     {
         viewpoints ??= SavedViewpoints;
-        Sectioning.NwcXmlViewpointSerializer.Save(path, viewpoints, units);
+        Sectioning.NwcXmlViewpointSerializer.Save(path, viewpoints, units ?? CommonLengthUnit.GetSymbol() ?? "m");
     }
 
     /// <summary>
     /// Serializes saved viewpoints of the assembly to an Autodesk Navisworks XML viewpoints string.
     /// </summary>
-    public string ToViewpointsXml(IReadOnlyList<NwcSavedViewpoint>? viewpoints = null, string units = "m")
+    public string ToViewpointsXml(IReadOnlyList<NwcSavedViewpoint>? viewpoints = null, string? units = null)
     {
         viewpoints ??= SavedViewpoints;
-        return Sectioning.NwcXmlViewpointSerializer.Serialize(viewpoints, units);
+        return Sectioning.NwcXmlViewpointSerializer.Serialize(viewpoints, units ?? CommonLengthUnit.GetSymbol() ?? "m");
     }
 
     /// <summary>
@@ -483,10 +483,11 @@ public sealed partial class NwcAssembly
         grids ??= new Grids.NwcGridSystem("Assembly Grids");
         GridSystem = grids;
 
+        var lengthUnit = grids.LengthUnit == NwcLengthUnit.Unknown ? CommonLengthUnit : grids.LengthUnit;
         int count = 0;
         foreach (var test in ClashTests)
         {
-            count += grids.AssignGridLocations(test);
+            count += grids.AssignGridLocations(test, lengthUnit);
         }
         foreach (var m in Models)
         {

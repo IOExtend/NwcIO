@@ -99,8 +99,8 @@ matrix.PopulateStandardMatrix(defaultTolerance: 0.002);
 
 // Configure tolerance per cell in document units; PopulateStandardMatrix fills cells in
 // discipline order: [0]=Architecture-Structure, [1]=Architecture-MEP, [2]=Structure-MEP
-matrix.Cells.Single(c => c.DisciplineA == "Architecture" && c.DisciplineB == "Structure").Tolerance = 0.005; // 5 document units
-matrix.Cells.Single(c => c.DisciplineA == "Structure" && c.DisciplineB == "MEP").Tolerance = 0.010;          // 10 document units
+matrix.Cells.Single(c => c.DisciplineA == "Architecture" && c.DisciplineB == "Structure").Tolerance = 0.005;
+matrix.Cells.Single(c => c.DisciplineA == "Structure" && c.DisciplineB == "MEP").Tolerance = 0.010;
 
 // Execute the entire coordination matrix
 matrix.Execute(assembly);

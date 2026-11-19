@@ -196,6 +196,7 @@ public sealed class NwcClashMatrix
         }
 
         var modelKeys = NwcElementGuid.ModelKeys(assembly.Models);
+        var lengthUnit = assembly.CommonLengthUnit;
         var keyByDocument = new Dictionary<NwcDocument, string>(ReferenceEqualityComparer.Instance);
         for (int i = 0; i < assembly.Models.Count; i++)
         {
@@ -318,7 +319,10 @@ public sealed class NwcClashMatrix
                             IfcGuid = NwcElementGuid.ForMesh(mB, keyByDocument[docB]),
                         };
 
-                        var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, clashPoint, -penetration);
+                        var clash = new NwcClashResult($"Clash_{clashId++}", c1, c2, clashPoint, -penetration)
+                        {
+                            LengthUnit = lengthUnit,
+                        };
 
                         if (!test.Rules.Any(rule => rule.ShouldIgnore(clash)))
                         {

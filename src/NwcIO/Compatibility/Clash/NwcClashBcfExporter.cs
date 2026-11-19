@@ -67,7 +67,9 @@ public static class NwcClashBcfExporter
     /// <summary>
     /// Saves clash tests, including both standalone results and grouped clashes, to one BCF 2.1 archive file.
     /// </summary>
-    internal static void SaveTests(string path, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
+    internal static void SaveTests(
+        string path, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination",
+        NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(tests);
@@ -79,14 +81,16 @@ public static class NwcClashBcfExporter
         }
 
         using var fs = File.Create(path);
-        WriteTests(fs, tests, projectName);
+        WriteTests(fs, tests, projectName, lengthUnit);
     }
 
     /// <summary>
     /// Writes clash tests, including both standalone results and grouped clashes, to one BCF 2.1 zip stream:
     /// a topic per clash group and a topic per clash that is in no group.
     /// </summary>
-    internal static void WriteTests(Stream stream, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination")
+    internal static void WriteTests(
+        Stream stream, IEnumerable<NwcClashTest> tests, string projectName = "Navisworks Clash Coordination",
+        NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(tests);
@@ -98,11 +102,11 @@ public static class NwcClashBcfExporter
 
         foreach (var test in tests)
         {
-            WriteTest(archive, test, projectName);
+            WriteTest(archive, test, projectName, lengthUnit);
         }
     }
 
-    private static void WriteTest(ZipArchive archive, NwcClashTest test, string projectName)
+    private static void WriteTest(ZipArchive archive, NwcClashTest test, string projectName, NwcLengthUnit lengthUnit)
     {
         // Export Clash Groups as unified topics
         foreach (var group in test.Groups)
@@ -120,7 +124,7 @@ public static class NwcClashBcfExporter
             using (var s = vpEntry.Open())
             using (var xml = XmlWriter.Create(s, Settings))
             {
-                WriteGroupViewpointXml(xml, group);
+                WriteGroupViewpointXml(xml, group, lengthUnit);
             }
         }
 
@@ -140,7 +144,7 @@ public static class NwcClashBcfExporter
             using (var s = vpEntry.Open())
             using (var xml = XmlWriter.Create(s, Settings))
             {
-                WriteViewpointXml(xml, clash);
+                WriteViewpointXml(xml, clash, lengthUnit);
             }
         }
     }
@@ -259,7 +263,7 @@ public static class NwcClashBcfExporter
         xml.WriteEndDocument();
     }
 
-    private static void WriteViewpointXml(XmlWriter xml, NwcClashResult clash)
+    private static void WriteViewpointXml(XmlWriter xml, NwcClashResult clash, NwcLengthUnit lengthUnit = NwcLengthUnit.Unknown)
     {
         xml.WriteStartDocument();
         xml.WriteStartElement("VisualizationInfo");
@@ -290,7 +294,8 @@ public static class NwcClashBcfExporter
         // Camera positioning
         xml.WriteStartElement("PerspectiveCamera");
 
-        var target = clash.ClashPoint;
+        double scale = clash.LengthUnit.GetMetresPerUnit() ?? lengthUnit.GetMetresPerUnit() ?? 1.0;
+        var target = clash.ClashPoint * scale;
         var offset = new Vector3d(5.0, -5.0, 3.5);
         var eye = target + offset;
         var dir = (target - eye).Normalize();
@@ -386,7 +391,7 @@ public static class NwcClashBcfExporter
         xml.WriteEndDocument();
     }
 
-    private static void WriteGroupViewpointXml(XmlWriter xml, NwcClashGroup group)
+    private static void WriteGroupViewpointXml(XmlWriter xml, NwcClashGroup group, NwcLengthUnit lengthUnit)
     {
         xml.WriteStartDocument();
         xml.WriteStartElement("VisualizationInfo");
@@ -420,7 +425,11 @@ public static class NwcClashBcfExporter
         // Camera positioning
         xml.WriteStartElement("PerspectiveCamera");
 
-        var target = group.ClashPoint;
+        var units = group.Clashes.Select(clash => clash.LengthUnit).Distinct().Take(2).ToArray();
+        double scale = units is [var unit]
+            ? unit.GetMetresPerUnit() ?? lengthUnit.GetMetresPerUnit() ?? 1.0
+            : lengthUnit.GetMetresPerUnit() ?? 1.0;
+        var target = group.ClashPoint * scale;
         var offset = new Vector3d(8.0, -8.0, 5.0);
         var eye = target + offset;
         var dir = (target - eye).Normalize();

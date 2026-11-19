@@ -78,6 +78,8 @@ public sealed class NwcElementDiff
 
     public NwcMesh? RevisionMesh { get; init; }
 
+    internal NwcLengthUnit LengthUnit { get; init; }
+
     /// <summary>
     /// Gets the best available 3D centroid for this element (from mesh or transform).
     /// </summary>
@@ -358,7 +360,7 @@ public sealed class NwcDiffReport
                 xml.WriteStartElement("VisualizationInfo");
                 xml.WriteAttributeString("Guid", vpGuid);
 
-                var center = item.Centroid;
+                var center = item.Centroid * (item.LengthUnit.GetMetresPerUnit() ?? 1.0);
                 var eye = center + new Vector3d(5.0, -5.0, 4.0);
                 var dir = (center - eye).Normalize();
 
