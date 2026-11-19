@@ -14,7 +14,7 @@ namespace NwcIO;
 public static class NwcWriter
 {
     /// <summary>
-    /// Writes an interoperable 448 cache in feet from an owned triangle model with known source units.
+    /// Writes an interoperable 448 cache in feet from owned triangle or line meshes with known source units.
     /// Bake mesh rotation and scale into the vertices before calling. Node properties are written as
     /// display text. The stream must be writable and positioned at the start of a new file.
     /// </summary>

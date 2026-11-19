@@ -188,7 +188,7 @@ internal sealed class NativeCacheModelWriter : IDisposable
         _recordLengths.Add(data.Length);
         _fragments.NewObject(13);
         _fragments.WriteDouble(radius);
-        _fragments.Write(mesh.TriangleCount);
+        _fragments.Write(mesh.LineIndices.Count > 0 ? mesh.LineIndices.Count / 2 : mesh.TriangleCount);
         _fragments.Write(4);
         _fragments.Write(0x2100);
         _fragments.Write(sequence);
