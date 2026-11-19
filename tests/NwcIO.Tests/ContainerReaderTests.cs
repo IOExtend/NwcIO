@@ -227,6 +227,41 @@ public class ContainerReaderTests
         Assert.Equal(0, container.TrailingGap);
     }
 
+    [Fact]
+    public void Read_MixedStreamWithLargeStoredPrefix_KeepsFollowingStream()
+    {
+        const ushort blockLength = 48_000;
+        using var compressed = new MemoryStream();
+        compressed.Write([0x78, 0x01]);
+        Span<byte> header = stackalloc byte[5];
+        header[0] = 0;
+        BinaryPrimitives.WriteUInt16LittleEndian(header[1..], blockLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(header[3..], unchecked((ushort)~blockLength));
+        byte[] zeros = new byte[blockLength];
+        compressed.Write(header);
+        compressed.Write(zeros);
+        compressed.Write(header);
+        compressed.Write(zeros);
+        compressed.Write([0x73, 0x04, 0x00]); // Final fixed-Huffman block encoding 'A'.
+        Span<byte> trailer = stackalloc byte[4];
+        const uint adlerA = 1 + (byte)'A';
+        const uint adlerB = (2 * (uint)blockLength + adlerA) % 65521;
+        BinaryPrimitives.WriteUInt32BigEndian(trailer, (adlerB << 16) | adlerA);
+        compressed.Write(trailer);
+        long firstLength = compressed.Length;
+        byte[] next = "next"u8.ToArray();
+        compressed.Write(CompressZlib(next));
+
+        var container = NwcContainerReader.Read(ContainerWith(compressed.ToArray()));
+
+        Assert.Equal(2, container.Streams.Count);
+        Assert.Equal([.. zeros, .. zeros, (byte)'A'], container.Streams[0].Data);
+        Assert.Equal(firstLength, container.Streams[0].CompressedLength);
+        Assert.Equal(container.Streams[0].FileOffset + firstLength, container.Streams[1].FileOffset);
+        Assert.Equal(next, container.Streams[1].Data);
+        Assert.Equal(0, container.TrailingGap);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

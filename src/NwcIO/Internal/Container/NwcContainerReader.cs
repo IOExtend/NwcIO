@@ -15,6 +15,7 @@ internal static class NwcContainerReader
 {
     private static ReadOnlySpan<byte> SectionMarker => "#LcUStream"u8;
     private const int InflateBufferSize = 64 * 1024;
+    private const int MaxDeflateExpansion = 258 * 8; // At least one bit per length code and at most 258 bytes per match.
 
     /// <summary>Default cap on the decompressed size of one stream: 512 MiB.</summary>
     public const long DefaultMaxDecompressedStreamBytes = 512L * 1024 * 1024;
@@ -225,12 +226,15 @@ internal static class NwcContainerReader
             long streamLimit = Math.Min(maxDecompressedStreamBytes, Array.MaxLength);
             long remaining = Math.Min(streamLimit, maxTotalDecompressedBytes - totalDecompressed);
             int storedLength = 0;
-            long end = source.Length;
-            bool stored = source.IsMemoryBacked && TryGetStoredStreamEnd(source, offset, remaining, out storedLength, out end);
-            var feed = new InflateFeed(source, offset, end: end);
+            long storedEnd = source.Length;
+            bool stored = source.IsMemoryBacked && TryGetStoredStreamEnd(source, offset, remaining, out storedLength, out storedEnd);
+            // Replay avoids staging large stored prefixes when even the worst-case decoded tail fits within the prefix size.
+            bool replay = !stored && !deferPayload && storedLength >= InflateBufferSize
+                && source.Length - storedEnd <= storedLength / MaxDeflateExpansion;
+            var feed = new InflateFeed(source, offset, end: stored ? storedEnd : source.Length);
             using var zlib = new ZLibStream(feed, CompressionMode.Decompress);
             byte[]? payload = stored && !deferPayload ? GC.AllocateUninitializedArray<byte>(storedLength) : null;
-            using var output = !stored && !deferPayload ? new InflateOutput() : null;
+            using var output = !stored && !replay && !deferPayload ? new InflateOutput() : null;
             uint adlerA = 1, adlerB = 0;
             int length = 0;
             while (true)
@@ -259,7 +263,7 @@ internal static class NwcContainerReader
 
                 length += count;
                 totalDecompressed += count; // Charge rejected streams too.
-                if (!stored)
+                if (!stored && !replay)
                 {
                     var bytes = target[..count];
                     UpdateAdler32(bytes, ref adlerA, ref adlerB);
@@ -270,11 +274,16 @@ internal static class NwcContainerReader
             long compressedLength;
             if (stored)
             {
-                compressedLength = end - offset;
+                compressedLength = storedEnd - offset;
                 if (length != storedLength || feed.BytesServed != compressedLength)
                 {
                     throw new InvalidDataException($"Zlib stream at offset {offset} changed after scanning.");
                 }
+            }
+            else if (replay)
+            {
+                payload = GC.AllocateUninitializedArray<byte>(length);
+                compressedLength = ReplayToBoundary(source, offset, feed.LastStart, buffer, payload);
             }
             else
             {
@@ -313,7 +322,6 @@ internal static class NwcContainerReader
     private static bool TryGetStoredStreamEnd(BufferedInput source, long offset, long limit, out int length, out long end)
     {
         length = 0;
-        end = source.Length;
         long block = offset + 2; // The container's zlib signatures have no preset dictionary.
         while (source.Length - block >= 9) // Stored block header and zlib trailer.
         {
@@ -340,6 +348,7 @@ internal static class NwcContainerReader
             }
         }
 
+        end = block; // The first block after the stored prefix.
         return false;
     }
 
@@ -359,11 +368,23 @@ internal static class NwcContainerReader
         }
 
         // Repeated checksums can occur in compressed data or framing. Measure the boundary byte by byte in that case.
-        var exactFeed = new InflateFeed(source, offset, feed.LastStart);
+        return ReplayToBoundary(source, offset, feed.LastStart, buffer);
+    }
+
+    private static long ReplayToBoundary(BufferedInput source, long offset, long lastBlockStart, byte[] buffer, byte[]? payload = null)
+    {
+        var exactFeed = new InflateFeed(source, offset, lastBlockStart);
         using var exact = new ZLibStream(exactFeed, CompressionMode.Decompress);
-        while (exact.Read(buffer, 0, buffer.Length) != 0)
+        if (payload is not null)
         {
-            source.CheckCancellation();
+            ReadPayload(exact, payload, source, offset);
+        }
+        else
+        {
+            while (exact.Read(buffer, 0, buffer.Length) != 0)
+            {
+                source.CheckCancellation();
+            }
         }
 
         return exactFeed.BytesServed;
