@@ -50,6 +50,27 @@ internal static class NwcContainerReader
         bool deferPayloads,
         Func<NwcContainer, T> parse,
         CancellationToken cancellationToken)
+        => ReadCore(input, maxDecompressedStreamBytes, maxTotalDecompressedBytes, deferPayloads,
+            container => ValueTask.FromResult(parse(container)), asynchronous: false, cancellationToken).GetSynchronousResult();
+
+    internal static ValueTask<T> ReadAsync<T>(
+        Stream input,
+        long maxDecompressedStreamBytes,
+        long maxTotalDecompressedBytes,
+        bool deferPayloads,
+        Func<NwcContainer, ValueTask<T>> parse,
+        CancellationToken cancellationToken)
+        => ReadCore(input, maxDecompressedStreamBytes, maxTotalDecompressedBytes, deferPayloads,
+            parse, asynchronous: true, cancellationToken);
+
+    private static async ValueTask<T> ReadCore<T>(
+        Stream input,
+        long maxDecompressedStreamBytes,
+        long maxTotalDecompressedBytes,
+        bool deferPayloads,
+        Func<NwcContainer, ValueTask<T>> parse,
+        bool asynchronous,
+        CancellationToken cancellationToken)
     {
         if (maxDecompressedStreamBytes <= 0)
         {
@@ -63,7 +84,8 @@ internal static class NwcContainerReader
 
         if (input.CanSeek)
         {
-            return ReadSeekable(input, maxDecompressedStreamBytes, maxTotalDecompressedBytes, deferPayloads, parse, cancellationToken);
+            return await ReadSeekable(new BufferedInput(input, asynchronous, cancellationToken),
+                maxDecompressedStreamBytes, maxTotalDecompressedBytes, deferPayloads, parse).ConfigureAwait(false);
         }
 
         string path = Path.Combine(Path.GetTempPath(), $"nwcio-{Guid.NewGuid():N}.tmp");
@@ -71,7 +93,8 @@ internal static class NwcContainerReader
         {
             Mode = FileMode.CreateNew,
             Access = FileAccess.ReadWrite,
-            Options = FileOptions.DeleteOnClose,
+            Options = FileOptions.DeleteOnClose | (asynchronous ? FileOptions.Asynchronous : FileOptions.None),
+            BufferSize = asynchronous ? 0 : 4096,
         };
         if (!OperatingSystem.IsWindows())
         {
@@ -83,17 +106,27 @@ internal static class NwcContainerReader
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            int count = input.Read(buffer, 0, buffer.Length);
+            int count = asynchronous
+                ? await input.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)
+                : input.Read(buffer, 0, buffer.Length);
             if (count == 0)
             {
                 break;
             }
 
-            copy.Write(buffer, 0, count);
+            if (asynchronous)
+            {
+                await copy.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                copy.Write(buffer, 0, count);
+            }
         }
 
         copy.Position = 0;
-        return ReadSeekable(copy, maxDecompressedStreamBytes, maxTotalDecompressedBytes, deferPayloads, parse, cancellationToken);
+        return await ReadSeekable(new BufferedInput(copy, asynchronous, cancellationToken),
+            maxDecompressedStreamBytes, maxTotalDecompressedBytes, deferPayloads, parse).ConfigureAwait(false);
     }
 
     public static NwcContainer ReadFile(string path) =>
@@ -105,16 +138,14 @@ internal static class NwcContainerReader
         return Read(input, maxDecompressedStreamBytes, maxTotalDecompressedBytes);
     }
 
-    private static T ReadSeekable<T>(
-        Stream input,
+    private static async ValueTask<T> ReadSeekable<T>(
+        BufferedInput source,
         long maxDecompressedStreamBytes,
         long maxTotalDecompressedBytes,
         bool deferPayloads,
-        Func<NwcContainer, T> parse,
-        CancellationToken cancellationToken)
+        Func<NwcContainer, ValueTask<T>> parse)
     {
-        var source = new BufferedInput(input, cancellationToken);
-        if (source.Length < 16 || !source.Peek(0, SectionMarker.Length).StartsWith(SectionMarker))
+        if (source.Length < 16 || !(await source.PeekAsync(0, SectionMarker.Length).ConfigureAwait(false)).Span.StartsWith(SectionMarker))
         {
             throw new InvalidDataException("Not an LcUStream container: missing '#LcUStream' header.");
         }
@@ -122,26 +153,25 @@ internal static class NwcContainerReader
         var sections = new List<LcUStreamHeader>();
         var streams = new List<LcRawStream>();
         var inflateBuffer = new byte[InflateBufferSize];
-        long totalDecompressed = 0;
+        var budget = new InflateBudget(maxDecompressedStreamBytes, maxTotalDecompressedBytes);
         long pos = 0;
         while (pos < source.Length)
         {
             long candidate = pos;
             while (candidate < source.Length)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var bytes = source.Peek(candidate, SectionMarker.Length);
-                if (bytes.StartsWith(SectionMarker))
+                source.CheckCancellation();
+                var bytes = await source.PeekAsync(candidate, SectionMarker.Length).ConfigureAwait(false);
+                if (bytes.Span.StartsWith(SectionMarker))
                 {
-                    var header = ReadHeader(source, candidate);
+                    var header = await ReadHeader(source, candidate).ConfigureAwait(false);
                     sections.Add(header);
                     pos = candidate + header.HeaderLength;
                     break;
                 }
 
-                if (IsZlibSignature(bytes) &&
-                    TryInflateAt(source, candidate, inflateBuffer, maxDecompressedStreamBytes, maxTotalDecompressedBytes, deferPayloads,
-                        ref totalDecompressed, out var stream))
+                if (IsZlibSignature(bytes.Span) &&
+                    await TryInflateAt(source, candidate, inflateBuffer, budget, deferPayloads).ConfigureAwait(false) is { } stream)
                 {
                     streams.Add(stream with
                     {
@@ -154,8 +184,8 @@ internal static class NwcContainerReader
                 }
 
                 // Only these two bytes can start a header or a compressed stream.
-                bytes = source.Peek(candidate + 1);
-                int next = bytes.IndexOfAny((byte)'#', (byte)0x78);
+                bytes = await source.PeekAsync(candidate + 1).ConfigureAwait(false);
+                int next = bytes.Span.IndexOfAny((byte)'#', (byte)0x78);
                 candidate += 1 + (next < 0 ? bytes.Length : next);
             }
 
@@ -165,17 +195,17 @@ internal static class NwcContainerReader
             }
         }
 
-        input.Position = source.EndPosition;
-        var result = parse(new NwcContainer
+        source.SeekToEnd();
+        var result = await parse(new NwcContainer
         {
             Sections = sections,
             Streams = streams,
             FileLength = source.Length,
             TrailingGap = source.Length - pos,
-        });
+        }).ConfigureAwait(false);
         if (deferPayloads)
         {
-            input.Position = source.EndPosition;
+            source.SeekToEnd();
         }
 
         return result;
@@ -184,50 +214,45 @@ internal static class NwcContainerReader
     private static bool IsZlibSignature(ReadOnlySpan<byte> bytes) =>
         bytes.Length >= 2 && bytes[0] == 0x78 && bytes[1] is 0x01 or 0x5E or 0x9C or 0xDA;
 
-    private static LcUStreamHeader ReadHeader(BufferedInput source, long offset)
+    private static async ValueTask<LcUStreamHeader> ReadHeader(BufferedInput source, long offset)
     {
-        var bytes = source.Peek(offset);
-        if (bytes.Contains((byte)'\n'))
+        var bytes = await source.PeekAsync(offset).ConfigureAwait(false);
+        if (bytes.Span.Contains((byte)'\n'))
         {
-            return LcUStreamHeader.Parse(bytes, offset);
+            return LcUStreamHeader.Parse(bytes.Span, offset);
         }
 
         using var line = new MemoryStream();
         long pos = offset;
         while (!bytes.IsEmpty)
         {
-            int end = bytes.IndexOf((byte)'\n');
+            int end = bytes.Span.IndexOf((byte)'\n');
             if (end >= 0)
             {
-                line.Write(bytes[..(end + 1)]);
+                line.Write(bytes.Span[..(end + 1)]);
                 break;
             }
 
-            line.Write(bytes);
+            line.Write(bytes.Span);
             pos += bytes.Length;
-            bytes = source.Peek(pos);
+            bytes = await source.PeekAsync(pos).ConfigureAwait(false);
         }
 
         return LcUStreamHeader.Parse(line.GetBuffer().AsSpan(0, (int)line.Length), offset);
     }
 
-    private static bool TryInflateAt(
+    private static async ValueTask<LcRawStream?> TryInflateAt(
         BufferedInput source,
         long offset,
         byte[] buffer,
-        long maxDecompressedStreamBytes,
-        long maxTotalDecompressedBytes,
-        bool deferPayload,
-        ref long totalDecompressed,
-        out LcRawStream stream)
+        InflateBudget budget,
+        bool deferPayload)
     {
         try
         {
-            long streamLimit = Math.Min(maxDecompressedStreamBytes, Array.MaxLength);
-            long remaining = Math.Min(streamLimit, maxTotalDecompressedBytes - totalDecompressed);
             int storedLength = 0;
             long storedEnd = source.Length;
-            bool stored = source.IsMemoryBacked && TryGetStoredStreamEnd(source, offset, remaining, out storedLength, out storedEnd);
+            bool stored = source.IsMemoryBacked && TryGetStoredStreamEnd(source, offset, budget.Remaining, out storedLength, out storedEnd);
             // Replay avoids staging large stored prefixes when even the worst-case decoded tail fits within the prefix size.
             bool replay = !stored && !deferPayload && storedLength >= InflateBufferSize
                 && source.Length - storedEnd <= storedLength / MaxDeflateExpansion;
@@ -241,31 +266,19 @@ internal static class NwcContainerReader
             {
                 source.CheckCancellation();
                 var target = payload is not null && length < payload.Length
-                    ? payload.AsSpan(length, Math.Min(buffer.Length, payload.Length - length))
-                    : output is not null ? output.GetSpan() : buffer.AsSpan();
-                int count = zlib.Read(target);
+                    ? payload.AsMemory(length, Math.Min(buffer.Length, payload.Length - length))
+                    : output is not null ? output.GetMemory() : buffer.AsMemory();
+                int count = await source.ReadInflated(zlib, target).ConfigureAwait(false);
                 if (count == 0)
                 {
                     break;
                 }
 
-                if (count > streamLimit - length)
-                {
-                    throw new InflateLimitException(
-                        $"Decompressed stream at offset {offset} exceeds the per-stream limit of {streamLimit} bytes.");
-                }
-
-                if (count > maxTotalDecompressedBytes - totalDecompressed)
-                {
-                    throw new InflateLimitException(
-                        $"Decompressed streams exceed the total limit of {maxTotalDecompressedBytes} bytes at stream offset {offset}.");
-                }
-
+                budget.Charge(offset, length, count);
                 length += count;
-                totalDecompressed += count; // Charge rejected streams too.
                 if (!stored && !replay)
                 {
-                    var bytes = target[..count];
+                    var bytes = target.Span[..count];
                     UpdateAdler32(bytes, ref adlerA, ref adlerB);
                     output?.Advance(count);
                 }
@@ -283,15 +296,15 @@ internal static class NwcContainerReader
             else if (replay)
             {
                 payload = GC.AllocateUninitializedArray<byte>(length);
-                compressedLength = ReplayToBoundary(source, offset, feed.LastStart, buffer, payload);
+                compressedLength = await ReplayToBoundary(source, offset, feed.LastStart, buffer, payload).ConfigureAwait(false);
             }
             else
             {
-                compressedLength = FindCompressedLength(source, offset, feed, (adlerB << 16) | adlerA, buffer);
+                compressedLength = await FindCompressedLength(source, offset, feed, (adlerB << 16) | adlerA, buffer).ConfigureAwait(false);
                 payload = output?.ToArray();
             }
 
-            stream = new LcRawStream
+            var stream = new LcRawStream
             {
                 Index = -1,
                 FileOffset = offset,
@@ -299,14 +312,14 @@ internal static class NwcContainerReader
                 GapBefore = 0,
                 SectionIndex = -1,
             };
-            stream = payload is null
+            return payload is null
                 ? stream with
                 {
                     DeferredLength = length,
                     ReadPayload = () => ReadPayload(source, offset, compressedLength, length),
+                    RequiresAsyncRead = source.Asynchronous,
                 }
                 : stream with { Data = payload };
-            return true;
         }
         catch (InflateLimitException ex)
         {
@@ -314,8 +327,7 @@ internal static class NwcContainerReader
         }
         catch (InvalidDataException)
         {
-            stream = null!;
-            return false;
+            return null;
         }
     }
 
@@ -326,7 +338,7 @@ internal static class NwcContainerReader
         while (source.Length - block >= 9) // Stored block header and zlib trailer.
         {
             source.CheckCancellation();
-            var header = source.Peek(block, 5);
+            var header = source.MemoryAt(block).Span;
             if ((header[0] & 6) != 0)
             {
                 break;
@@ -352,13 +364,13 @@ internal static class NwcContainerReader
         return false;
     }
 
-    private static long FindCompressedLength(BufferedInput source, long offset, InflateFeed feed, uint adler, byte[] buffer)
+    private static async ValueTask<long> FindCompressedLength(BufferedInput source, long offset, InflateFeed feed, uint adler, byte[] buffer)
     {
         // A successful inflate validated the trailer. Its last byte arrived in the last read,
         // so only this span can contain it, including up to three bytes from the preceding read.
         long start = Math.Max(offset, feed.LastStart - 3);
         int length = (int)(offset + feed.BytesServed - start);
-        var tail = source.Peek(start, length)[..length];
+        var tail = (await source.PeekAsync(start, length).ConfigureAwait(false)).Span[..length];
         Span<byte> trailer = stackalloc byte[4];
         BinaryPrimitives.WriteUInt32BigEndian(trailer, adler);
         int match = tail.IndexOf(trailer);
@@ -368,20 +380,20 @@ internal static class NwcContainerReader
         }
 
         // Repeated checksums can occur in compressed data or framing. Measure the boundary byte by byte in that case.
-        return ReplayToBoundary(source, offset, feed.LastStart, buffer);
+        return await ReplayToBoundary(source, offset, feed.LastStart, buffer).ConfigureAwait(false);
     }
 
-    private static long ReplayToBoundary(BufferedInput source, long offset, long lastBlockStart, byte[] buffer, byte[]? payload = null)
+    private static async ValueTask<long> ReplayToBoundary(BufferedInput source, long offset, long lastBlockStart, byte[] buffer, byte[]? payload = null)
     {
         var exactFeed = new InflateFeed(source, offset, lastBlockStart);
         using var exact = new ZLibStream(exactFeed, CompressionMode.Decompress);
         if (payload is not null)
         {
-            ReadPayload(exact, payload, source, offset);
+            await ReadPayload(exact, payload, source, offset).ConfigureAwait(false);
         }
         else
         {
-            while (exact.Read(buffer, 0, buffer.Length) != 0)
+            while (await source.ReadInflated(exact, buffer).ConfigureAwait(false) != 0)
             {
                 source.CheckCancellation();
             }
@@ -445,22 +457,25 @@ internal static class NwcContainerReader
         return Vector128.Sum(low + high);
     }
 
-    private static byte[] ReadPayload(BufferedInput source, long offset, long compressedLength, int length)
+    private static async ValueTask<byte[]> ReadPayload(BufferedInput source, long offset, long compressedLength, int length)
     {
         var feed = new InflateFeed(source, offset, end: offset + compressedLength);
         using var zlib = new ZLibStream(feed, CompressionMode.Decompress);
         var payload = GC.AllocateUninitializedArray<byte>(length);
-        ReadPayload(zlib, payload, source, offset);
+        await ReadPayload(zlib, payload, source, offset).ConfigureAwait(false);
         return payload;
     }
 
-    private static void ReadPayload(ZLibStream zlib, byte[] payload, BufferedInput source, long offset)
+    private static async ValueTask ReadPayload(ZLibStream zlib, byte[] payload, BufferedInput source, long offset)
     {
         for (int pos = 0; pos < payload.Length;)
         {
             source.CheckCancellation();
             int count = Math.Min(64 * 1024, payload.Length - pos);
-            if (zlib.ReadAtLeast(payload.AsSpan(pos, count), count, throwOnEndOfStream: false) != count)
+            int read = source.Asynchronous
+                ? await zlib.ReadAtLeastAsync(payload.AsMemory(pos, count), count, throwOnEndOfStream: false, source.Token).ConfigureAwait(false)
+                : zlib.ReadAtLeast(payload.AsSpan(pos, count), count, throwOnEndOfStream: false);
+            if (read != count)
             {
                 throw new InvalidDataException($"Zlib stream at offset {offset} changed after scanning.");
             }
@@ -468,9 +483,38 @@ internal static class NwcContainerReader
             pos += count;
         }
 
-        if (zlib.ReadByte() != -1)
+        source.CheckCancellation();
+        bool extra = source.Asynchronous
+            ? await zlib.ReadAsync(new byte[1].AsMemory(), source.Token).ConfigureAwait(false) != 0
+            : zlib.ReadByte() != -1;
+        if (extra)
         {
             throw new InvalidDataException($"Zlib stream at offset {offset} changed after scanning.");
+        }
+    }
+
+    private sealed class InflateBudget(long maxStreamBytes, long maxTotalBytes)
+    {
+        private readonly long _streamLimit = Math.Min(maxStreamBytes, Array.MaxLength);
+        private long _total;
+
+        public long Remaining => Math.Min(_streamLimit, maxTotalBytes - _total);
+
+        public void Charge(long offset, int length, int count)
+        {
+            if (count > _streamLimit - length)
+            {
+                throw new InflateLimitException(
+                    $"Decompressed stream at offset {offset} exceeds the per-stream limit of {_streamLimit} bytes.");
+            }
+
+            if (count > maxTotalBytes - _total)
+            {
+                throw new InflateLimitException(
+                    $"Decompressed streams exceed the total limit of {maxTotalBytes} bytes at stream offset {offset}.");
+            }
+
+            _total += count; // Charge rejected streams too.
         }
     }
 
@@ -481,7 +525,7 @@ internal static class NwcContainerReader
         private readonly List<byte[]> _blocks = [];
         private int _length;
 
-        public Span<byte> GetSpan()
+        public Memory<byte> GetMemory()
         {
             int block = _length / InflateBufferSize;
             if (block == _blocks.Count)
@@ -490,7 +534,7 @@ internal static class NwcContainerReader
             }
 
             int used = _length % InflateBufferSize;
-            return _blocks[block].AsSpan(used, InflateBufferSize - used);
+            return _blocks[block].AsMemory(used, InflateBufferSize - used);
         }
 
         public void Advance(int count) => _length += count;
@@ -518,46 +562,71 @@ internal static class NwcContainerReader
         }
     }
 
-    private sealed class BufferedInput(Stream input, CancellationToken cancellationToken)
+    private sealed class BufferedInput(Stream input, bool asynchronous, CancellationToken cancellationToken)
     {
         private readonly long _origin = input.Position;
         private readonly byte[] _buffer = new byte[64 * 1024];
         private readonly ArraySegment<byte> _memory =
             input.GetType() == typeof(MemoryStream) && ((MemoryStream)input).TryGetBuffer(out var segment) ? segment : default;
+        private readonly long _endPosition = input.Length;
         private long _start;
         private int _count;
 
-        public long EndPosition { get; } = input.Length;
-        public long Length => Math.Max(0, EndPosition - _origin);
+        public long Length => Math.Max(0, _endPosition - _origin);
         public bool IsMemoryBacked => _memory.Array is not null;
+        public bool Asynchronous => asynchronous;
+        public CancellationToken Token => cancellationToken;
 
+        public void SeekToEnd() => input.Position = _endPosition;
         public void CheckCancellation() => cancellationToken.ThrowIfCancellationRequested();
 
-        public ReadOnlySpan<byte> Peek(long pos, int minimum = 1)
+        public ReadOnlyMemory<byte> MemoryAt(long pos) => _memory.AsMemory((int)(_origin + pos));
+
+        public ValueTask<int> ReadInflated(ZLibStream zlib, Memory<byte> target) =>
+            asynchronous ? zlib.ReadAsync(target, cancellationToken) : ValueTask.FromResult(zlib.Read(target.Span));
+
+        public ValueTask<ReadOnlyMemory<byte>> PeekAsync(long pos, int minimum = 1)
         {
             if (pos >= Length)
             {
-                return [];
+                return default;
             }
 
-            if (_memory.Array is not null)
+            if (IsMemoryBacked)
             {
-                return _memory.AsSpan((int)(_origin + pos));
+                return ValueTask.FromResult(MemoryAt(pos));
             }
 
             int required = (int)Math.Min(minimum, Length - pos);
             long index = pos - _start;
-            if (index < 0 || index > _count - required)
+            if (index >= 0 && index <= _count - required)
             {
-                CheckCancellation();
-                _count = (int)Math.Min(_buffer.Length, Length - pos);
-                input.Position = _origin + pos;
-                input.ReadExactly(_buffer.AsSpan(0, _count));
-                _start = pos;
-                index = 0;
+                return ValueTask.FromResult<ReadOnlyMemory<byte>>(_buffer.AsMemory((int)index, _count - (int)index));
             }
 
-            return _buffer.AsSpan((int)index, _count - (int)index);
+            CheckCancellation();
+            int count = (int)Math.Min(_buffer.Length, Length - pos);
+            input.Position = _origin + pos;
+            if (asynchronous)
+            {
+                return FillAsync(pos, count);
+            }
+
+            input.ReadExactly(_buffer.AsSpan(0, count));
+            return ValueTask.FromResult(UpdateCache(pos, count));
+        }
+
+        private async ValueTask<ReadOnlyMemory<byte>> FillAsync(long pos, int count)
+        {
+            await input.ReadExactlyAsync(_buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+            return UpdateCache(pos, count);
+        }
+
+        private ReadOnlyMemory<byte> UpdateCache(long pos, int count)
+        {
+            _start = pos;
+            _count = count;
+            return _buffer.AsMemory(0, count);
         }
     }
 
@@ -584,6 +653,31 @@ internal static class NwcContainerReader
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            int length = NextReadLength(count);
+            if (length != 0)
+            {
+                var bytes = _source.PeekAsync(_position, length).GetSynchronousResult();
+                Copy(bytes, buffer.AsMemory(offset, length));
+            }
+
+            return length;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int length = NextReadLength(buffer.Length);
+            if (length != 0)
+            {
+                var bytes = await _source.PeekAsync(_position, length).ConfigureAwait(false);
+                Copy(bytes, buffer[..length]);
+            }
+
+            return length;
+        }
+
+        private int NextReadLength(int count)
+        {
             if (count == 0)
             {
                 return 0;
@@ -598,11 +692,14 @@ internal static class NwcContainerReader
                 throw new InvalidDataException($"Truncated zlib stream at offset {_start}.");
             }
 
-            var bytes = _source.Peek(_position, length);
-            bytes[..length].CopyTo(buffer.AsSpan(offset, length));
-            LastStart = _position;
-            _position += length;
             return length;
+        }
+
+        private void Copy(ReadOnlyMemory<byte> bytes, Memory<byte> destination)
+        {
+            bytes[..destination.Length].CopyTo(destination);
+            LastStart = _position;
+            _position += destination.Length;
         }
 
         public override bool CanRead => true;

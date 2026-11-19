@@ -37,6 +37,18 @@ internal static class MeshParser
         IReadOnlyList<int>? transformIndices,
         out int skippedRecords)
     {
+        var result = ParseAsync(container, transforms, maxVertices, transformIndices, default).GetSynchronousResult();
+        skippedRecords = result.SkippedRecords;
+        return result.Meshes;
+    }
+
+    public static async ValueTask<(IReadOnlyList<NwcMesh> Meshes, int SkippedRecords)> ParseAsync(
+        NwcContainer container,
+        IReadOnlyList<NwcTransform>? transforms,
+        int maxVertices,
+        IReadOnlyList<int>? transformIndices,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(container);
         if (maxVertices < MinMeshVertices)
         {
@@ -51,18 +63,17 @@ internal static class MeshParser
         var tocStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (tocStream is not null)
         {
-            ParseViaToc(container, tocStream, meshes, transforms, maxVertices, transformIndices, ref tocSkipped);
+            tocSkipped = await ParseViaToc(container, tocStream, meshes, transforms, maxVertices, transformIndices, cancellationToken).ConfigureAwait(false);
         }
 
         // 2. Secondary fallback: if TOC yielded no meshes, scan individual streams for vertex buffers.
         if (meshes.Count == 0)
         {
-            ParseViaHeuristicScan(container, meshes, transforms, maxVertices, transformIndices, ref scanSkipped);
+            scanSkipped = await ParseViaHeuristicScan(container, meshes, transforms, maxVertices, transformIndices, cancellationToken).ConfigureAwait(false);
         }
 
         // The fallback replaces the TOC attempt; take the larger count so neither path hides a skipped record.
-        skippedRecords = Math.Max(tocSkipped, scanSkipped);
-        return meshes;
+        return (meshes, Math.Max(tocSkipped, scanSkipped));
     }
 
     private static void AssignTransform(
@@ -91,19 +102,20 @@ internal static class MeshParser
         }
     }
 
-    private static void ParseViaToc(
+    private static async ValueTask<int> ParseViaToc(
         NwcContainer container,
         LcRawStream tocStream,
         List<NwcMesh> meshes,
         IReadOnlyList<NwcTransform>? transforms,
         int maxVertices,
         IReadOnlyList<int>? transformIndices,
-        ref int skippedRecords)
+        CancellationToken cancellationToken)
     {
-        var tocData = tocStream.Data;
+        int skippedRecords = 0;
+        var tocData = await tocStream.GetDataAsync().ConfigureAwait(false);
         if (tocData.Length < 16)
         {
-            return;
+            return 0;
         }
 
         int recordCount = BinaryPrimitives.ReadInt32LittleEndian(tocData.AsSpan(0));
@@ -111,13 +123,13 @@ internal static class MeshParser
 
         if (recordCount <= 0 || chunkCount <= 0 || chunkCount > 5000)
         {
-            return;
+            return 0;
         }
 
         int tocOffset = 8 + 4 * chunkCount;
         if (tocOffset > tocData.Length || recordCount > (tocData.Length - tocOffset) / 4)
         {
-            return;
+            return 0;
         }
 
         var recordLengths = new int[recordCount];
@@ -141,7 +153,7 @@ internal static class MeshParser
             var chunkLength = container.Streams[i].DecompressedLength;
             if (chunkLength > int.MaxValue - totalBytes)
             {
-                return;
+                return 0;
             }
 
             totalBytes += chunkLength;
@@ -149,14 +161,15 @@ internal static class MeshParser
 
         if (totalBytes == 0)
         {
-            return;
+            return 0;
         }
 
         var combined = new byte[totalBytes];
         int copyPos = 0;
         for (int i = startChunkIdx; i < endChunkIdx; i++)
         {
-            var data = container.Streams[i].Data;
+            cancellationToken.ThrowIfCancellationRequested();
+            var data = await container.Streams[i].GetDataAsync().ConfigureAwait(false);
             Buffer.BlockCopy(data, 0, combined, copyPos, data.Length);
             copyPos += data.Length;
         }
@@ -165,6 +178,7 @@ internal static class MeshParser
         var usedIds = new MeshIdAllocator();
         for (int r = 0; r < recordCount; r++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             int rLen = recordLengths[r];
             if (rLen < 0)
             {
@@ -223,19 +237,23 @@ internal static class MeshParser
 
             curPos += rLen;
         }
+
+        return skippedRecords;
     }
 
-    private static void ParseViaHeuristicScan(
+    private static async ValueTask<int> ParseViaHeuristicScan(
         NwcContainer container,
         List<NwcMesh> meshes,
         IReadOnlyList<NwcTransform>? transforms,
         int maxVertices,
         IReadOnlyList<int>? transformIndices,
-        ref int skippedRecords)
+        CancellationToken cancellationToken)
     {
+        int skippedRecords = 0;
         foreach (var stream in container.Streams)
         {
-            var data = stream.Data;
+            cancellationToken.ThrowIfCancellationRequested();
+            var data = await stream.GetDataAsync().ConfigureAwait(false);
             if (data.Length < 28)
             {
                 continue;
@@ -279,6 +297,8 @@ internal static class MeshParser
                 }
             }
         }
+
+        return skippedRecords;
     }
 
     /// <summary>Tracks claimed mesh ids. Fallback probing resumes from the last fallback, so many duplicates stay linear.</summary>

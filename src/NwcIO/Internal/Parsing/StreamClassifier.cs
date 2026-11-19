@@ -10,18 +10,22 @@ namespace NwcIO.Internal.Parsing;
 /// </summary>
 internal static class StreamClassifier
 {
-    public static void ClassifyAll(IReadOnlyList<LcRawStream> streams)
+    public static void ClassifyAll(IReadOnlyList<LcRawStream> streams) =>
+        ClassifyAllAsync(streams, default).GetSynchronousResult();
+
+    public static async ValueTask ClassifyAllAsync(IReadOnlyList<LcRawStream> streams, CancellationToken cancellationToken)
     {
         for (int i = 0; i < streams.Count; i++)
         {
-            streams[i].Kind = Classify(streams[i]);
+            cancellationToken.ThrowIfCancellationRequested();
+            streams[i].Kind = Classify(await streams[i].GetDataAsync().ConfigureAwait(false));
         }
 
         // Post-pass: TOC catalogs preceding geometry chunks in Section 0
         var toc = streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
         if (toc is not null && toc.DecompressedLength >= 8)
         {
-            int chunkCount = ReadInt32(toc.Data, 4);
+            int chunkCount = ReadInt32(await toc.GetDataAsync().ConfigureAwait(false), 4);
             int start = Math.Max(0, toc.Index - chunkCount);
             for (int i = start; i < toc.Index; i++)
             {
@@ -33,9 +37,10 @@ internal static class StreamClassifier
         }
     }
 
-    public static NwcStreamKind Classify(LcRawStream stream)
+    public static NwcStreamKind Classify(LcRawStream stream) => Classify(stream.Data);
+
+    private static NwcStreamKind Classify(byte[] data)
     {
-        var data = stream.Data;
         if (data.Length < 8)
         {
             return NwcStreamKind.Unknown;

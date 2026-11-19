@@ -108,6 +108,19 @@ public class PartitionPropsTests
     public void Open_ModelFile_AttachesTheProps() =>
         Assert.Equal(3, NwcDocument.Open(new MemoryStream(File(null))).RootNode!.Children[0].Children[0].PropertyTabs.Count);
 
+    [Fact]
+    public async Task OpenAsync_WithoutCatalog_LoadsAndValidatesExternalProperties()
+    {
+        var options = new NwcReaderOptions { KeepStreamCatalog = false };
+        using var input = new MemoryStream(File(null));
+        var document = await NwcDocument.OpenAsync(input, options);
+        Assert.Equal(3, document.RootNode!.Children[0].Children[0].PropertyTabs.Count);
+
+        using var damaged = new MemoryStream(File(toc => { toc[^1] = 1; return toc; }));
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => NwcDocument.OpenAsync(damaged, options));
+        Assert.Equal("LcOaPartitionProps: the table of contents pad is not zero", failure.Message);
+    }
+
     [Theory]
     [InlineData(0x01000000)]
     [InlineData(0x00020000)]

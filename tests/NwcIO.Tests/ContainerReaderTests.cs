@@ -204,7 +204,7 @@ public class ContainerReaderTests
     [InlineData(8_181, false)]
     [InlineData(8_182, false)]
     [InlineData(12_000, true)]
-    public void Read_HuffmanStreamWithSplitOrRepeatedTrailer_PreservesExactBoundary(int payloadLength, bool repeatTrailer)
+    public async Task Read_HuffmanStreamWithSplitOrRepeatedTrailer_PreservesExactBoundary(int payloadLength, bool repeatTrailer)
     {
         // Non-final stored block with zero bytes, followed by an empty final fixed-Huffman block.
         var compressed = new byte[13 + payloadLength];
@@ -217,14 +217,24 @@ public class ContainerReaderTests
         byte[] gap = repeatTrailer ? compressed[^4..] : [];
         var next = CompressZlib("next"u8.ToArray());
 
-        var container = NwcContainerReader.Read(ContainerWith([.. compressed, .. gap, .. next]));
+        var bytes = ContainerWith([.. compressed, .. gap, .. next]);
+        Check(NwcContainerReader.Read(bytes));
 
-        Assert.Equal(2, container.Streams.Count);
-        Assert.Equal(new byte[payloadLength], container.Streams[0].Data);
-        Assert.Equal(compressed.Length, container.Streams[0].CompressedLength);
-        Assert.Equal(gap.Length, container.Streams[1].GapBefore);
-        Assert.Equal("next"u8.ToArray(), container.Streams[1].Data);
-        Assert.Equal(0, container.TrailingGap);
+        using var input = new MemoryStream(bytes);
+        var container = await NwcContainerReader.ReadAsync(input, NwcContainerReader.DefaultMaxDecompressedStreamBytes,
+            NwcContainerReader.DefaultMaxTotalDecompressedBytes, deferPayloads: false, ValueTask.FromResult, default);
+        Check(container);
+
+        void Check(NwcContainer container)
+        {
+
+            Assert.Equal(2, container.Streams.Count);
+            Assert.Equal(new byte[payloadLength], container.Streams[0].Data);
+            Assert.Equal(compressed.Length, container.Streams[0].CompressedLength);
+            Assert.Equal(gap.Length, container.Streams[1].GapBefore);
+            Assert.Equal("next"u8.ToArray(), container.Streams[1].Data);
+            Assert.Equal(0, container.TrailingGap);
+        }
     }
 
     [Fact]

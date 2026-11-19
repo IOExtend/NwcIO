@@ -49,8 +49,21 @@ internal sealed record LcRawStream
     /// <summary>Bytes skipped in the file right before this stream (framing/section text).</summary>
     public required long GapBefore { get; init; }
 
-    public byte[] Data { get => _data ?? ReadPayload!(); init => _data = value; }
-    public Func<byte[]>? ReadPayload { get; init; }
+    public byte[] Data
+    {
+        get => RequiresAsyncRead ? throw new InvalidOperationException("Use GetDataAsync to read this stream.") : GetDataAsync().GetSynchronousResult();
+        init => _data = value;
+    }
+
+    public Func<ValueTask<byte[]>>? ReadPayload { get; init; }
+    public bool RequiresAsyncRead { get; init; }
+
+    public ValueTask<byte[]> GetDataAsync() => _data is not null ? ValueTask.FromResult(_data) : ReadPayload!();
+
+    public async ValueTask<LcRawStream> LoadAsync() =>
+        RequiresAsyncRead
+            ? this with { Data = await GetDataAsync().ConfigureAwait(false), ReadPayload = null, RequiresAsyncRead = false }
+            : this;
     public int DeferredLength { get; init; }
     public int DecompressedLength => _data?.Length ?? DeferredLength;
 

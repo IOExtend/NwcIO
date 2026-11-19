@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.ExceptionServices;
 using NwcIO.Internal.Container;
 using NwcIO.Model;
 
@@ -15,7 +16,7 @@ internal sealed record ModelSegments(
     IReadOnlyList<LcRawStream> GeometryChunks,
     LcRawStream? Toc,
     LcRawStream? GuidStore,
-    Func<IReadOnlyList<byte[]>?> PartitionProps);
+    Func<ValueTask<IReadOnlyList<byte[]>?>> PartitionProps);
 
 /// <summary>
 /// The strictly read model: the tree root (null without a scene tree), one mesh and transform per fragment, the GUID table (empty when
@@ -42,12 +43,12 @@ internal static class ModelGraphReader
 
     /// <returns>The segments, or null when the container is not a model file (it then keeps the lenient path).</returns>
     /// <exception cref="InvalidDataException">The directory names a model segment more than once or in a wrong shape.</exception>
-    public static ModelSegments? Locate(NwcContainer container)
+    public static async ValueTask<ModelSegments?> LocateAsync(NwcContainer container)
     {
         var section1 = container.Streams.Where(s => s.SectionIndex == 1).Take(2).ToList();
 
         // Not a directory means not a model file, so the parse error is not needed.
-        if (section1.Count != 1 || !DbCacheParser.TryParse(section1[0].Data, out var directory, out _))
+        if (section1.Count != 1 || !DbCacheParser.TryParse(await section1[0].GetDataAsync().ConfigureAwait(false), out var directory, out _))
         {
             return null;
         }
@@ -115,18 +116,18 @@ internal static class ModelGraphReader
 
     /// <summary>The tree first, so a tree that cannot be read fails before any geometry work; then geometry, fragments and links.</summary>
     /// <exception cref="InvalidDataException">A segment breaks its grammar or a fragment breaks a link rule.</exception>
-    public static ModelGraph Read(ModelSegments segments, NwcReaderOptions options, string rootName)
+    public static async ValueTask<ModelGraph> ReadAsync(ModelSegments segments, NwcReaderOptions options, string rootName, CancellationToken cancellationToken)
     {
         // The tree needs the table for element GUIDs whatever ReadGuids says.
         Guid[] guids = segments.GuidStore is not null && (options.ReadGuids || (options.BuildSceneTree && segments.Hierarchy is not null))
-            ? ReadGuidStore(segments.GuidStore.Data)
+            ? ReadGuidStore(await segments.GuidStore.GetDataAsync().ConfigureAwait(false))
             : [];
         IReadOnlyList<NwcNode>? preorder = null;
         if (options.BuildSceneTree)
         {
             preorder = segments.Hierarchy is null
                 ? [new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 }]
-                : HierarchyParser.Read(segments.Hierarchy.Data, rootName, options.ReadPropertyRecords, guids, segments.PartitionProps);
+                : await ReadHierarchy(segments.Hierarchy, rootName, options.ReadPropertyRecords, guids, segments.PartitionProps).ConfigureAwait(false);
         }
 
         var meshes = new List<NwcMesh>();
@@ -140,12 +141,13 @@ internal static class ModelGraphReader
                 throw new InvalidDataException($"{FragmentsSegment}: fragments without geometry");
             }
 
-            var records = GeometrySegmentReader.Read(segments.GeometryChunks, segments.Toc);
-            Fragment[] fragments = segments.Fragments is null ? [] : FragmentParser.Read(segments.Fragments.Data);
+            var records = await GeometrySegmentReader.ReadAsync(segments.GeometryChunks, segments.Toc, cancellationToken).ConfigureAwait(false);
+            Fragment[] fragments = segments.Fragments is null ? [] : FragmentParser.Read(await segments.Fragments.GetDataAsync().ConfigureAwait(false));
             CheckLinks(fragments, records, preorder);
             object? elementKey = null;
             for (int k = 0; k < fragments.Length; k++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var fragment = fragments[k];
                 NwcTransform? transform = null;
                 if (options.ReadTransforms)
@@ -248,9 +250,38 @@ internal static class ModelGraphReader
         return guids;
     }
 
+    private static async ValueTask<IReadOnlyList<NwcNode>> ReadHierarchy(
+        LcRawStream hierarchy, string rootName, bool includeProperties, Guid[] guids,
+        Func<ValueTask<IReadOnlyList<byte[]>?>> partitionProps)
+    {
+        byte[] data = await hierarchy.GetDataAsync().ConfigureAwait(false);
+        if (!hierarchy.RequiresAsyncRead)
+        {
+            return HierarchyParser.Read(data, rootName, includeProperties, guids, () => partitionProps().GetSynchronousResult());
+        }
+
+        // The hierarchy always checks the roots on a successful parse. Defer validation failures to that same point.
+        IReadOnlyList<byte[]>? roots = null;
+        ExceptionDispatchInfo? failure = null;
+        try
+        {
+            roots = await partitionProps().ConfigureAwait(false);
+        }
+        catch (InvalidDataException ex)
+        {
+            failure = ExceptionDispatchInfo.Capture(ex);
+        }
+
+        return HierarchyParser.Read(data, rootName, includeProperties, guids, () =>
+        {
+            failure?.Throw();
+            return roots;
+        });
+    }
+
     // The LcOaPartitionProps root streams, once the last stream, the table of contents [i32 k][k x i32 compressed length] zero-padded
     // to 8, matches them (docs/format-notes.md §2.2.1); null when the directory names no such segment, empty for a TOC alone (k = 0).
-    private static byte[][]? PartitionRootStreams(IReadOnlyList<LcRawStream> streams, List<NwcDbCacheEntry> entries)
+    private static async ValueTask<IReadOnlyList<byte[]>?> PartitionRootStreams(IReadOnlyList<LcRawStream> streams, List<NwcDbCacheEntry> entries)
     {
         NwcDbCacheEntry? entry = null;
         foreach (var named in entries)
@@ -264,7 +295,7 @@ internal static class ModelGraphReader
         }
 
         var segment = PrefixedStreams(streams, entry, PartitionPropsSegment);
-        byte[] toc = segment[^1].Data;
+        byte[] toc = await segment[^1].GetDataAsync().ConfigureAwait(false);
         int k = segment.Length - 1;
         int expected = (4 + (4 * k) + 7) & ~7;
         if (toc.Length != expected)
@@ -292,7 +323,13 @@ internal static class ModelGraphReader
             throw new InvalidDataException($"{PartitionPropsSegment}: the table of contents pad is not zero");
         }
 
-        return [.. segment.Take(k).Select(s => s.Data)];
+        var roots = new byte[k][];
+        for (int i = 0; i < roots.Length; i++)
+        {
+            roots[i] = await segment[i].GetDataAsync().ConfigureAwait(false);
+        }
+
+        return roots;
     }
 
     private static NwcDbCacheEntry Once(NwcDbCacheEntry? found, NwcDbCacheEntry entry, string segment) =>
