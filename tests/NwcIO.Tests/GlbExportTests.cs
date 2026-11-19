@@ -8,19 +8,96 @@ namespace NwcIO.Tests;
 
 public class GlbExportTests
 {
-    [Fact]
-    public void GlbExporter_WriteFile_RemovesPartialFileOnFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GlbExporter_WriteFile_KeepsDestinationOnFailure(bool existing)
     {
         string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.glb");
+        byte[] original = [1, 2, 3];
         try
         {
+            if (existing)
+            {
+                File.WriteAllBytes(path, original);
+            }
+
             Assert.Throws<InvalidOperationException>(() =>
                 GlbExporter.WriteFile(new ThrowingMeshList(), Array.Empty<NwcMaterial>(), path));
-            Assert.False(File.Exists(path));
+            Assert.Equal(existing, File.Exists(path));
+            if (existing)
+            {
+                Assert.Equal(original, File.ReadAllBytes(path));
+            }
         }
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void GlbExporter_CreateBinBuffer_FailsWhenTempDirectoryIsMissing()
+    {
+        var directory = Directory.CreateTempSubdirectory("nwcio-glb-");
+        try
+        {
+            string unavailable = Path.Combine(directory.FullName, "missing");
+            Assert.ThrowsAny<IOException>(() => GlbExporter.CreateBinBuffer(unavailable));
+        }
+        finally
+        {
+            directory.Delete();
+        }
+    }
+
+    [Theory]
+    [InlineData(2_147_483_649L, 2_147_483_652u, 2_147_483_684u)]
+    [InlineData(4_294_967_260L, 4_294_967_260u, 4_294_967_292u)]
+    public void GlbExporter_WriteContainer_WritesUnsignedLengthsAboveTwoGiB(long bytes, uint chunkLength, uint totalLength)
+    {
+        using var bin = new HeaderOnlyBin(bytes);
+        using var output = new MemoryStream();
+
+        GlbExporter.WriteContainer(output, "{}"u8, bin);
+
+        Assert.True(bin.CopyRequested);
+        byte[] header = output.ToArray();
+        Assert.Equal(totalLength, BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(8)));
+        Assert.Equal(4u, BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(12)));
+        Assert.Equal(chunkLength, BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(24)));
+        Assert.Equal(0x004E4942u, BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(28)));
+        Assert.Equal(32 + chunkLength - bytes, header.Length);
+        Assert.All(header[32..], value => Assert.Equal(0, value));
+    }
+
+    [Theory]
+    [InlineData(4_294_967_261L, "GLB file")]
+    [InlineData(4_294_967_293L, "GLB BIN chunk")]
+    [InlineData(long.MaxValue, "GLB BIN chunk")]
+    public void GlbExporter_WriteContainer_RejectsSizeOverflowBeforeWriting(long bytes, string expectedError)
+    {
+        using var bin = new HeaderOnlyBin(bytes);
+        using var output = new MemoryStream();
+
+        var error = Assert.Throws<InvalidOperationException>(() => GlbExporter.WriteContainer(output, "{}"u8, bin));
+
+        Assert.Contains(expectedError, error.Message, StringComparison.Ordinal);
+        Assert.Contains("4294967292", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, output.Length);
+        Assert.False(bin.CopyRequested);
+    }
+
+    private sealed class HeaderOnlyBin(long length) : MemoryStream
+    {
+        public bool CopyRequested { get; private set; }
+        public override long Length { get; } = length;
+        public override long Position { get; set; } = length;
+
+        public override void CopyTo(Stream destination, int bufferSize)
+        {
+            Assert.Equal(0, Position);
+            CopyRequested = true;
         }
     }
 

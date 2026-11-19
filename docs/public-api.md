@@ -93,3 +93,8 @@ run the corresponding synchronous operations on the thread pool.
 | `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. Frozen: bug fixes only. |
 | `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). Frozen: bug fixes only. |
 | `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). |
+
+GLB geometry export requires a writable system temporary directory for its BIN chunk. The
+exporter removes the temporary file when it closes. A path-based save replaces the destination
+after the export succeeds. The complete GLB is limited to 4,294,967,292 bytes, including its
+headers and 4-byte padding. [glTF 2.0 binary layout](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#binary-gltf-layout)
