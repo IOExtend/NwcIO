@@ -190,7 +190,8 @@ public sealed partial class NwcDocument
         }
 
         fileInfo.FormatVersion ??= container.Sections.Select(s => s.InternalVersion).FirstOrDefault(v => v is not null);
-        fileInfo.LengthUnit = options.LengthUnit ?? InferLengthUnit(fileInfo.LoaderPlugin);
+        bool linkedWriterCache = segments is null && fileInfo.Options.Contains(WriterSceneLinks.MetreCacheOption);
+        fileInfo.LengthUnit = options.LengthUnit ?? (linkedWriterCache ? NwcLengthUnit.Meters : InferLengthUnit(fileInfo.LoaderPlugin));
         fileInfo.Encoding ??= container.Sections.Select(s => s.Encoding).FirstOrDefault(e => e is not null);
         fileInfo.ChunkMarker ??= container.Sections.Select(s => s.Marker).FirstOrDefault(m => m is not null);
 
@@ -273,6 +274,8 @@ public sealed partial class NwcDocument
             if (options.BuildSceneTree)
             {
                 rootNode = SceneTreeBuilder.Build(rootName, records, transforms, guids);
+                if (linkedWriterCache)
+                    WriterSceneLinks.Attach(rootNode, meshes, options.ReadMeshes, diagnostics);
             }
         }
 
