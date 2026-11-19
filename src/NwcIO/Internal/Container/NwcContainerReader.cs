@@ -1,4 +1,8 @@
+using System.Buffers;
+using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace NwcIO.Internal.Container;
 
@@ -10,6 +14,7 @@ namespace NwcIO.Internal.Container;
 internal static class NwcContainerReader
 {
     private static ReadOnlySpan<byte> SectionMarker => "#LcUStream"u8;
+    private const int InflateBufferSize = 64 * 1024;
 
     /// <summary>Default cap on the decompressed size of one stream: 512 MiB.</summary>
     public const long DefaultMaxDecompressedStreamBytes = 512L * 1024 * 1024;
@@ -22,7 +27,7 @@ internal static class NwcContainerReader
 
     public static NwcContainer Read(byte[] data, long maxDecompressedStreamBytes, long maxTotalDecompressedBytes)
     {
-        using var input = new MemoryStream(data, writable: false);
+        using var input = new MemoryStream(data, 0, data.Length, writable: false, publiclyVisible: true);
         return Read(input, maxDecompressedStreamBytes, maxTotalDecompressedBytes);
     }
 
@@ -115,7 +120,7 @@ internal static class NwcContainerReader
 
         var sections = new List<LcUStreamHeader>();
         var streams = new List<LcRawStream>();
-        var inflateBuffer = new byte[64 * 1024];
+        var inflateBuffer = new byte[InflateBufferSize];
         long totalDecompressed = 0;
         long pos = 0;
         while (pos < source.Length)
@@ -217,14 +222,29 @@ internal static class NwcContainerReader
     {
         try
         {
-            var feed = new InflateFeed(source, offset);
+            long streamLimit = Math.Min(maxDecompressedStreamBytes, Array.MaxLength);
+            long remaining = Math.Min(streamLimit, maxTotalDecompressedBytes - totalDecompressed);
+            int storedLength = 0;
+            long end = source.Length;
+            bool stored = source.IsMemoryBacked && TryGetStoredStreamEnd(source, offset, remaining, out storedLength, out end);
+            var feed = new InflateFeed(source, offset, end: end);
             using var zlib = new ZLibStream(feed, CompressionMode.Decompress);
+            byte[]? payload = stored && !deferPayload ? GC.AllocateUninitializedArray<byte>(storedLength) : null;
+            using var output = !stored && !deferPayload ? new InflateOutput() : null;
+            uint adlerA = 1, adlerB = 0;
             int length = 0;
-            int count;
-            while ((count = zlib.Read(buffer, 0, buffer.Length)) != 0)
+            while (true)
             {
                 source.CheckCancellation();
-                long streamLimit = Math.Min(maxDecompressedStreamBytes, Array.MaxLength);
+                var target = payload is not null && length < payload.Length
+                    ? payload.AsSpan(length, Math.Min(buffer.Length, payload.Length - length))
+                    : output is not null ? output.GetSpan() : buffer.AsSpan();
+                int count = zlib.Read(target);
+                if (count == 0)
+                {
+                    break;
+                }
+
                 if (count > streamLimit - length)
                 {
                     throw new InflateLimitException(
@@ -239,27 +259,29 @@ internal static class NwcContainerReader
 
                 length += count;
                 totalDecompressed += count; // Charge rejected streams too.
+                if (!stored)
+                {
+                    var bytes = target[..count];
+                    UpdateAdler32(bytes, ref adlerA, ref adlerB);
+                    output?.Advance(count);
+                }
             }
 
-            // Re-inflate with single-byte reads from the last block to find the exact end.
-            var exactFeed = new InflateFeed(source, offset, feed.LastStart);
-            byte[]? payload = deferPayload ? null : GC.AllocateUninitializedArray<byte>(length);
-            using (var exact = new ZLibStream(exactFeed, CompressionMode.Decompress))
+            long compressedLength;
+            if (stored)
             {
-                if (payload is null)
+                compressedLength = end - offset;
+                if (length != storedLength || feed.BytesServed != compressedLength)
                 {
-                    while (exact.Read(buffer, 0, buffer.Length) != 0)
-                    {
-                        source.CheckCancellation();
-                    }
-                }
-                else
-                {
-                    ReadPayload(exact, payload, source, offset);
+                    throw new InvalidDataException($"Zlib stream at offset {offset} changed after scanning.");
                 }
             }
+            else
+            {
+                compressedLength = FindCompressedLength(source, offset, feed, (adlerB << 16) | adlerA, buffer);
+                payload = output?.ToArray();
+            }
 
-            long compressedLength = exactFeed.BytesServed;
             stream = new LcRawStream
             {
                 Index = -1,
@@ -286,6 +308,120 @@ internal static class NwcContainerReader
             stream = null!;
             return false;
         }
+    }
+
+    private static bool TryGetStoredStreamEnd(BufferedInput source, long offset, long limit, out int length, out long end)
+    {
+        length = 0;
+        end = source.Length;
+        long block = offset + 2; // The container's zlib signatures have no preset dictionary.
+        while (source.Length - block >= 9) // Stored block header and zlib trailer.
+        {
+            source.CheckCancellation();
+            var header = source.Peek(block, 5);
+            if ((header[0] & 6) != 0)
+            {
+                break;
+            }
+
+            int size = BinaryPrimitives.ReadUInt16LittleEndian(header[1..]);
+            int complement = BinaryPrimitives.ReadUInt16LittleEndian(header[3..]);
+            if ((size ^ complement) != ushort.MaxValue || size > limit - length || size > source.Length - block - 9)
+            {
+                break;
+            }
+
+            length += size;
+            block += 5 + size;
+            if ((header[0] & 1) != 0)
+            {
+                end = block + 4;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static long FindCompressedLength(BufferedInput source, long offset, InflateFeed feed, uint adler, byte[] buffer)
+    {
+        // A successful inflate validated the trailer. Its last byte arrived in the last read,
+        // so only this span can contain it, including up to three bytes from the preceding read.
+        long start = Math.Max(offset, feed.LastStart - 3);
+        int length = (int)(offset + feed.BytesServed - start);
+        var tail = source.Peek(start, length)[..length];
+        Span<byte> trailer = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(trailer, adler);
+        int match = tail.IndexOf(trailer);
+        if (match >= 0 && tail[(match + 1)..].IndexOf(trailer) < 0)
+        {
+            return start + match + trailer.Length - offset;
+        }
+
+        // Repeated checksums can occur in compressed data or framing. Measure the boundary byte by byte in that case.
+        var exactFeed = new InflateFeed(source, offset, feed.LastStart);
+        using var exact = new ZLibStream(exactFeed, CompressionMode.Decompress);
+        while (exact.Read(buffer, 0, buffer.Length) != 0)
+        {
+            source.CheckCancellation();
+        }
+
+        return exactFeed.BytesServed;
+    }
+
+    internal static void UpdateAdler32(ReadOnlySpan<byte> data, ref uint a, ref uint b)
+    {
+        const uint modulus = 65521;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            const int batchSize = 256;
+            var lowWeights = Vector128.Create((ushort)16, 15, 14, 13, 12, 11, 10, 9);
+            var highWeights = Vector128.Create((ushort)8, 7, 6, 5, 4, 3, 2, 1);
+            while (data.Length >= batchSize)
+            {
+                var low = Vector128<ushort>.Zero;
+                var high = Vector128<ushort>.Zero;
+                var lowPrefix = Vector128<ushort>.Zero;
+                var highPrefix = Vector128<ushort>.Zero;
+                ref byte bytes = ref MemoryMarshal.GetReference(data);
+                for (int offset = 0; offset < batchSize; offset += 16)
+                {
+                    lowPrefix += low;
+                    highPrefix += high;
+                    var (left, right) = Vector128.Widen(Vector128.LoadUnsafe(ref bytes, (nuint)offset));
+                    low += left;
+                    high += right;
+                }
+
+                // Each vector's bytes add their weights within that vector, plus 16 for each vector after it.
+                b += (batchSize * a) + (16 * (SumWidened(lowPrefix) + SumWidened(highPrefix)))
+                    + SumWidened(low * lowWeights) + SumWidened(high * highWeights);
+                a += Vector128.Sum(low + high);
+                a %= modulus;
+                b %= modulus;
+                data = data[batchSize..];
+            }
+        }
+
+        while (!data.IsEmpty)
+        {
+            int count = Math.Min(data.Length, 5552); // B stays within uint even for all-255 input.
+            foreach (byte value in data[..count])
+            {
+                a += value;
+                b += a;
+            }
+
+            a %= modulus;
+            b %= modulus;
+            data = data[count..];
+        }
+    }
+
+    private static uint SumWidened(Vector128<ushort> values)
+    {
+        var (low, high) = Vector128.Widen(values);
+        return Vector128.Sum(low + high);
     }
 
     private static byte[] ReadPayload(BufferedInput source, long offset, long compressedLength, int length)
@@ -319,15 +455,60 @@ internal static class NwcContainerReader
 
     private sealed class InflateLimitException(string message) : Exception(message);
 
+    private sealed class InflateOutput : IDisposable
+    {
+        private readonly List<byte[]> _blocks = [];
+        private int _length;
+
+        public Span<byte> GetSpan()
+        {
+            int block = _length / InflateBufferSize;
+            if (block == _blocks.Count)
+            {
+                _blocks.Add(ArrayPool<byte>.Shared.Rent(InflateBufferSize));
+            }
+
+            int used = _length % InflateBufferSize;
+            return _blocks[block].AsSpan(used, InflateBufferSize - used);
+        }
+
+        public void Advance(int count) => _length += count;
+
+        public byte[] ToArray()
+        {
+            var payload = GC.AllocateUninitializedArray<byte>(_length);
+            int offset = 0;
+            foreach (byte[] block in _blocks)
+            {
+                int count = Math.Min(InflateBufferSize, payload.Length - offset);
+                block.AsSpan(0, count).CopyTo(payload.AsSpan(offset));
+                offset += count;
+            }
+
+            return payload;
+        }
+
+        public void Dispose()
+        {
+            foreach (byte[] block in _blocks)
+            {
+                ArrayPool<byte>.Shared.Return(block);
+            }
+        }
+    }
+
     private sealed class BufferedInput(Stream input, CancellationToken cancellationToken)
     {
         private readonly long _origin = input.Position;
         private readonly byte[] _buffer = new byte[64 * 1024];
+        private readonly ArraySegment<byte> _memory =
+            input.GetType() == typeof(MemoryStream) && ((MemoryStream)input).TryGetBuffer(out var segment) ? segment : default;
         private long _start;
         private int _count;
 
         public long EndPosition { get; } = input.Length;
         public long Length => Math.Max(0, EndPosition - _origin);
+        public bool IsMemoryBacked => _memory.Array is not null;
 
         public void CheckCancellation() => cancellationToken.ThrowIfCancellationRequested();
 
@@ -336,6 +517,11 @@ internal static class NwcContainerReader
             if (pos >= Length)
             {
                 return [];
+            }
+
+            if (_memory.Array is not null)
+            {
+                return _memory.AsSpan((int)(_origin + pos));
             }
 
             int required = (int)Math.Min(minimum, Length - pos);
