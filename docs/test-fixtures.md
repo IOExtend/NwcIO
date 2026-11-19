@@ -10,7 +10,7 @@ The #27 workload can be reproduced with 24,000,000 bytes from `new Random(27).Ne
 and each byte reduced modulo 192. Write one stream with `NwcContainerWriter.Write([payload])`
 using its default compression. This produces 22,548,544 compressed bytes on .NET 10.0.12 on Windows.
 Compare `NwcContainerReader.Read(bytes)` with `ZLibStream.CopyTo(Stream.Null)` on the same compressed
-bytes after the section header. Release build, three warm-up runs and a median of nine samples:
+bytes after the section header. PR #259 used a Release build, three warm-up runs and a median of nine samples:
 
 | Input | Reader returning decoded bytes | `ZLibStream.CopyTo(Stream.Null)` | Native inflate into an exact-size array |
 | --- | ---: | ---: | ---: |
@@ -20,12 +20,22 @@ bytes after the section header. Release build, three warm-up runs and a median o
 
 The reader is 1.21× the native discard time on the #27 workload. The native discard baseline
 on mostly stored DEFLATE data is much shorter, while returning the full payload requires an array.
-A second inflate pass is reserved for streams whose validated trailer cannot be located uniquely.
+The reader uses a second inflate pass when the validated trailer is ambiguous or when a large
+stored prefix in an array-backed input would otherwise have to be staged and copied.
+
+The mixed-stream follow-up used the same payloads on Windows with .NET 10.0.12 Release.
+Four warm-up rounds and 15 measured rounds rotated starting order among the four paths.
+The figures are medians.
+
+| Input | Before PR #259 | With PR #259 | After mixed-stream fix | `ZLibStream.CopyTo(Stream.Null)` |
+| --- | ---: | ---: | ---: | ---: |
+| Pseudorandom first 22.5 MB, zero-filled last 1.5 MB | 5.18 ms | 7.29 ms | 5.06 ms | 0.76 ms |
+| #27 workload, 24 MB | 87.16 ms | 46.05 ms | 45.90 ms | 41.78 ms |
 
 For the memory check, open an in-memory container with eight copies of the #27 payload using
 the default reader options, varying `KeepStreamCatalog`. Measure above a baseline taken after
 allocating the input, with `GC.GetTotalMemory(false)` sampled at roughly 1 ms intervals during the open
-and a full collection for the retained-memory figure. In the same Windows run, the sampled heap
+and a full collection for the retained-memory figure. In the PR #259 Windows run, the sampled heap
 peak was 366.4 MiB with the catalog disabled and 183.4 MiB with it enabled. These samples include
 collectible allocations. At return, the corresponding live heap deltas were 0.0 MiB and 183.2 MiB.
 A separate test scans a synthetic seekable input with a valid stream beyond 2 GiB.

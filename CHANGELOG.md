@@ -14,6 +14,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Fixed
 - The container reader rejects zlib data that ends before the trailer is validated, even when the payload ends with bytes matching its own checksum.
+- Eager container reads of mixed DEFLATE streams with a large stored prefix and a short coded tail inflate directly into the final payload on replay, reducing buffer copies.
 - Document saves to an NWC or JSON path replace the destination only after the write succeeds. The container reader and both document exporters check cancellation during processing.
 - GLB identifies NwcIO as the generator when exporting a document.
 
