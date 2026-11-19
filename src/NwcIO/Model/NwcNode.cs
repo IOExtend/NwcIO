@@ -25,7 +25,7 @@ public sealed class NwcNode
     /// <summary>Properties attached directly to this node.</summary>
     public List<NwcPropertyRecord> Properties { get; } = [];
 
-    /// <summary>The property tabs of this node in stored slot order, for Navisworks model files read through their DbCache directory; <see cref="Properties"/> is their records in that order (the same objects). Other files and <c>ReadPropertyRecords = false</c> leave it empty.</summary>
+    /// <summary>Property tabs in DbCache slot order, or grouped by record class for a linked writer cache. Tab records also appear in <see cref="Properties"/>.</summary>
     public List<NwcPropertyTab> PropertyTabs { get; } = [];
 
     /// <summary>Hyperlinks / URLs attached directly to this node (class 79 <c>LcOaURLAttribute</c>).</summary>
@@ -66,10 +66,10 @@ public sealed class NwcNode
     /// <summary>On the strict path, the name of the nearest class-31 material on this node or an ancestor, <c>""</c> for one whose name is null; null without one.</summary>
     internal string? MaterialName { get; init; }
 
-    /// <summary>The first of <see cref="Meshes"/> for Navisworks model files read through their DbCache directory (files written by <c>NwcWriter</c> and other containers leave <see cref="Meshes"/> empty); null when the node has no geometry.</summary>
+    /// <summary>The first of <see cref="Meshes"/>, or null when the node has no geometry.</summary>
     public NwcMesh? Mesh { get; set; }
 
-    /// <summary>Every mesh instance placed at this node; <see cref="Mesh"/> is the first of them. Only Navisworks model files read through their DbCache directory fill it (files written by <c>NwcWriter</c> and other containers leave it empty).</summary>
+    /// <summary>Every mesh instance placed at this node in a DbCache model or a linked writer cache.</summary>
     public List<NwcMesh> Meshes { get; } = [];
 
     public override string ToString() => $"{Name} ({Class}) [Children: {Children.Count}, Props: {Properties.Count}]";

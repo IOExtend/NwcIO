@@ -12,6 +12,57 @@ namespace NwcIO.Scene.Tests;
 
 public sealed class NwcSceneReaderTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Read_LinkedWriterCacheRestoresMeshAndProperties(bool linked)
+    {
+        var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+        var wall = new NwcNode { Id = 11, Name = "Wall", Class = "Test.Element", Parent = root };
+        root.Children.Add(wall);
+        wall.Properties.Add(new() { FirstInt = 11, Tag = 52, Class = "Revit", Name = "Fire rating", ValueType = 4, Value = "EI 60" });
+        wall.Properties.Add(new() { FirstInt = 11, Tag = 52, Class = "IOExtend.NwcWriter.Link", Name = "Mesh ID", ValueType = 2, IntValue = 5 });
+        var mesh = new NwcMesh
+        {
+            Id = 5, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2],
+        };
+        var doc = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { Options = linked ? ["IOExtend.NwcWriter.Scene/1"] : [] },
+            meshes: [mesh], rootNode: root);
+        using var file = TempFile(NwcWriter.WriteToBytes(doc), "Wall.nwc");
+        var reopened = NwcDocument.Open(file.Path, new() { Strict = true });
+        var result = Valid(NwcSceneReader.Read(file.Path));
+        if (!linked)
+        {
+            Assert.Equal(NwcLengthUnit.Unknown, reopened.LengthUnit);
+            Assert.Null(Assert.Single(reopened.Meshes).Node);
+            Assert.Empty(result.Document.Instances);
+            return;
+        }
+
+        Assert.Equal(NwcLengthUnit.Meters, reopened.LengthUnit);
+        Assert.Equal(NwcLengthUnit.Feet,
+            NwcDocument.Open(file.Path, new() { LengthUnit = NwcLengthUnit.Feet }).LengthUnit);
+        Assert.Same(Assert.Single(reopened.RootNode!.Children), Assert.Single(reopened.Meshes).Node);
+        var instance = Assert.Single(result.Document.Instances);
+        var sceneWall = Assert.Single(result.Document.Elements, element => element.Id == instance.ElementId);
+        Assert.Equal("Wall", sceneWall.Name);
+        var propertySet = Assert.Single(result.Document.PropertySets, set => sceneWall.PropertySetIds.Contains(set.Id));
+        Assert.Equal("EI 60", Assert.Single(propertySet.Properties).Value.Text);
+    }
+
+    [Fact]
+    public void Read_LinkedWriterCacheReportsAnUnknownMesh()
+    {
+        var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+        root.Properties.Add(new() { FirstInt = 0, Tag = 52, Class = "IOExtend.NwcWriter.Link", Name = "Mesh ID", ValueType = 2, IntValue = 5 });
+        var doc = NwcDocument.Create(
+            fileInfo: new NwcFileInfo { Options = ["IOExtend.NwcWriter.Scene/1"] }, rootNode: root);
+        using var file = TempFile(NwcWriter.WriteToBytes(doc), "Broken.nwc");
+        Assert.Contains(NwcDocument.Open(file.Path).Diagnostics, d => d.Code == "invalid-writer-mesh-link");
+        Assert.Throws<InvalidDataException>(() => NwcDocument.Open(file.Path, new() { Strict = true }));
+    }
+
     [Fact]
     public void Read_File_DescribesTheModel()
     {
