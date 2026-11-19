@@ -4,6 +4,8 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-11-19
+
 ### Fixed
 
 - Revit-exported NWC files can use class-66 element ID flags `0x00020000` and share a pose across fragments. The reader accepts both encodings and preserves the element IDs and mesh placement (#261).
