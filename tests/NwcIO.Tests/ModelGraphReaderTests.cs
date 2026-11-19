@@ -45,10 +45,12 @@ public class ModelGraphReaderTests
         Assert.Equal([new Vector3d(1, 2, 3), new(2, 2, 3), new(1, 3, 3), new(2, 3, 3)], doc.Meshes[0].GetWorldVertices());
     }
 
-    [Fact]
-    public void Open_MixedFile_DecodesLinesNormalsAndCrossingRecords()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Open_MixedFile_DecodesLinesNormalsAndCrossingRecords(bool keepCatalog)
     {
-        var doc = NwcDocument.Open(new MemoryStream(MixedFile()));
+        var doc = NwcDocument.Open(new MemoryStream(MixedFile()), new NwcReaderOptions { KeepStreamCatalog = keepCatalog });
         Assert.Equal(5, doc.Meshes.Count);
         Assert.Equal([2, 3, 6, 7, 7], doc.Meshes.Select(m => m.Node!.Id));
         var leaf = doc.Meshes[3].Node!;
@@ -66,9 +68,10 @@ public class ModelGraphReaderTests
         Assert.All(doc.Meshes.Skip(3), m => { Assert.Same(doc.Meshes[0].Vertices, m.Vertices); Assert.Same(doc.Meshes[0].Indices, m.Indices); });
         Assert.Equal(new Vector3d(0, 5, 0), doc.Meshes[1].GetWorldVertices()[0]);
 
-        // streams: hierarchy, fragments, chunk 0, chunk 1, TOC, directory
-        Assert.Equal(
-            [NwcStreamKind.Transforms, NwcStreamKind.Geometry, NwcStreamKind.Geometry, NwcStreamKind.Toc],
+        NwcStreamKind[] expectedKinds = keepCatalog
+            ? [NwcStreamKind.Transforms, NwcStreamKind.Geometry, NwcStreamKind.Geometry, NwcStreamKind.Toc]
+            : [];
+        Assert.Equal(expectedKinds,
             doc.Container.Streams.Skip(1).Take(4).Select(s => s.Kind));
     }
 

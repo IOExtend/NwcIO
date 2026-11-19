@@ -19,7 +19,7 @@ internal static class StreamClassifier
 
         // Post-pass: TOC catalogs preceding geometry chunks in Section 0
         var toc = streams.FirstOrDefault(s => s.Kind == NwcStreamKind.Toc);
-        if (toc is not null && toc.Data.Length >= 8)
+        if (toc is not null && toc.DecompressedLength >= 8)
         {
             int chunkCount = ReadInt32(toc.Data, 4);
             int start = Math.Max(0, toc.Index - chunkCount);

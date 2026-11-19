@@ -11,10 +11,15 @@ internal static class NwcContainerWriter
 {
     public const string DefaultHeader = "#LcUStream-V1.1 binary double release utf8 navisworks:448 lizlib\n";
 
-    public static void Write(Stream output, IReadOnlyList<byte[]> decompressedStreams, string? header = null)
+    public static void Write(
+        Stream output,
+        IReadOnlyList<byte[]> decompressedStreams,
+        string? header = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(decompressedStreams);
+        cancellationToken.ThrowIfCancellationRequested();
 
         ValidateHeader(header);
         header ??= DefaultHeader;
@@ -30,9 +35,18 @@ internal static class NwcContainerWriter
         {
             byte[] streamData = decompressedStreams[i];
             using var zlib = new ZLibStream(output, CompressionLevel.Optimal, leaveOpen: true);
-            zlib.Write(streamData, 0, streamData.Length);
+            int offset = 0;
+            do
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int count = Math.Min(64 * 1024, streamData.Length - offset);
+                zlib.Write(streamData, offset, count);
+                offset += count;
+            }
+            while (offset < streamData.Length);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         output.Flush();
     }
 

@@ -36,6 +36,8 @@ internal enum NwcStreamKind
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1711:Identifiers should not have incorrect suffix", Justification = "Matches Navisworks LcUStream naming convention")]
 internal sealed record LcRawStream
 {
+    private readonly byte[]? _data;
+
     public required int Index { get; init; }
 
     /// <summary>Absolute file offset where the zlib data starts.</summary>
@@ -45,9 +47,12 @@ internal sealed record LcRawStream
     public required long CompressedLength { get; init; }
 
     /// <summary>Bytes skipped in the file right before this stream (framing/section text).</summary>
-    public required int GapBefore { get; init; }
+    public required long GapBefore { get; init; }
 
-    public required byte[] Data { get; init; }
+    public byte[] Data { get => _data ?? ReadPayload!(); init => _data = value; }
+    public Func<byte[]>? ReadPayload { get; init; }
+    public int DeferredLength { get; init; }
+    public int DecompressedLength => _data?.Length ?? DeferredLength;
 
     public NwcStreamKind Kind { get; set; } = NwcStreamKind.Unknown;
 

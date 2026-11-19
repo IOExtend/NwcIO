@@ -15,11 +15,12 @@ internal static class GeometrySegmentReader
     /// <returns>The records in TOC order.</returns>
     public static GeometryRecord[] Read(IReadOnlyList<LcRawStream> chunks, LcRawStream toc)
     {
-        var records = Cut(chunks, ReadToc(chunks, toc.Data));
+        var lengths = ReadToc(chunks, toc.Data);
+        var records = Cut(chunks, lengths);
 
         // 16 wins when both widths parse: a file without palettes, or a palette valid under both (docs/format-notes.md §2.6).
-        if (TryParseAll(records, 16, out var parsed, out int wideAt, out var wideError)
-            || TryParseAll(records, 8, out parsed, out int narrowAt, out var narrowError))
+        if (TryParseAll(records, lengths.Length, 16, out var parsed, out int wideAt, out var wideError)
+            || TryParseAll(records, lengths.Length, 8, out parsed, out int narrowAt, out var narrowError))
         {
             return parsed;
         }
@@ -84,7 +85,7 @@ internal static class GeometrySegmentReader
         long block = 0;
         foreach (var chunk in chunks)
         {
-            block += chunk.Data.Length;
+            block += chunk.DecompressedLength;
         }
 
         if (sum != block)
@@ -96,24 +97,22 @@ internal static class GeometrySegmentReader
     }
 
     // A record inside one chunk stays a slice of it; a crossing record is copied once. There is no concatenated block.
-    private static ReadOnlyMemory<byte>[] Cut(IReadOnlyList<LcRawStream> chunks, int[] lengths)
+    private static IEnumerable<ReadOnlyMemory<byte>> Cut(IReadOnlyList<LcRawStream> chunks, int[] lengths)
     {
-        var records = new ReadOnlyMemory<byte>[lengths.Length];
-        int c = 0, offset = 0;
-        for (int k = 0; k < lengths.Length; k++)
+        int nextChunk = 0, offset = 0;
+        byte[] data = [];
+        foreach (int length in lengths)
         {
             // The sum check guarantees the remaining chunks hold every remaining record byte.
-            while (offset == chunks[c].Data.Length)
+            while (offset == data.Length)
             {
-                c++;
+                data = chunks[nextChunk++].Data;
                 offset = 0;
             }
 
-            int length = lengths[k];
-            byte[] data = chunks[c].Data;
             if (data.Length - offset >= length)
             {
-                records[k] = data.AsMemory(offset, length);
+                yield return data.AsMemory(offset, length);
                 offset += length;
                 continue;
             }
@@ -123,38 +122,40 @@ internal static class GeometrySegmentReader
             data.AsSpan(offset).CopyTo(copy);
             while (done < length)
             {
-                c++;
-                offset = Math.Min(length - done, chunks[c].Data.Length);
-                chunks[c].Data.AsSpan(0, offset).CopyTo(copy.AsSpan(done));
+                data = chunks[nextChunk++].Data;
+                offset = Math.Min(length - done, data.Length);
+                data.AsSpan(0, offset).CopyTo(copy.AsSpan(done));
                 done += offset;
             }
 
-            records[k] = copy;
+            yield return copy;
         }
-
-        return records;
     }
 
     // Stops at the first record that does not parse under this width.
     private static bool TryParseAll(
-        ReadOnlyMemory<byte>[] records,
+        IEnumerable<ReadOnlyMemory<byte>> records,
+        int count,
         int normalBits,
         [NotNullWhen(true)] out GeometryRecord[]? parsed,
         out int failedAt,
         [NotNullWhen(false)] out InvalidDataException? error)
     {
-        var result = new GeometryRecord[records.Length];
-        for (int k = 0; k < records.Length; k++)
+        var result = new GeometryRecord[count];
+        int k = 0;
+        foreach (var record in records)
         {
             try
             {
-                result[k] = GeometryRecordParser.Parse(records[k].Span, normalBits);
+                result[k] = GeometryRecordParser.Parse(record.Span, normalBits);
             }
             catch (InvalidDataException ex)
             {
                 (parsed, failedAt, error) = (null, k, ex);
                 return false;
             }
+
+            k++;
         }
 
         (parsed, failedAt, error) = (result, -1, null);

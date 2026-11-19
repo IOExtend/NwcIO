@@ -9,6 +9,36 @@ namespace NwcIO.Tests;
 
 public class WriterTests
 {
+    [Fact]
+    public void WriteFile_FailureAfterWriting_KeepsOriginalAndRemovesTemporaryFile()
+    {
+        var directory = Directory.CreateTempSubdirectory("nwcio-writer-");
+        string path = Path.Combine(directory.FullName, "model.nwc");
+        byte[] original = [1, 2, 3];
+        try
+        {
+            File.WriteAllBytes(path, original);
+            Assert.Throws<IOException>(() => NwcIO.Internal.AtomicFileWriter.Write(path, output =>
+            {
+                output.WriteByte(42);
+                throw new IOException("Simulated write failure.");
+            }, default));
+
+            Assert.Equal(original, File.ReadAllBytes(path));
+            Assert.Equal(path, Assert.Single(Directory.EnumerateFiles(directory.FullName)));
+
+            var document = NwcDocument.Create();
+            document.Save(path);
+            Assert.Equal(document.ToByteArray(), File.ReadAllBytes(path));
+            Assert.Equal(path, Assert.Single(Directory.EnumerateFiles(directory.FullName)));
+        }
+        finally
+        {
+            File.Delete(path);
+            directory.Delete();
+        }
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(2)]

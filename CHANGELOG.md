@@ -4,6 +4,17 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+### Added
+- `NwcDocument.SaveJsonAsync` exports to a path or stream on a thread-pool thread and accepts cancellation and progress.
+
+### Fixed
+- The container reader rejects zlib data that ends before the trailer is validated, even when the payload ends with bytes matching its own checksum.
+- Document saves to an NWC or JSON path replace the destination only after the write succeeds. The container reader and both document exporters check cancellation during processing.
+- GLB identifies NwcIO as the generator when exporting a document.
+
+### Changed
+- The container reader scans seekable inputs in blocks with 64-bit offsets. Non-seekable inputs are spooled to a temporary file. With `KeepStreamCatalog = false`, parsers inflate payloads on demand.
+
 ## [0.14.0] - 2026-11-18
 
 ### Added
@@ -474,7 +485,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
   - **glTF 2.0 Binary (GLB)**:
     - Interleaved binary buffers with PBR material definitions, per-element metadata, and embedded viewpoints / cameras.
   - **Wavefront OBJ**:
-    - Direct export of textured geometry (`.obj` + `.mtl`).
+    - Direct export of mesh geometry to `.obj`.
   - **Structured JSON**:
     - Export of complete scene hierarchy, bounding boxes, property sets, clash test results, and camera definitions.
 - **BCF 2.1 & Clash Reports**:

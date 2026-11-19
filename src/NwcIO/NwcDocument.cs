@@ -119,7 +119,6 @@ public sealed partial class NwcDocument
     /// <summary>Opens and parses a Navisworks file from disk.</summary>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
     /// <exception cref="InvalidDataException">The file is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     public static NwcDocument Open(string path, NwcReaderOptions? options = null)
         => Open(path, options, null, default);
 
@@ -146,7 +145,6 @@ public sealed partial class NwcDocument
 
     /// <summary>Opens and parses a Navisworks file from a stream.</summary>
     /// <exception cref="InvalidDataException">The stream is not an LcUStream container, a stream exceeds <see cref="NwcReaderOptions.MaxDecompressedStreamBytes"/> or <see cref="NwcReaderOptions.MaxTotalDecompressedBytes"/>, or its DbCache directory names model segments that break the format.</exception>
-    /// <exception cref="IOException">The container is larger than the 2 GiB a single in-memory buffer can hold.</exception>
     public static NwcDocument Open(Stream stream, NwcReaderOptions? options = null, string? fallbackName = null)
         => Open(stream, options, fallbackName, null, default);
 
@@ -164,7 +162,21 @@ public sealed partial class NwcDocument
         options ??= NwcReaderOptions.Default;
         cancellationToken.ThrowIfCancellationRequested();
 
-        var container = NwcContainerReader.Read(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes);
+        bool keepStreamCatalog = options.KeepStreamCatalog;
+        return NwcContainerReader.Read(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes,
+            deferPayloads: !keepStreamCatalog,
+            container => ParseContainer(container, options, keepStreamCatalog, fallbackName, progress, cancellationToken),
+            cancellationToken);
+    }
+
+    private static NwcDocument ParseContainer(
+        NwcContainer container,
+        NwcReaderOptions options,
+        bool keepStreamCatalog,
+        string? fallbackName,
+        IProgress<NwcProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("read-container", 1, 1));
         StreamClassifier.ClassifyAll(container.Streams);
@@ -316,7 +328,7 @@ public sealed partial class NwcDocument
             }
         }
 
-        if (!options.KeepStreamCatalog)
+        if (!keepStreamCatalog)
         {
             container = container with { Streams = [] };
         }
@@ -407,8 +419,7 @@ public sealed partial class NwcDocument
     {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-nwc", 0, 1));
-        NwcWriter.Write(this, path, header);
-        cancellationToken.ThrowIfCancellationRequested();
+        NwcWriter.Write(this, path, header, cancellationToken);
         progress?.Report(new NwcProgress("export-nwc", 1, 1));
     }
 
@@ -421,7 +432,7 @@ public sealed partial class NwcDocument
     {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-nwc", 0, 1));
-        NwcWriter.Write(this, stream, header);
+        NwcWriter.Write(this, stream, header, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-nwc", 1, 1));
     }
@@ -446,8 +457,7 @@ public sealed partial class NwcDocument
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 0, 1));
         cancellationToken.ThrowIfCancellationRequested();
-        Internal.Json.JsonExporter.WriteFile(this, path, options);
-        cancellationToken.ThrowIfCancellationRequested();
+        Internal.Json.JsonExporter.WriteFile(this, path, options, cancellationToken);
         progress?.Report(new NwcProgress("export-json", 1, 1));
     }
 
@@ -462,7 +472,7 @@ public sealed partial class NwcDocument
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 0, 1));
         cancellationToken.ThrowIfCancellationRequested();
-        Internal.Json.JsonExporter.Write(this, stream, options);
+        Internal.Json.JsonExporter.Write(this, stream, options, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("export-json", 1, 1));
     }
@@ -499,6 +509,22 @@ public sealed partial class NwcDocument
     /// <summary>Saves the document to a stream asynchronously.</summary>
     public Task SaveAsync(Stream stream, string? header = null, CancellationToken cancellationToken = default)
         => Task.Run(() => Save(stream, header, null, cancellationToken), cancellationToken);
+
+    /// <summary>Exports the document to a JSON file on a thread-pool thread.</summary>
+    public Task SaveJsonAsync(
+        string path,
+        NwcJsonExportOptions? options = null,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() => SaveJson(path, options, progress, cancellationToken), cancellationToken);
+
+    /// <summary>Exports the document to a JSON stream on a thread-pool thread.</summary>
+    public Task SaveJsonAsync(
+        Stream stream,
+        NwcJsonExportOptions? options = null,
+        IProgress<NwcProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() => SaveJson(stream, options, progress, cancellationToken), cancellationToken);
 
     private static NwcLengthUnit InferLengthUnit(string? loaderPlugin) =>
         loaderPlugin is "LcNwcLoaderPlugin:lcldrevit" or "nwexportrevit"
