@@ -236,9 +236,12 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 .tab-row { display: flex; border-bottom: 1px solid #333; background: #181818; }
 .tab-btn { flex: 1; padding: 8px; font-size: 11px; background: none; border: none; color: #888; cursor: pointer; text-align: center; border-bottom: 2px solid transparent; }
 .tab-btn.active { color: #fff; border-bottom: 2px solid #007acc; background: #222; }
-.tree-item { padding: 6px 8px; font-size: 12px; cursor: pointer; border-radius: 3px; display: flex; align-items: center; gap: 6px; user-select: none; }
+.tree-item { width: 100%; padding: 6px 8px; font: inherit; font-size: 12px; color: inherit; background: none; border: 0; border-radius: 3px; text-align: left; display: block; overflow-wrap: anywhere; cursor: pointer; user-select: none; }
 .tree-item:hover { background: #2c2c2c; }
 .tree-item.selected { background: #007acc; color: #fff; }
+.tree-item:focus-visible, #measure-clear:focus-visible, #glcanvas:focus-visible { outline: 2px solid #70bbff; outline-offset: -2px; }
+.camera-keys { display: none; position: absolute; left: 12px; bottom: 12px; max-width: calc(100% - 24px); padding: 6px 8px; border-radius: 4px; color: #e0e0e0; background: #222; font-size: 12px; pointer-events: none; }
+#glcanvas:focus-visible + .camera-keys { display: block; }
 .prop-category { margin-bottom: 12px; }
 .prop-category-title { font-size: 11px; font-weight: 600; color: #888; text-transform: uppercase; margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px solid #333; }
 .prop-table { width: 100%; font-size: 11px; border-collapse: collapse; }
@@ -254,6 +257,8 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
 .measure-panel .title { font-weight: 600; color: #4dabf7; margin-bottom: 4px; display: flex; justify-content: space-between; }
 .measure-panel .row { display: flex; justify-content: space-between; margin: 2px 0; color: #ccc; }
 .measure-panel .val { font-weight: 600; color: #fff; }
+#measure-clear { background: none; border: 0; border-radius: 3px; padding: 0 4px; color: #aaa; font: inherit; cursor: pointer; }
+#measure-clear:hover { color: #fff; }
 .timeliner-bar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(25,25,25,0.94); border: 1px solid #007acc; border-radius: 6px; padding: 8px 16px; display: flex; gap: 12px; align-items: center; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,0.5); min-width: 480px; }
 .timeliner-bar button { background: #2a2a2a; color: #fff; border: 1px solid #555; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
 .timeliner-bar button:hover { background: #3a3a3a; }
@@ -270,7 +275,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   <h1>{System.Net.WebUtility.HtmlEncode(title)}</h1>
   <div class="toolbar">
     <button class="btn" id="btn-timeliner" style="display:none;">4D TimeLiner</button>
-    <button class="btn" id="btn-measure">Measure</button>
+    <button class="btn" id="btn-measure" aria-pressed="false">Measure</button>
     <button class="btn" id="btn-toggle-sec">Sectioning</button>
     <button class="btn" id="btn-turntable">Turntable</button>
     <button class="btn" id="btn-wireframe">Wireframe</button>
@@ -299,11 +304,12 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   <div id="viewport-container">
     <div class="hud-stats" id="hud-stats">Meshes: 0 | Vertices: 0</div>
     <div class="hud-warning" id="hud-truncated"></div>
-    <canvas id="glcanvas"></canvas>
+    <canvas id="glcanvas" tabindex="0" role="region" aria-label="3D model view" aria-describedby="camera-keys"></canvas>
+    <div class="camera-keys" id="camera-keys">Arrow keys to orbit, + and &minus; to zoom, Home to reset view.</div>
     <canvas id="overlay"></canvas>
     <div class="measure-panel" id="measure-panel" style="display:none;">
-      <div class="title"><span>3D Measure</span><span id="measure-clear" style="cursor:pointer;color:#888;">&times;</span></div>
-      <div id="measure-status" style="color:#aaa;margin-bottom:4px;">Click 2 points to measure</div>
+      <div class="title"><span>3D Measure</span><button type="button" id="measure-clear" aria-label="Clear measurement">&times;</button></div>
+      <div id="measure-status" aria-live="polite" style="color:#aaa;margin-bottom:4px;">Click 2 points to measure</div>
       <div id="measure-results" style="display:none;">
         <div class="row"><span>Distance:</span><span class="val" id="m-dist">0.00 m</span></div>
         <div class="row"><span>Horiz Dist:</span><span class="val" id="m-horiz">0.00 m</span></div>
@@ -313,9 +319,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     </div>
     <div class="timeliner-bar" id="timeliner-bar" style="display:none;">
       <button id="tl-play">▶ Play</button>
-      <input type="range" id="tl-slider" min="0" max="1000" value="0">
+      <input type="range" id="tl-slider" aria-label="TimeLiner position" min="0" max="1000" value="0">
       <span class="timeliner-date" id="tl-date">--/--/----</span>
-      <select id="tl-speed" style="background:#222;color:#ccc;border:1px solid #444;border-radius:3px;padding:3px;font-size:11px;">
+      <select id="tl-speed" aria-label="TimeLiner playback speed" style="background:#222;color:#ccc;border:1px solid #444;border-radius:3px;padding:3px;font-size:11px;">
         <option value="1">1x</option>
         <option value="5">5x</option>
         <option value="15">15x</option>
@@ -1014,6 +1020,15 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     }
   }
 
+  function orbitCamera(dx, dy) {
+    camPhi -= dx;
+    camTheta = Math.max(0.01, Math.min(Math.PI - 0.01, camTheta - dy));
+  }
+
+  function zoomCamera(factor) {
+    camRadius = Math.max(0.2, camRadius * factor);
+  }
+
   // Mouse & Touch Orbit Controls
   canvas.addEventListener('mousedown', e => {
     isDragging = true;
@@ -1037,19 +1052,50 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       camTarget[0] -= dx * factor;
       camTarget[1] += dy * factor;
     } else {
-      camPhi -= dx * 0.008;
-      camTheta -= dy * 0.008;
-      camTheta = Math.max(0.01, Math.min(Math.PI - 0.01, camTheta));
+      orbitCamera(dx * 0.008, dy * 0.008);
     }
     requestAnimationFrame(render);
   });
 
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
-    camRadius *= (e.deltaY > 0 ? 1.1 : 0.9);
-    camRadius = Math.max(0.2, camRadius);
+    zoomCamera(e.deltaY > 0 ? 1.1 : 0.9);
     requestAnimationFrame(render);
   }, { passive: false });
+
+  canvas.addEventListener('keydown', e => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+
+    const step = 0.1;
+    let dx = 0, dy = 0, zoom = 1;
+    switch (e.key) {
+      case 'ArrowLeft': dx = -step; break;
+      case 'ArrowRight': dx = step; break;
+      case 'ArrowUp': dy = -step; break;
+      case 'ArrowDown': dy = step; break;
+      case '+':
+      case '=': zoom = 0.9; break;
+      case '-': zoom = 1.1; break;
+      case 'Home': break;
+      default: return;
+    }
+
+    e.preventDefault();
+    if (tourActive) stopTour();
+    if (turntableActive) toggleTurntable();
+    if (e.key === 'Home') {
+      resetCamera();
+      return;
+    }
+
+    if (currentCamAnim !== null) {
+      cancelAnimationFrame(currentCamAnim);
+      currentCamAnim = null;
+    }
+    if (dx || dy) orbitCamera(dx, dy);
+    if (zoom !== 1) zoomCamera(zoom);
+    requestAnimationFrame(render);
+  });
 
   // Element Selection & Property Inspector & Measure
   canvas.addEventListener('click', e => {
@@ -1134,13 +1180,19 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     }
   }
 
+  function listButton(text) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'tree-item';
+    button.textContent = text;
+    return button;
+  }
+
   // Populate Viewpoints Tab
   const vpsContainer = document.getElementById('vps-list') || document.getElementById('tab-vps');
   if (modelData.viewpoints && modelData.viewpoints.length > 0) {
     modelData.viewpoints.forEach(vp => {
-      const item = document.createElement('div');
-      item.className = 'tree-item';
-      item.textContent = vp.name;
+      const item = listButton(vp.name || 'Unnamed viewpoint');
       item.addEventListener('click', () => {
         if (vp.camera && vp.camera.position && vp.camera.target) {
           const newTarget = [...vp.camera.target];
@@ -1171,9 +1223,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       clashesContainer.appendChild(tDiv);
 
       (test.allClashes || []).forEach(clash => {
-        const cItem = document.createElement('div');
-        cItem.className = 'tree-item';
-        cItem.textContent = `${clash.name}: ${clash.item1?.name || 'A'} vs ${clash.item2?.name || 'B'}`;
+        const cItem = listButton(`${clash.name || 'Unnamed clash'}: ${clash.item1?.name || 'A'} vs ${clash.item2?.name || 'B'}`);
         cItem.addEventListener('click', () => {
           if (clash.point) {
             animateCameraTo([...clash.point], 4.0, camTheta, camPhi);
@@ -1189,9 +1239,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   // Hierarchy Tab
   const treeContainer = document.getElementById('tab-tree');
   modelData.meshes.forEach((m, idx) => {
-    const item = document.createElement('div');
-    item.className = 'tree-item';
-    item.textContent = m.name || `Mesh ${idx+1}`;
+    const item = listButton(m.name || `Mesh ${idx+1}`);
     item.addEventListener('click', () => {
       selectedMeshIndex = idx;
       showProperties(m);
@@ -1222,10 +1270,11 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             container.appendChild(subDiv);
           }
         } else {
-          const itemDiv = document.createElement('div');
-          itemDiv.className = 'tree-item';
-          itemDiv.textContent = (item.type === 'search' ? '🔍 ' : '📌 ') + item.name;
-          itemDiv.addEventListener('click', () => {
+          const isSearch = item.type === 'search';
+          const name = item.name || (isSearch ? 'Unnamed search set' : 'Unnamed selection set');
+          const button = listButton((isSearch ? '🔍 ' : '📌 ') + name);
+          button.setAttribute('aria-label', name);
+          button.addEventListener('click', () => {
             selectedSetMeshIndices.clear();
             if (item.nodeIds && item.nodeIds.length > 0) {
               const idSet = new Set(item.nodeIds);
@@ -1238,7 +1287,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             }
             requestAnimationFrame(render);
           });
-          container.appendChild(itemDiv);
+          container.appendChild(button);
         }
       });
     }
@@ -1431,7 +1480,7 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   });
 
   // Toolbar Actions
-  document.getElementById('btn-reset-cam').addEventListener('click', () => {
+  function resetCamera() {
     const resetTarget = [
       (bbox.min[0] + bbox.max[0]) * 0.5,
       (bbox.min[1] + bbox.max[1]) * 0.5,
@@ -1439,7 +1488,9 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     ];
     const resetRadius = Math.max(Math.hypot(bbox.max[0]-bbox.min[0], bbox.max[1]-bbox.min[1], bbox.max[2]-bbox.min[2]) * 1.2, 5.0);
     animateCameraTo(resetTarget, resetRadius, 0.8, 0.5);
-  });
+  }
+
+  document.getElementById('btn-reset-cam').addEventListener('click', resetCamera);
 
   const btnTurntable = document.getElementById('btn-turntable');
   if (btnTurntable) {
@@ -1463,20 +1514,24 @@ canvas#overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   document.getElementById('btn-measure').addEventListener('click', function() {
     measureMode = !measureMode;
     this.classList.toggle('active', measureMode);
+    this.setAttribute('aria-pressed', String(measureMode));
     document.getElementById('measure-panel').style.display = measureMode ? 'block' : 'none';
-    if (!measureMode) {
-      measureP1 = null; measureP2 = null;
-      document.getElementById('measure-results').style.display = 'none';
-      document.getElementById('measure-status').textContent = 'Click 2 points to measure';
-    }
-    requestAnimationFrame(render);
+    if (!measureMode) clearMeasurement();
+    else requestAnimationFrame(render);
   });
 
-  document.getElementById('measure-clear').addEventListener('click', () => {
+  function clearMeasurement() {
     measureP1 = null; measureP2 = null;
     document.getElementById('measure-results').style.display = 'none';
     document.getElementById('measure-status').textContent = 'Click 2 points to measure';
     requestAnimationFrame(render);
+  }
+
+  document.getElementById('measure-clear').addEventListener('click', clearMeasurement);
+  window.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && measureMode && !e.defaultPrevented && !e.target.matches?.('input, select, textarea')) {
+      clearMeasurement();
+    }
   });
 
   const secControls = document.getElementById('sec-controls');

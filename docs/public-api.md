@@ -117,6 +117,10 @@ The convenience methods register a test only after it completes.
 | `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). Frozen: bug fixes only. |
 | `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). |
 
+In the HTML viewer, use Tab to reach the viewpoint, clash, hierarchy and set buttons, then Enter or
+Space to activate them. With focus on the 3D model view, the arrow keys orbit, + and - zoom, and
+Home resets the camera. Escape clears the current measurement while Measure is active.
+
 GLB geometry export requires a writable system temporary directory for its BIN chunk. The
 exporter removes the temporary file when it closes. A path-based save replaces the destination
 after the export succeeds. The complete GLB is limited to 4,294,967,292 bytes, including its
