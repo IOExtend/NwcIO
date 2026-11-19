@@ -170,13 +170,17 @@ Reads binary Navisworks Cache (`.nwc`), Navisworks Document (`.nwd`), and Navisw
 
 ### Writer limitations
 
-`NwcWriter` / `NwcDocument.Save` produce an `#LcUStream` container that NwcIO reads back. The output uses NwcIO's own layout and has not been verified to open in Autodesk Navisworks.
+`NwcWriter.WriteNative(document, stream)` writes an interoperable 448 cache without Autodesk software or an SDK.
+It writes ordered triangles with face normals, diffuse colours, mesh ownership, the element hierarchy, GUIDs and property display text.
+Set the input document's length unit and each mesh's owning node. Bake rotation and scale into its vertices before writing.
+The cache stores local positions in float32 and translations in float64, in feet. The native writer covers triangle geometry.
+
+`NwcWriter.Write` and `NwcDocument.Save` produce NwcIO's original `#LcUStream` layout.
 
 - Geometry is written as one float32 vertex buffer per mesh in a single TOC chunk, with triangle indices, mesh id and name in a writer-specific trailer; normals, UVs and colors are not stored.
 - `Materials`, `XRefs`, `DbCache`, `AppearanceProfiler`, `ClashTests` and `GridSystem` are not written, so they are empty or heuristic after reopening; `NwcNode.Hyperlinks` and `PropertyTabs` are not written either. Scene-tree and viewpoint details are covered by the `.nwc` writer item in the list above.
 - The partition header stores `FileInfo.SourceByteSize` (`0` when it is not set); a missing source path becomes `Model.rvt` and a missing loader plugin becomes `LcOpRevitExport`. The container header defaults to `navisworks:448 lizlib` unless a header is passed to `NwcWriter`.
 - Selection sets and TimeLiner schedules are written in NwcIO's own XML exchange layouts.
-- Only NwcIO reopening the file is tested; no test opens the output in Navisworks.
 
 ## Scope and frozen features
 

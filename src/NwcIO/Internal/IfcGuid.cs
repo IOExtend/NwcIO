@@ -61,6 +61,27 @@ internal static class IfcGuid
         return new string(result);
     }
 
+    public static bool TryFromIfcGuid(string text, out Guid guid)
+    {
+        guid = default;
+        if (text.Length != 22 || text[0] is < '0' or > '3')
+            return false;
+
+        UInt128 bits = 0;
+        foreach (char ch in text)
+        {
+            int digit = Chars.IndexOf(ch);
+            if (digit < 0)
+                return false;
+            bits = (bits << 6) | (uint)digit;
+        }
+
+        Span<byte> bytes = stackalloc byte[16];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt128BigEndian(bytes, bits);
+        guid = new Guid(bytes, bigEndian: true);
+        return true;
+    }
+
     /// <summary>Generate a new random IFC GUID (22 chars).</summary>
     public static string NewGuid() => ToIfcGuid(Guid.NewGuid());
 

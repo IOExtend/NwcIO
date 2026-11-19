@@ -14,6 +14,22 @@ namespace NwcIO;
 public static class NwcWriter
 {
     /// <summary>
+    /// Writes an interoperable 448 cache in feet from an owned triangle model with known source units.
+    /// Bake mesh rotation and scale into the vertices before calling. Node properties are written as
+    /// display text. The stream must be writable and positioned at the start of a new file.
+    /// </summary>
+    public static void WriteNative(NwcDocument document, Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(stream);
+        if (!stream.CanWrite || (stream.CanSeek && (stream.Position != 0 || stream.Length != 0)))
+            throw new ArgumentException("A native NWC output stream must be writable and empty.", nameof(stream));
+
+        var segments = NativeCacheModelWriter.Serialize(document);
+        NativeCacheContainerWriter.Write(stream, segments);
+    }
+
+    /// <summary>
     /// Writes the document to the specified file path, replacing the destination after the complete file is written.
     /// </summary>
     public static void Write(NwcDocument document, string path, string? header = null)
