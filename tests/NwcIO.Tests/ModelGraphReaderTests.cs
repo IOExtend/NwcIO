@@ -45,6 +45,29 @@ public class ModelGraphReaderTests
         Assert.Equal([new Vector3d(1, 2, 3), new(2, 2, 3), new(1, 3, 3), new(2, 3, 3)], doc.Meshes[0].GetWorldVertices());
     }
 
+    [Fact]
+    public void Open_CompactSharedPoses_PreserveMeshOwnersAndPlacement()
+    {
+        const int count = 32;
+        var fragments = Enumerable.Range(0, count)
+            .Select(i => i == 0 ? new Frag(2, new(10, 0, 0), -2, 2, 4, Rec: 1)
+                : new Frag(7, Vector3d.Zero, 1, 2, 4, Rec: 1, SharesGeometryOf: 0, SharesPoseOf: 0))
+            .ToArray();
+        byte[] stream = SyntheticFragments.Build(fragments);
+        Assert.True(stream.Length - sizeof(int) < count * 80);
+        using var file = new MemoryStream(SyntheticNwcFile.Build(FormatVectors.H1, stream, [FormatVectors.R1], [120]));
+        var doc = NwcDocument.Open(file);
+
+        Assert.Equal(count, doc.Meshes.Count);
+        Assert.Equal(2, doc.Meshes[0].Node!.Id);
+        Assert.All(doc.Meshes.Skip(1), mesh => Assert.Equal(7, mesh.Node!.Id));
+        Assert.All(doc.Meshes, mesh =>
+        {
+            Assert.Equal(-2, mesh.Transform!.Scale);
+            Assert.Equal([new Vector3d(10, 0, 0), new(8, 0, 0), new(10, -2, 0), new(8, -2, 0)], mesh.GetWorldVertices());
+        });
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

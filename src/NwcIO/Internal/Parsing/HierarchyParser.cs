@@ -494,7 +494,7 @@ internal static class HierarchyParser
             return new NwcPropertyTab { Name = tab, InternalName = username.Internal, Properties = records };
         }
 
-        // Class 66 (docs/format-notes.md §2.2.1): [str name = null][ptr 52 key][i32 flags = 0x01000000] PAD8 [i64 value in 1..2^31-1],
+        // Class 66 (docs/format-notes.md §2.2.1): [str name = null][ptr 52 key][i32 flags] PAD8 [i64 value in 1..2^31-1],
         // a one-property tab named by its key.
         private NwcPropertyTab ReadElementId()
         {
@@ -505,9 +505,9 @@ internal static class HierarchyParser
 
             var key = ReadUsername();
             int flags = _reader.ReadInt32();
-            if (flags != 0x01000000)
+            if (flags is not (0x01000000 or 0x00020000))
             {
-                throw _reader.Fail($"class-66 flags {flags:X8} are not 01000000");
+                throw _reader.Fail($"class-66 flags {flags:X8} are not 01000000 or 00020000");
             }
 
             long value = _reader.ReadInt64();

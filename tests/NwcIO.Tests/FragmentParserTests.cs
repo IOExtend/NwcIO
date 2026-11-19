@@ -20,7 +20,7 @@ public class FragmentParserTests
     [Theory]
     [InlineData(252, new[] { 0 }, "null pointer in a slot that needs an object")]              // null fragment pointer
     [InlineData(252, new[] { 1, 100 }, "back-reference in a slot that needs a new object")]    // fragment pointer as back-reference
-    [InlineData(288, new[] { 1, 104 }, "back-reference in a slot that needs a new object")]    // pose pointer as back-reference (to the class-93 object)
+    [InlineData(288, new[] { 1, 104 }, "back-reference to class 93, which this slot does not allow")]
     [InlineData(292, new[] { 93 }, "class 93, which this slot does not allow")]                // pose pointer to a new class-93 object
     [InlineData(12, new[] { 1 }, "f64 alignment pad is not zero")]                             // non-zero f64 pad
     public void Read_InvalidFragments_Throws(int offset, int[] ints, string rule)
@@ -82,10 +82,17 @@ public class FragmentParserTests
 
     // each variant would parse under a reader that allows it, so only the observed-slot rule rejects it
     [Theory]
-    [InlineData("sharedPose", "back-reference in a slot that needs a new object")]  // fragment 1's pose = Ref(101), fragment 0's finished class-15 pose
     [InlineData("appearanceNull", "null pointer in a slot that needs an object")]   // fragment 1's appearance = Null()
     [InlineData("materialNull", "null pointer in a slot that needs an object")]     // class 55 with a null material and no class-54 object
     public void Read_ObservedSlotRuleBroken_Throws(string defect, string rule) => AssertRule(rule, BuildF1(defect));
+
+    [Fact]
+    public void Read_SharedPose_ReusesTranslationRotationAndScale()
+    {
+        var fragments = FragmentParser.Read(BuildF1("sharedPose"));
+        Assert.Equal((fragments[0].Translation, fragments[0].Rotation, fragments[0].Scale),
+            (fragments[1].Translation, fragments[1].Rotation, fragments[1].Scale));
+    }
 
     // A null pose (seen in .nwd files saved by Navisworks 2026) places the record at its class-93 centre c, here (0.5, 0.5, 0)
     [Fact]
