@@ -9,13 +9,32 @@ internal static class JsonExporter
 {
     public static void Write(
         NwcDocument document, Stream output, NwcJsonExportOptions options, CancellationToken cancellationToken = default)
+        => WriteCore(document, output, options, asynchronous: false, cancellationToken).GetSynchronousResult();
+
+    public static ValueTask WriteAsync(
+        NwcDocument document, Stream output, NwcJsonExportOptions options, CancellationToken cancellationToken)
+        => WriteCore(document, output, options, asynchronous: true, cancellationToken);
+
+    private static async ValueTask WriteCore(
+        NwcDocument document, Stream output, NwcJsonExportOptions options, bool asynchronous, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        using var writer = new Utf8JsonWriter(output, new JsonWriterOptions
+        using var writer = new Utf8JsonWriter(output, new JsonWriterOptions { Indented = options.Indented });
+        try
         {
-            Indented = options.Indented,
-        });
+            await WriteDocument(writer, document, options, asynchronous, cancellationToken).ConfigureAwait(false);
+            await Flush(writer, asynchronous, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Disposal must not write to the destination again, including after cancellation.
+            writer.Reset(Stream.Null);
+        }
+    }
 
+    private static async ValueTask WriteDocument(
+        Utf8JsonWriter writer, NwcDocument document, NwcJsonExportOptions options, bool asynchronous, CancellationToken cancellationToken)
+    {
         writer.WriteStartObject();
 
         writer.WriteStartObject("file");
@@ -37,7 +56,7 @@ internal static class JsonExporter
         writer.WriteStartArray("options");
         foreach (var option in document.FileInfo.Options)
         {
-            FlushIfNeeded(writer, cancellationToken);
+            await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
             writer.WriteStringValue(option);
         }
 
@@ -60,7 +79,7 @@ internal static class JsonExporter
             }
 
             writer.WriteEndObject();
-            FlushIfNeeded(writer, cancellationToken);
+            await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
         }
 
         writer.WriteEndArray();
@@ -70,7 +89,7 @@ internal static class JsonExporter
         foreach (var guid in document.Guids)
         {
             writer.WriteStringValue(guid.ToString("D"));
-            FlushIfNeeded(writer, cancellationToken);
+            await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
         }
 
         writer.WriteEndArray();
@@ -128,7 +147,7 @@ internal static class JsonExporter
                 writer.WriteEndArray();
 
                 writer.WriteEndObject();
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
             }
 
             writer.WriteEndArray();
@@ -137,7 +156,7 @@ internal static class JsonExporter
         if (options.IncludeSceneTree && document.RootNode is not null)
         {
             writer.WriteStartObject("sceneTree");
-            WriteNodeRecursive(writer, document.RootNode, cancellationToken);
+            await WriteNodeRecursive(writer, document.RootNode, asynchronous, cancellationToken).ConfigureAwait(false);
             writer.WriteEndObject();
         }
 
@@ -174,7 +193,7 @@ internal static class JsonExporter
                 }
 
                 writer.WriteEndObject();
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
             }
 
             writer.WriteEndArray();
@@ -186,7 +205,7 @@ internal static class JsonExporter
             writer.WriteStartArray("materials");
             foreach (var mat in document.Materials)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStartObject();
                 writer.WriteNumber("id", mat.Id);
                 writer.WriteString("name", mat.Name);
@@ -208,7 +227,7 @@ internal static class JsonExporter
             writer.WriteStartArray("references");
             foreach (var xref in document.XRefs.References)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStartObject();
                 writer.WriteString("originalPath", xref.OriginalPath);
                 writer.WriteString("remappedPath", xref.RemappedPath);
@@ -226,7 +245,7 @@ internal static class JsonExporter
             writer.WriteStartArray("entries");
             foreach (var entry in document.DbCache.Entries)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStartObject();
                 writer.WriteString("name", entry.Name);
                 writer.WriteNumber("flags", entry.Flags);
@@ -243,7 +262,7 @@ internal static class JsonExporter
             writer.WriteStartArray("savedViewpoints");
             foreach (var vp in document.SavedViewpoints)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStartObject();
                 writer.WriteString("id", vp.Id?.ToString("D"));
                 writer.WriteString("name", vp.Name);
@@ -288,7 +307,7 @@ internal static class JsonExporter
                     writer.WriteStartArray("comments");
                     foreach (var c in vp.Comments)
                     {
-                        FlushIfNeeded(writer, cancellationToken);
+                        await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                         writer.WriteStringValue(c);
                     }
                     writer.WriteEndArray();
@@ -304,7 +323,7 @@ internal static class JsonExporter
             writer.WriteStartArray("diagnostics");
             foreach (var diagnostic in document.Diagnostics)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStartObject();
                 writer.WriteString("severity", diagnostic.Severity.ToString());
                 writer.WriteString("code", diagnostic.Code);
@@ -324,12 +343,10 @@ internal static class JsonExporter
 
         if (options.IncludeStreamCatalog)
         {
-            WriteStreamCatalog(writer, document, cancellationToken);
+            await WriteStreamCatalog(writer, document, asynchronous, cancellationToken).ConfigureAwait(false);
         }
 
         writer.WriteEndObject();
-        cancellationToken.ThrowIfCancellationRequested();
-        writer.Flush();
     }
 
     public static void WriteFile(
@@ -338,7 +355,7 @@ internal static class JsonExporter
 
     private const int FlushThreshold = 64 * 1024;
 
-    private static void WriteNodeRecursive(Utf8JsonWriter writer, NwcNode node, CancellationToken cancellationToken)
+    private static async ValueTask WriteNodeRecursive(Utf8JsonWriter writer, NwcNode node, bool asynchronous, CancellationToken cancellationToken)
     {
         writer.WriteNumber("id", node.Id);
         writer.WriteString("name", node.Name);
@@ -386,7 +403,7 @@ internal static class JsonExporter
             writer.WriteStartArray("properties");
             foreach (var prop in node.Properties)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStartObject();
                 writer.WriteString("name", prop.Name);
                 writer.WriteString("class", prop.Class);
@@ -406,7 +423,7 @@ internal static class JsonExporter
             writer.WriteStartArray("hyperlinks");
             foreach (var link in node.Hyperlinks)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStartObject();
                 writer.WriteString("name", link.Name);
                 writer.WriteString("url", link.Url);
@@ -420,7 +437,7 @@ internal static class JsonExporter
                     writer.WriteStartArray("attachmentPoints");
                     foreach (var pt in link.AttachmentPoints)
                     {
-                        FlushIfNeeded(writer, cancellationToken);
+                        await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                         writer.WriteStartArray();
                         WriteSafeNumberValue(writer, pt.X);
                         WriteSafeNumberValue(writer, pt.Y);
@@ -443,27 +460,36 @@ internal static class JsonExporter
             foreach (var child in node.Children)
             {
                 writer.WriteStartObject();
-                WriteNodeRecursive(writer, child, cancellationToken);
+                await WriteNodeRecursive(writer, child, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteEndObject();
             }
 
             writer.WriteEndArray();
         }
 
-        FlushIfNeeded(writer, cancellationToken);
+        await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
     }
 
     // Keeps the pending buffer bounded so the output stream receives data while the export is still running.
-    private static void FlushIfNeeded(Utf8JsonWriter writer, CancellationToken cancellationToken)
+    private static ValueTask FlushIfNeeded(Utf8JsonWriter writer, bool asynchronous, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (writer.BytesPending > FlushThreshold)
-        {
-            writer.Flush();
-        }
+        return writer.BytesPending > FlushThreshold ? Flush(writer, asynchronous, cancellationToken) : ValueTask.CompletedTask;
     }
 
-    private static void WriteStreamCatalog(Utf8JsonWriter writer, NwcDocument document, CancellationToken cancellationToken)
+    private static ValueTask Flush(Utf8JsonWriter writer, bool asynchronous, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (asynchronous)
+        {
+            return new ValueTask(writer.FlushAsync(cancellationToken));
+        }
+
+        writer.Flush();
+        return ValueTask.CompletedTask;
+    }
+
+    private static async ValueTask WriteStreamCatalog(Utf8JsonWriter writer, NwcDocument document, bool asynchronous, CancellationToken cancellationToken)
     {
         var container = document.Container;
         writer.WriteStartObject("container");
@@ -471,14 +497,14 @@ internal static class JsonExporter
         writer.WriteStartArray("sections");
         foreach (var section in container.Sections)
         {
-            FlushIfNeeded(writer, cancellationToken);
+            await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
             writer.WriteStartObject();
             writer.WriteNumber("fileOffset", section.FileOffset);
             writer.WriteString("format", section.Format);
             writer.WriteStartArray("tokens");
             foreach (var token in section.Tokens)
             {
-                FlushIfNeeded(writer, cancellationToken);
+                await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
                 writer.WriteStringValue(token);
             }
 
@@ -492,7 +518,7 @@ internal static class JsonExporter
         writer.WriteStartArray("streams");
         foreach (var stream in container.Streams)
         {
-            FlushIfNeeded(writer, cancellationToken);
+            await FlushIfNeeded(writer, asynchronous, cancellationToken).ConfigureAwait(false);
             writer.WriteStartObject();
             writer.WriteNumber("index", stream.Index);
             writer.WriteNumber("fileOffset", stream.FileOffset);

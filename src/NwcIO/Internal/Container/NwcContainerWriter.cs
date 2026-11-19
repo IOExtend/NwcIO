@@ -21,15 +21,7 @@ internal static class NwcContainerWriter
         ArgumentNullException.ThrowIfNull(decompressedStreams);
         cancellationToken.ThrowIfCancellationRequested();
 
-        ValidateHeader(header);
-        header ??= DefaultHeader;
-        if (!header.EndsWith('\n'))
-        {
-            header += '\n';
-        }
-
-        byte[] headerBytes = Encoding.ASCII.GetBytes(header);
-        output.Write(headerBytes);
+        output.Write(EncodeHeader(header));
 
         for (int i = 0; i < decompressedStreams.Count; i++)
         {
@@ -48,6 +40,66 @@ internal static class NwcContainerWriter
 
         cancellationToken.ThrowIfCancellationRequested();
         output.Flush();
+    }
+
+    public static async ValueTask WriteAsync(
+        Stream output,
+        IReadOnlyList<byte[]> decompressedStreams,
+        string? header,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await output.WriteAsync(EncodeHeader(header), cancellationToken).ConfigureAwait(false);
+
+        var destination = new CompressionOutput(output, cancellationToken);
+        foreach (byte[] streamData in decompressedStreams)
+        {
+            var zlib = new ZLibStream(destination, CompressionLevel.Optimal, leaveOpen: true);
+            await using (zlib.ConfigureAwait(false))
+            {
+                int offset = 0;
+                do
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    int count = Math.Min(64 * 1024, streamData.Length - offset);
+                    await zlib.WriteAsync(streamData.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
+                    offset += count;
+                }
+                while (offset < streamData.Length);
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private static byte[] EncodeHeader(string? header)
+    {
+        ValidateHeader(header);
+        header ??= DefaultHeader;
+        return Encoding.ASCII.GetBytes(header.EndsWith('\n') ? header : header + '\n');
+    }
+
+    // ZLibStream.DisposeAsync writes the trailer without a token.
+    private sealed class CompressionOutput(Stream output, CancellationToken operationToken) : Stream
+    {
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            operationToken.ThrowIfCancellationRequested();
+            return output.WriteAsync(buffer, operationToken);
+        }
+
+        public override bool CanWrite => output.CanWrite;
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 
     internal static void ValidateHeader(string? header)

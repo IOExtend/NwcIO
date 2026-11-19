@@ -5,6 +5,17 @@ namespace NwcIO.Internal;
 internal static class AtomicFileWriter
 {
     public static void Write(string path, Action<Stream> write, CancellationToken cancellationToken)
+        => WriteCore(path, output =>
+        {
+            write(output);
+            return ValueTask.CompletedTask;
+        }, asynchronous: false, cancellationToken).GetSynchronousResult();
+
+    public static ValueTask WriteAsync(string path, Func<Stream, ValueTask> write, CancellationToken cancellationToken)
+        => WriteCore(path, write, asynchronous: true, cancellationToken);
+
+    private static async ValueTask WriteCore(
+        string path, Func<Stream, ValueTask> write, bool asynchronous, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var target = new FileInfo(Path.GetFullPath(path));
@@ -21,13 +32,24 @@ internal static class AtomicFileWriter
         }
 
         string temp = Path.Combine(target.DirectoryName!, $"nwcio-{Guid.NewGuid():N}.tmp");
-        var output = CreateTemporaryFile(temp, target, exists);
+        var output = CreateTemporaryFile(temp, target, exists, asynchronous);
         bool committed = false;
         try
         {
-            using (output)
+            try
             {
-                write(output);
+                await write(output).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (asynchronous)
+                {
+                    await output.DisposeAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    output.Dispose();
+                }
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -43,15 +65,24 @@ internal static class AtomicFileWriter
         }
     }
 
-    private static FileStream CreateTemporaryFile(string path, FileInfo target, bool exists)
+    private static FileStream CreateTemporaryFile(string path, FileInfo target, bool exists, bool asynchronous)
     {
+        var fileOptions = asynchronous ? FileOptions.Asynchronous : FileOptions.None;
+        int bufferSize = asynchronous ? 1 : 4096;
         if (OperatingSystem.IsWindows() && exists)
         {
-            return new FileInfo(path).Create(FileMode.CreateNew, FileSystemRights.Write, FileShare.None, 4096,
-                FileOptions.None, target.GetAccessControl(AccessControlSections.Access));
+            return new FileInfo(path).Create(FileMode.CreateNew, FileSystemRights.Write, FileShare.None, bufferSize,
+                fileOptions, target.GetAccessControl(AccessControlSections.Access));
         }
 
-        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+            Options = fileOptions,
+            BufferSize = bufferSize,
+        };
         if (!OperatingSystem.IsWindows() && exists)
         {
             options.UnixCreateMode = File.GetUnixFileMode(target.FullName)

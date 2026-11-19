@@ -41,7 +41,9 @@ are inflated on demand during parsing.
 `NwcDocument.Save` and `SaveJson` accept cancellation and progress for paths and streams.
 Path saves replace the destination after the output has been written successfully. A cancelled stream
 save can leave partial output in the caller's stream. `OpenAsync`, `SaveAsync` and `SaveJsonAsync`
-run the corresponding synchronous operations on the thread pool.
+use asynchronous reads and writes for file and stream overloads and pass the cancellation token
+to the underlying I/O. Parsing, serialization and compression perform synchronous CPU work between I/O operations.
+Stream overloads leave the supplied stream open.
 
 ## Coordination & Clash Detection (`NwcIO.Model.Clash`)
 

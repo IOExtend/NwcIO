@@ -1,3 +1,4 @@
+using NwcIO.Internal;
 using NwcIO.Internal.Container;
 using NwcIO.Internal.Parsing;
 using NwcIO.Model;
@@ -165,11 +166,11 @@ public sealed partial class NwcDocument
         bool keepStreamCatalog = options.KeepStreamCatalog;
         return NwcContainerReader.Read(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes,
             deferPayloads: !keepStreamCatalog,
-            container => ParseContainer(container, options, keepStreamCatalog, fallbackName, progress, cancellationToken),
+            container => ParseContainer(container, options, keepStreamCatalog, fallbackName, progress, cancellationToken).GetSynchronousResult(),
             cancellationToken);
     }
 
-    private static NwcDocument ParseContainer(
+    private static async ValueTask<NwcDocument> ParseContainer(
         NwcContainer container,
         NwcReaderOptions options,
         bool keepStreamCatalog,
@@ -179,14 +180,14 @@ public sealed partial class NwcDocument
     {
         cancellationToken.ThrowIfCancellationRequested();
         progress?.Report(new NwcProgress("read-container", 1, 1));
-        StreamClassifier.ClassifyAll(container.Streams);
-        var segments = ModelGraphReader.Locate(container);
+        await StreamClassifier.ClassifyAllAsync(container.Streams, cancellationToken).ConfigureAwait(false);
+        var segments = await ModelGraphReader.LocateAsync(container).ConfigureAwait(false);
 
         var fileInfo = new NwcFileInfo();
         var headerStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.PartitionHeader);
         if (headerStream is not null)
         {
-            fileInfo = PartitionHeaderParser.Parse(headerStream);
+            fileInfo = PartitionHeaderParser.Parse(await headerStream.LoadAsync().ConfigureAwait(false));
         }
 
         fileInfo.FormatVersion ??= container.Sections.Select(s => s.InternalVersion).FirstOrDefault(v => v is not null);
@@ -204,7 +205,7 @@ public sealed partial class NwcDocument
         {
             foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.SceneTree))
             {
-                var scanner = new PropertyRecordScanner(s.Data);
+                var scanner = new PropertyRecordScanner(await s.GetDataAsync().ConfigureAwait(false));
                 records.AddRange(scanner.Scan());
                 if (segments is null && scanner.FailureReason is not null)
                 {
@@ -224,7 +225,7 @@ public sealed partial class NwcDocument
         {
             foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.Guids))
             {
-                if (GuidTableParser.TryParse(s, out var parsed))
+                if (GuidTableParser.TryParse(await s.LoadAsync().ConfigureAwait(false), out var parsed))
                 {
                     guids.AddRange(parsed);
                 }
@@ -239,7 +240,7 @@ public sealed partial class NwcDocument
         cancellationToken.ThrowIfCancellationRequested();
         if (segments is not null)
         {
-            var graph = ModelGraphReader.Read(segments, options, rootName);
+            var graph = await ModelGraphReader.ReadAsync(segments, options, rootName, cancellationToken).ConfigureAwait(false);
             transforms.AddRange(graph.Transforms);
             meshes.AddRange(graph.Meshes);
             materials.AddRange(graph.Materials);
@@ -255,7 +256,7 @@ public sealed partial class NwcDocument
             {
                 foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.Transforms))
                 {
-                    transforms.AddRange(TransformParser.Parse(s));
+                    transforms.AddRange(TransformParser.Parse(await s.LoadAsync().ConfigureAwait(false)));
                 }
             }
 
@@ -265,10 +266,12 @@ public sealed partial class NwcDocument
                 var linksStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.TransformLinks);
                 if (linksStream is not null)
                 {
-                    transformIndices = TransformLinkParser.TryParse(linksStream);
+                    transformIndices = TransformLinkParser.TryParse(await linksStream.LoadAsync().ConfigureAwait(false));
                 }
 
-                meshes.AddRange(MeshParser.Parse(container, transforms, options.MaxMeshVertices, transformIndices, out skippedMeshRecords));
+                var meshResult = await MeshParser.ParseAsync(container, transforms, options.MaxMeshVertices, transformIndices, cancellationToken).ConfigureAwait(false);
+                meshes.AddRange(meshResult.Meshes);
+                skippedMeshRecords = meshResult.SkippedRecords;
             }
 
             if (options.BuildSceneTree)
@@ -292,14 +295,14 @@ public sealed partial class NwcDocument
         var xrefStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.XRefJson);
         if (xrefStream is not null)
         {
-            xRefs = XRefTableParser.Parse(xrefStream);
+            xRefs = XRefTableParser.Parse(await xrefStream.LoadAsync().ConfigureAwait(false));
         }
 
         var dbCache = segments?.Directory;
         var dbCacheStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.DbCache);
         if (dbCache is null && dbCacheStream is not null)
         {
-            dbCache = DbCacheParser.Parse(dbCacheStream);
+            dbCache = DbCacheParser.Parse(await dbCacheStream.LoadAsync().ConfigureAwait(false));
         }
 
         var savedViewpoints = new List<NwcSavedViewpoint>();
@@ -307,7 +310,7 @@ public sealed partial class NwcDocument
         {
             foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.SavedViews))
             {
-                savedViewpoints.AddRange(ViewpointParser.Parse(s));
+                savedViewpoints.AddRange(ViewpointParser.Parse(await s.LoadAsync().ConfigureAwait(false)));
             }
         }
 
@@ -316,7 +319,7 @@ public sealed partial class NwcDocument
         {
             foreach (var s in container.Streams.Where(s => s.Kind == NwcStreamKind.SelectionSets))
             {
-                selectionSets.AddRange(SelectionSetParser.Parse(s));
+                selectionSets.AddRange(SelectionSetParser.Parse(await s.LoadAsync().ConfigureAwait(false)));
             }
         }
 
@@ -327,7 +330,7 @@ public sealed partial class NwcDocument
             var tlStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.TimeLiner);
             if (tlStream is not null)
             {
-                timeLiner = TimeLinerParser.Parse(tlStream);
+                timeLiner = TimeLinerParser.Parse(await tlStream.LoadAsync().ConfigureAwait(false));
             }
         }
 
@@ -488,46 +491,83 @@ public sealed partial class NwcDocument
         return System.Text.Encoding.UTF8.GetString(ms.ToArray());
     }
 
-    /// <summary>Opens a file asynchronously. The current implementation wraps the synchronous reader.</summary>
-    public static Task<NwcDocument> OpenAsync(
+    /// <summary>Opens and parses a file using asynchronous I/O.</summary>
+    public static async Task<NwcDocument> OpenAsync(
         string path,
         NwcReaderOptions? options = null,
         IProgress<NwcProgress>? progress = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => Open(path, options, progress, cancellationToken), cancellationToken);
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"Navisworks file not found: {path}", path);
+        }
 
-    /// <summary>Opens a stream asynchronously. The current implementation wraps the synchronous reader.</summary>
-    public static Task<NwcDocument> OpenAsync(
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 0, FileOptions.Asynchronous);
+        await using (stream.ConfigureAwait(false))
+        {
+            var document = await OpenAsync(stream, options, Path.GetFileNameWithoutExtension(path), progress, cancellationToken).ConfigureAwait(false);
+            document._loadedPath = Path.GetFullPath(path);
+            return document;
+        }
+    }
+
+    /// <summary>Opens and parses a stream using asynchronous I/O.</summary>
+    public static async Task<NwcDocument> OpenAsync(
         Stream stream,
         NwcReaderOptions? options = null,
         string? fallbackName = null,
         IProgress<NwcProgress>? progress = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => Open(stream, options, fallbackName, progress, cancellationToken), cancellationToken);
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(stream);
+        options ??= NwcReaderOptions.Default;
 
-    /// <summary>Saves the document asynchronously. The current implementation wraps the synchronous writer.</summary>
+        bool keepStreamCatalog = options.KeepStreamCatalog;
+        return await NwcContainerReader.ReadAsync(stream, options.MaxDecompressedStreamBytes, options.MaxTotalDecompressedBytes,
+            deferPayloads: !keepStreamCatalog,
+            container => ParseContainer(container, options, keepStreamCatalog, fallbackName, progress, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Saves the document to a file using asynchronous I/O.</summary>
     public Task SaveAsync(string path, string? header = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => Save(path, header, null, cancellationToken), cancellationToken);
+        => NwcWriter.WriteAsync(this, path, header, cancellationToken);
 
     /// <summary>Saves the document to a stream asynchronously.</summary>
     public Task SaveAsync(Stream stream, string? header = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => Save(stream, header, null, cancellationToken), cancellationToken);
+        => NwcWriter.WriteAsync(this, stream, header, cancellationToken);
 
-    /// <summary>Exports the document to a JSON file on a thread-pool thread.</summary>
-    public Task SaveJsonAsync(
+    /// <summary>Exports the document to a JSON file using asynchronous I/O.</summary>
+    public async Task SaveJsonAsync(
         string path,
         NwcJsonExportOptions? options = null,
         IProgress<NwcProgress>? progress = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveJson(path, options, progress, cancellationToken), cancellationToken);
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 0, 1));
+        await Internal.AtomicFileWriter.WriteAsync(path, output =>
+            Internal.Json.JsonExporter.WriteAsync(this, output, options ?? NwcJsonExportOptions.Default, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+        progress?.Report(new NwcProgress("export-json", 1, 1));
+    }
 
-    /// <summary>Exports the document to a JSON stream on a thread-pool thread.</summary>
-    public Task SaveJsonAsync(
+    /// <summary>Exports the document to a JSON stream using asynchronous I/O.</summary>
+    public async Task SaveJsonAsync(
         Stream stream,
         NwcJsonExportOptions? options = null,
         IProgress<NwcProgress>? progress = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => SaveJson(stream, options, progress, cancellationToken), cancellationToken);
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 0, 1));
+        await Internal.Json.JsonExporter.WriteAsync(this, stream, options ?? NwcJsonExportOptions.Default, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new NwcProgress("export-json", 1, 1));
+    }
 
     private static NwcLengthUnit InferLengthUnit(string? loaderPlugin) =>
         loaderPlugin is "LcNwcLoaderPlugin:lcldrevit" or "nwexportrevit"

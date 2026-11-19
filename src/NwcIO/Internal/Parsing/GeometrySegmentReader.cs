@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Diagnostics.CodeAnalysis;
 using NwcIO.Internal.Container;
 
 namespace NwcIO.Internal.Parsing;
@@ -14,18 +13,27 @@ internal static class GeometrySegmentReader
     /// <param name="toc">The inflated TOC stream: [N][ch][ch x size][N x len], zero padded to a multiple of 8.</param>
     /// <returns>The records in TOC order.</returns>
     public static GeometryRecord[] Read(IReadOnlyList<LcRawStream> chunks, LcRawStream toc)
+        => ReadAsync(chunks, toc, default).GetSynchronousResult();
+
+    public static async ValueTask<GeometryRecord[]> ReadAsync(
+        IReadOnlyList<LcRawStream> chunks, LcRawStream toc, CancellationToken cancellationToken)
     {
-        var lengths = ReadToc(chunks, toc.Data);
-        var records = Cut(chunks, lengths);
+        var lengths = ReadToc(chunks, await toc.GetDataAsync().ConfigureAwait(false));
 
         // 16 wins when both widths parse: a file without palettes, or a palette valid under both (docs/format-notes.md §2.6).
-        if (TryParseAll(records, lengths.Length, 16, out var parsed, out int wideAt, out var wideError)
-            || TryParseAll(records, lengths.Length, 8, out parsed, out int narrowAt, out var narrowError))
+        var wide = await TryParseAll(chunks, lengths, 16, cancellationToken).ConfigureAwait(false);
+        if (wide.Records is not null)
         {
-            return parsed;
+            return wide.Records;
         }
 
-        var (index, inner) = narrowAt > wideAt ? (narrowAt, narrowError) : (wideAt, wideError);
+        var narrow = await TryParseAll(chunks, lengths, 8, cancellationToken).ConfigureAwait(false);
+        if (narrow.Records is not null)
+        {
+            return narrow.Records;
+        }
+
+        var (index, inner) = narrow.FailedAt > wide.FailedAt ? (narrow.FailedAt, narrow.Error!) : (wide.FailedAt, wide.Error!);
         throw new InvalidDataException($"LcOpNwdGeometry record {index}: {inner.Message}", inner);
     }
 
@@ -96,70 +104,58 @@ internal static class GeometrySegmentReader
         return lengths;
     }
 
-    // A record inside one chunk stays a slice of it; a crossing record is copied once. There is no concatenated block.
-    private static IEnumerable<ReadOnlyMemory<byte>> Cut(IReadOnlyList<LcRawStream> chunks, int[] lengths)
+    // A record inside one chunk stays a slice of it; a crossing record is copied once. Stop at the first invalid record.
+    private static async ValueTask<(GeometryRecord[]? Records, int FailedAt, InvalidDataException? Error)> TryParseAll(
+        IReadOnlyList<LcRawStream> chunks, int[] lengths, int normalBits, CancellationToken cancellationToken)
     {
+        var result = new GeometryRecord[lengths.Length];
         int nextChunk = 0, offset = 0;
         byte[] data = [];
-        foreach (int length in lengths)
+        for (int k = 0; k < lengths.Length; k++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            int length = lengths[k];
+
             // The sum check guarantees the remaining chunks hold every remaining record byte.
             while (offset == data.Length)
             {
-                data = chunks[nextChunk++].Data;
+                data = await chunks[nextChunk++].GetDataAsync().ConfigureAwait(false);
                 offset = 0;
             }
 
+            ReadOnlyMemory<byte> record;
             if (data.Length - offset >= length)
             {
-                yield return data.AsMemory(offset, length);
+                record = data.AsMemory(offset, length);
                 offset += length;
-                continue;
             }
-
-            var copy = new byte[length];
-            int done = data.Length - offset;
-            data.AsSpan(offset).CopyTo(copy);
-            while (done < length)
+            else
             {
-                data = chunks[nextChunk++].Data;
-                offset = Math.Min(length - done, data.Length);
-                data.AsSpan(0, offset).CopyTo(copy.AsSpan(done));
-                done += offset;
+                var copy = new byte[length];
+                int done = data.Length - offset;
+                data.AsSpan(offset).CopyTo(copy);
+                while (done < length)
+                {
+                    data = await chunks[nextChunk++].GetDataAsync().ConfigureAwait(false);
+                    offset = Math.Min(length - done, data.Length);
+                    data.AsSpan(0, offset).CopyTo(copy.AsSpan(done));
+                    done += offset;
+                }
+
+                record = copy;
             }
 
-            yield return copy;
-        }
-    }
-
-    // Stops at the first record that does not parse under this width.
-    private static bool TryParseAll(
-        IEnumerable<ReadOnlyMemory<byte>> records,
-        int count,
-        int normalBits,
-        [NotNullWhen(true)] out GeometryRecord[]? parsed,
-        out int failedAt,
-        [NotNullWhen(false)] out InvalidDataException? error)
-    {
-        var result = new GeometryRecord[count];
-        int k = 0;
-        foreach (var record in records)
-        {
             try
             {
                 result[k] = GeometryRecordParser.Parse(record.Span, normalBits);
             }
             catch (InvalidDataException ex)
             {
-                (parsed, failedAt, error) = (null, k, ex);
-                return false;
+                return (null, k, ex);
             }
-
-            k++;
         }
 
-        (parsed, failedAt, error) = (result, -1, null);
-        return true;
+        return (result, -1, null);
     }
 
     private static InvalidDataException Toc(string rule) => new($"LcOpNwdGeometry TOC: {rule}");

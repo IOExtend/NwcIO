@@ -62,6 +62,25 @@ public static class NwcWriter
         NwcContainerWriter.Write(stream, streams, header, cancellationToken);
     }
 
+    internal static async Task WriteAsync(NwcDocument document, string path, string? header, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        NwcContainerWriter.ValidateHeader(header);
+        var streams = NwcStreamSerializer.SerializeDocument(document);
+        await AtomicFileWriter.WriteAsync(path, output => NwcContainerWriter.WriteAsync(output, streams, header, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task WriteAsync(NwcDocument document, Stream stream, string? header, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(stream);
+        NwcContainerWriter.ValidateHeader(header);
+        var streams = NwcStreamSerializer.SerializeDocument(document);
+        await NwcContainerWriter.WriteAsync(stream, streams, header, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Serializes the document into a byte array containing a complete .nwc file.
     /// </summary>
