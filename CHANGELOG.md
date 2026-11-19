@@ -4,12 +4,15 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-19
+
 ### Added
 
+- `NwcWriter.WriteNative` writes interoperable 448 NWC caches without Autodesk software. It preserves triangle
+  geometry, mesh ownership, the element tree, IFC GlobalIds, colours and property display text.
+  `NwcWriter.Write` and `NwcDocument.Save` retain their existing output layout.
 - NWC writer caches that carry the explicit `IOExtend.NwcWriter.Scene/1` option reopen in metres with their recorded
   mesh owners and property tabs. This lets the scene adapter show converted RVT geometry and element properties.
-
-### Added
 - `NwcDocument.SaveJsonAsync` exports to a path or stream on a thread-pool thread and accepts cancellation and progress.
 
 ### Fixed
