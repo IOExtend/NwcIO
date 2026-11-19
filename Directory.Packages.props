@@ -3,7 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="IOScene" Version="[0.1.0, 0.2.0-0.0)" />
+    <PackageVersion Include="IOScene" Version="[0.1.2, 0.2.0-0.0)" />
     <PackageVersion Include="IfcIO" Version="0.10.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
