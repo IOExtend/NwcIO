@@ -29,8 +29,9 @@ A single `.nwc` file often contains multiple `#LcUStream` sections (e.g. partiti
 Following each section header is a series of back-to-back zlib compressed streams (RFC 1950, magic `0x78 0x01`, `0x78 0x5E`, `0x78 0x9C`, or `0x78 0xDA`).
 
 Between some streams are framing blocks:
-- 40-byte framing/hash blocks: a 20-byte or 40-byte checksum / hash before major partition boundaries.
-- Trailing gap: optional footer bytes (e.g. SQLite DB cache metadata).
+- The Revit NWC caches examined use the `lichunk-008` header for section 0 and the `lizlib` header for section 1. The section-1 header is followed by seven zero bytes and the compressed DbCache directory.
+- Immediately after that zlib stream, the footer stores eight bytes of unknown meaning, the little-endian 64-bit absolute offset of the section-1 header, and another copy of the section-0 header line, including its newline.
+- The directory identifies a 40-byte raw `LcOpNwdGeometryCompress` segment before the geometry segment. The meaning of its bytes is unknown.
 
 ## 2. Decompressed Stream Classification
 
@@ -115,6 +116,10 @@ The nesting is therefore independent of the exporter UI language for the marker 
 - **Placement**: the fragment pose is the full world transform of the record's positions: `world = s·R(q)·v + t`, with `s = 1` for classes 14 and 15 and `R(q)` the identity for class 14. `R(q)` is the usual rotation matrix of the normalised quaternion. No unit conversion is applied.
 - **Mirroring**: a pose with `s < 0` mirrors the geometry, so triangle winding must be reversed to keep faces outward in world space. Local vertices and indices are not changed.
 - **Sharing**: several fragments may reference one geometry record, directly or through back-referenced class 93 objects. The pose is never shared.
+
+#### Spatial hierarchy (`LcOpNwdSpatialHierarchy`)
+
+In Revit NWC caches this is a single zlib stream holding a tree in preorder. Each node begins with two little-endian int32 values. A tag of 2 or 5 is followed by its child count and then the children. A tag of 1 is followed by the zero-based ordinal of a fragment in the fragments stream. Every fragment ordinal occurs once. The distinction between tags 2 and 5 is unknown.
 
 ### 2.5 Table of Contents (`Toc`) and Geometry Chunks
 - **Layout**: `[int32 N][int32 ch][ch x int32 compressed chunk size][N x int32 record length]`, zero-padded to a multiple of 8. The padded length is `roundup8(8 + 4*ch + 4*N)`.
