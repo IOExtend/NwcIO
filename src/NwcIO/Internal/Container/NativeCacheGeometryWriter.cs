@@ -9,25 +9,30 @@ internal static class NativeCacheGeometryWriter
 
     public static (byte[] Data, BoundingBox3d Bounds) WriteMesh(NwcMesh mesh, double feetPerUnit)
     {
-        if (mesh.LineIndices.Count != 0 || mesh.Indices.Count == 0 || mesh.Indices.Count % 3 != 0)
-            throw new ArgumentException("Native NWC output requires nonempty triangle lists.", nameof(mesh));
+        bool lines = mesh.LineIndices.Count != 0;
+        IReadOnlyList<int> indices = lines ? mesh.LineIndices : mesh.Indices;
+        int verticesPerPrimitive = lines ? 2 : 3;
+        if (indices.Count == 0 || indices.Count % verticesPerPrimitive != 0 || (lines && mesh.Indices.Count != 0))
+            throw new ArgumentException("Native NWC output requires a nonempty triangle or line list per mesh.", nameof(mesh));
+        if (mesh.LineColors is { } colors && (!lines || colors.Count != mesh.Vertices.Count))
+            throw new ArgumentException("Native NWC line colors must match the source vertex count.", nameof(mesh));
 
         using var record = new NativeCacheBinaryWriter();
-        int vertexCount = mesh.Indices.Count;
+        int vertexCount = indices.Count;
         var vertices = new Vector3d[vertexCount];
         var min = new Vector3d(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity);
         var max = new Vector3d(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
         record.Write(100);
-        record.Write(94);
+        record.Write(lines ? 95 : 94);
         record.Write(101);
         record.Write(60);
         record.Write(vertexCount);
         record.Write(checked(3 * vertexCount));
         for (int i = 0; i < vertexCount; i++)
         {
-            int index = mesh.Indices[i];
+            int index = indices[i];
             if ((uint)index >= (uint)mesh.Vertices.Count)
-                throw new ArgumentException("A native NWC triangle index is outside its vertex buffer.", nameof(mesh));
+                throw new ArgumentException("A native NWC index is outside its vertex buffer.", nameof(mesh));
 
             Vector3d position = mesh.Vertices[index] * feetPerUnit;
             float x = (float)position.X, y = (float)position.Y, z = (float)position.Z;
@@ -43,6 +48,14 @@ internal static class NativeCacheGeometryWriter
         }
 
         record.Write(0); // UV slot
+        if (lines)
+        {
+            record.Write(0); // Normal slot
+            WriteLineColors(record, mesh);
+            WritePrimitiveLengths(record, vertexCount / 2, 2);
+            return (record.Finish(), new(min, max));
+        }
+
         record.Write(102);
         record.Write(100);
         record.Write(-vertexCount);
@@ -66,14 +79,7 @@ internal static class NativeCacheGeometryWriter
 
         record.Write(0); // colour slot
         // Each triangle is an independent strip with three render vertices in index order.
-        int triangles = vertexCount / 3;
-        record.Write(triangles);
-        record.Write(2);
-        record.Write(triangles);
-        for (int i = 0; i < triangles / 16; i++)
-            record.Write(uint.MaxValue);
-        if (triangles % 16 != 0)
-            record.Write(uint.MaxValue << (32 - 2 * (triangles % 16)));
+        WritePrimitiveLengths(record, vertexCount / 3, 3);
         record.Write(0); // Corner vertices are already in strip order.
         return (record.Finish(), new(min, max));
 
@@ -85,6 +91,46 @@ internal static class NativeCacheGeometryWriter
                 record.Write(pendingWord | part);
             highHalf = !highHalf;
         }
+    }
+
+    private static void WriteLineColors(NativeCacheBinaryWriter record, NwcMesh mesh)
+    {
+        if (mesh.LineColors is not { } colors)
+        {
+            record.Write(0);
+            return;
+        }
+
+        record.Write(102);
+        record.Write(58);
+        record.Write(5634);
+        record.Write(-mesh.LineIndices.Count);
+        record.Write(mesh.LineIndices.Count);
+        foreach (int index in mesh.LineIndices)
+        {
+            var color = colors[index];
+            record.Write(PackColor(color.A));
+            record.Write(PackColor(color.B));
+            record.Write(PackColor(color.G));
+            record.Write(PackColor(color.R));
+        }
+
+        static byte PackColor(float channel) =>
+            float.IsFinite(channel) && channel is >= 0 and <= 1
+                ? (byte)Math.Round(channel * 255)
+                : throw new ArgumentException("Native NWC line color channels must be finite and between 0 and 1.");
+    }
+
+    private static void WritePrimitiveLengths(NativeCacheBinaryWriter record, int count, int length)
+    {
+        record.Write(count);
+        record.Write(2);
+        record.Write(count);
+        uint packed = 0x55555555u * (uint)length;
+        for (int i = 0; i < count / 16; i++)
+            record.Write(packed);
+        if (count % 16 != 0)
+            record.Write(packed & (uint.MaxValue << (32 - 2 * (count % 16))));
     }
 
     public static NativeCacheSegment BuildSegment(MemoryStream geometry, IReadOnlyList<int> recordLengths)

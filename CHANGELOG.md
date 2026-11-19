@@ -4,6 +4,12 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-19
+
+### Added
+
+- `NwcWriter.WriteNative` preserves line segments and their vertex colours in interoperable NWC caches.
+
 ## [0.15.1] - 2026-11-19
 
 ### Fixed

@@ -47,6 +47,60 @@ public class NativeCacheWriterTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NativeRoundTripKeepsLinePairsAndTheirOwner(bool withColors)
+    {
+        var root = new NwcNode { Id = 1, Name = "model.rvt", Class = "Model" };
+        var owner = new NwcNode { Id = 2, Name = "Model Lines", Class = "LcRevitElement" };
+        root.Children.Add(owner);
+        var source = new NwcMesh
+        {
+            Id = 1,
+            Node = owner,
+            Vertices = [new(1, 0, 0), new(0, 2, 0), new(0, 0, 3)],
+            Indices = [],
+            LineIndices = Enumerable.Range(0, 17).SelectMany(i => new[] { i % 3, (i + 1) % 3 }).ToArray(),
+            LineColors = withColors ? [new(1, 0, 0), new(0, 1, 0), new(0, 0, 1)] : null,
+            Transform = new() { Id = 1, Translation = new(10, 20, 30) },
+        };
+        var document = NwcDocument.Create(
+            fileInfo: new() { LengthUnit = NwcLengthUnit.Feet }, rootNode: root, meshes: [source]);
+        using var stream = new MemoryStream();
+        NwcWriter.WriteNative(document, stream);
+        stream.Position = 0;
+        var loaded = Assert.Single(NwcDocument.Open(stream, new() { Strict = true }).Meshes);
+        Assert.Equal(owner.Name, loaded.Node?.Name);
+        Assert.Empty(loaded.Indices);
+        Assert.Equal(Enumerable.Range(0, 34), loaded.LineIndices);
+        Assert.Equal(source.LineIndices.Select(i => source.Vertices[i] + new Vector3d(10, 20, 30)), loaded.GetWorldVertices());
+        if (withColors)
+            Assert.Equal(source.LineIndices.Select(i => source.LineColors![i]), loaded.LineColors);
+        else
+            Assert.Null(loaded.LineColors);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InvalidLineTopologyLeavesOutputEmpty(bool mixed)
+    {
+        var root = new NwcNode { Id = 1, Name = "model.rvt", Class = "Model" };
+        var invalid = new NwcMesh
+        {
+            Id = 1,
+            Node = root,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = mixed ? [0, 1, 2] : [],
+            LineIndices = mixed ? [0, 1] : [0, 3],
+        };
+        var document = NwcDocument.Create(fileInfo: new() { LengthUnit = NwcLengthUnit.Feet }, rootNode: root, meshes: [invalid]);
+        using var stream = new MemoryStream();
+        Assert.Throws<ArgumentException>(() => NwcWriter.WriteNative(document, stream));
+        Assert.Equal(0, stream.Length);
+    }
+
     [Fact]
     public void UnsupportedMeshLeavesOutputEmpty()
     {
