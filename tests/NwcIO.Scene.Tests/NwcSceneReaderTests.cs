@@ -24,7 +24,9 @@ public sealed class NwcSceneReaderTests
         wall.Properties.Add(new() { FirstInt = 11, Tag = 52, Class = "IOExtend.NwcWriter.Link", Name = "Mesh ID", ValueType = 2, IntValue = 5 });
         var mesh = new NwcMesh
         {
-            Id = 5, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2],
+            Id = 5,
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 2],
         };
         var doc = NwcDocument.Create(
             fileInfo: new NwcFileInfo { Options = linked ? ["IOExtend.NwcWriter.Scene/1"] : [] },
