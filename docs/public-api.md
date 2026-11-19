@@ -45,6 +45,12 @@ use asynchronous reads and writes for file and stream overloads and pass the can
 to the underlying I/O. Parsing, serialization and compression perform synchronous CPU work between I/O operations.
 Stream overloads leave the supplied stream open.
 
+`NwcAssembly.LoadFromDirectoryAsync` and `NwcAssembly.OpenNwfAsync` read model files asynchronously
+and pass cancellation through to each read. They load models sequentially in the same order as their
+synchronous counterparts. Directory discovery and reference resolution use synchronous filesystem metadata.
+The `load-models` phase reports each folder model, or the primary NWF and each of its reference entries,
+including missing, duplicate and unsupported references.
+
 ## Coordination & Clash Detection (`NwcIO.Model.Clash`)
 
 | Type | Description |
