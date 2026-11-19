@@ -199,6 +199,74 @@ public class ContainerReaderTests
         Assert.Equal(nextPayload, container.Streams[1].Data);
     }
 
+    [Theory]
+    [InlineData(8_180, false)]
+    [InlineData(8_181, false)]
+    [InlineData(8_182, false)]
+    [InlineData(12_000, true)]
+    public void Read_HuffmanStreamWithSplitOrRepeatedTrailer_PreservesExactBoundary(int payloadLength, bool repeatTrailer)
+    {
+        // Non-final stored block with zero bytes, followed by an empty final fixed-Huffman block.
+        var compressed = new byte[13 + payloadLength];
+        compressed[0] = 0x78;
+        compressed[1] = 0x01;
+        BinaryPrimitives.WriteUInt16LittleEndian(compressed.AsSpan(3), (ushort)payloadLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(compressed.AsSpan(5), unchecked((ushort)~payloadLength));
+        compressed[^6] = 0x03;
+        BinaryPrimitives.WriteUInt32BigEndian(compressed.AsSpan(compressed.Length - 4), ((uint)payloadLength << 16) | 1);
+        byte[] gap = repeatTrailer ? compressed[^4..] : [];
+        var next = CompressZlib("next"u8.ToArray());
+
+        var container = NwcContainerReader.Read(ContainerWith([.. compressed, .. gap, .. next]));
+
+        Assert.Equal(2, container.Streams.Count);
+        Assert.Equal(new byte[payloadLength], container.Streams[0].Data);
+        Assert.Equal(compressed.Length, container.Streams[0].CompressedLength);
+        Assert.Equal(gap.Length, container.Streams[1].GapBefore);
+        Assert.Equal("next"u8.ToArray(), container.Streams[1].Data);
+        Assert.Equal(0, container.TrailingGap);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Adler32_IncrementalAcrossVectorAndScalarLengths_MatchesZlib(bool maximumBytes)
+    {
+        var payload = new byte[100_003];
+        if (maximumBytes)
+        {
+            Array.Fill(payload, byte.MaxValue);
+        }
+        else
+        {
+            new Random(27).NextBytes(payload);
+        }
+
+        uint a = 1, b = 0;
+        NwcContainerReader.UpdateAdler32(payload.AsSpan(0, 257), ref a, ref b);
+        NwcContainerReader.UpdateAdler32(payload.AsSpan(257), ref a, ref b);
+        uint expected = BinaryPrimitives.ReadUInt32BigEndian(CompressZlib(payload).AsSpan()[^4..]);
+
+        Assert.Equal(expected, (b << 16) | a);
+    }
+
+    [Fact]
+    public void Read_VisibleMemoryStreamWithOffsetAndPosition_UsesTheSelectedRange()
+    {
+        byte[] payload = "selected range"u8.ToArray();
+        byte[] file = ContainerWith(CompressZlib(payload));
+        byte[] bytes = [1, 2, 3, .. file, 4, 5, 6];
+        using var input = new MemoryStream(bytes, 2, file.Length + 1, writable: false, publiclyVisible: true);
+        input.Position = 1;
+
+        var container = NwcContainerReader.Read(input);
+
+        Assert.Equal(payload, Assert.Single(container.Streams).Data);
+        Assert.Equal(file.Length, container.FileLength);
+        Assert.Equal(0, container.TrailingGap);
+        Assert.Equal(input.Length, input.Position);
+    }
+
     [Fact]
     public void Read_ThreeIdenticalStreams_KeepsEachCompressedLength()
     {

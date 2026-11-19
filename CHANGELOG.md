@@ -19,6 +19,7 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Changed
 - The container reader scans seekable inputs in blocks with 64-bit offsets. Non-seekable inputs are spooled to a temporary file. With `KeepStreamCatalog = false`, parsers inflate payloads on demand.
+- The container reader usually inflates each candidate once during scanning. It uses the location of the validated zlib trailer to find exact stream lengths and repeats inflation when that location is ambiguous.
 
 ## [0.14.0] - 2026-11-18
 
