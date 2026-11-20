@@ -16,6 +16,9 @@ public sealed class NwcNode
 
     public string? Value { get; set; }
 
+    /// <summary>Whether this node is explicitly hidden in the native scene graph. An ancestor may also hide it.</summary>
+    public bool IsHidden { get; set; }
+
     /// <summary>Parent node in the scene tree, or null for root nodes.</summary>
     public NwcNode? Parent { get; set; }
 
