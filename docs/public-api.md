@@ -128,7 +128,7 @@ region before testing for intersection. Proximity grouping finds nearby clashes 
 | Type | Description |
 |---|---|
 | `NwcDocument.SaveIfc` / `NwcAssembly.SaveIfc` | ISO 10303-21 STEP export supporting IFC2x3 Coordination View and modern IFC4 mesh tessellation (`IfcTriangulatedFaceSet`), configured via `NwcIfcExportOptions` (`NwcIfcSchemaVersion`, `NwcIfcLengthUnit`). Frozen: bug fixes only. |
-| `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. Frozen: bug fixes only. |
+| `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. `NwcGlbExportOptions` configures GLB path and stream exports, including `NwcDocument.SaveGlbAsync`. |
 | `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). Frozen: bug fixes only. |
 | `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). |
 
@@ -147,6 +147,16 @@ references are interpreted relative to the exported asset. Embedded image payloa
 material channels remain outside this support.
 An OBJ save with materials requires a sibling filename that can be used in an `mtllib` directive.
 The export rejects a symbolic link at the material library path.
+
+Use `NwcGlbExportOptions` to set the GLB coordinate system and camera options.
+
+| Option | Default | Effect |
+|---|---|---|
+| `WorldCoordinates` | `true` | Bake mesh placements into the exported vertices. Set to `false` to export local mesh vertices. Saved cameras start in document coordinates in either mode. |
+| `ConvertZUpToYUp` | `false` | Rotate mesh positions, normals and cameras via `(x, y, z) → (x, z, -y)`. |
+| `UnitScale` | `1.0` | Multiply positions and camera lengths by a positive finite factor. Use `0.001` for millimetres to metres, or use `NwcDocument.MetresPerUnit` when the source unit is known. |
+| `RecenterToOrigin` | `false` | Subtract the exported mesh bounds' center in double precision before packing vertices as float32. A shared root node restores the offset in exported axes and units, including for saved cameras. |
+| `ExportCameras` | `true` | Include cameras from saved viewpoints. |
 
 GLB geometry export requires a writable system temporary directory for its BIN chunk. The
 exporter removes the temporary file when it closes. A path-based save replaces the destination

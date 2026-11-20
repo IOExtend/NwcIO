@@ -28,12 +28,20 @@ public sealed partial class NwcDocument
 
     /// <summary>Exports binary glTF to a file asynchronously.</summary>
     public Task SaveGlbAsync(string path, bool worldCoordinates = true, CancellationToken cancellationToken = default) =>
-        CompatibilityExport.WriteFileAsync(path, output => GlbExporter.Write(Meshes, Materials, output, worldCoordinates,
-            viewpoints: SavedViewpoints, cancellationToken: cancellationToken), cancellationToken);
+        SaveGlbAsync(path, NwcGlbExportOptions.ForCoordinates(worldCoordinates), cancellationToken);
 
     /// <summary>Exports binary glTF to a stream asynchronously.</summary>
     public Task SaveGlbAsync(Stream stream, bool worldCoordinates = true, CancellationToken cancellationToken = default) =>
-        CompatibilityExport.WriteAsync(stream, output => GlbExporter.Write(Meshes, Materials, output, worldCoordinates,
+        SaveGlbAsync(stream, NwcGlbExportOptions.ForCoordinates(worldCoordinates), cancellationToken);
+
+    /// <summary>Exports binary glTF to a file asynchronously using the given options.</summary>
+    public Task SaveGlbAsync(string path, NwcGlbExportOptions options, CancellationToken cancellationToken = default) =>
+        CompatibilityExport.WriteFileAsync(path, output => GlbExporter.Write(Meshes, Materials, output, options,
+            viewpoints: SavedViewpoints, cancellationToken: cancellationToken), cancellationToken);
+
+    /// <summary>Exports binary glTF to a stream asynchronously using the given options.</summary>
+    public Task SaveGlbAsync(Stream stream, NwcGlbExportOptions options, CancellationToken cancellationToken = default) =>
+        CompatibilityExport.WriteAsync(stream, output => GlbExporter.Write(Meshes, Materials, output, options,
             viewpoints: SavedViewpoints, cancellationToken: cancellationToken), cancellationToken);
 
     /// <summary>Exports an IFC STEP file asynchronously.</summary>
