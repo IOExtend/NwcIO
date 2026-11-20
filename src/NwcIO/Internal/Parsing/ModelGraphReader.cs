@@ -16,6 +16,7 @@ internal sealed record ModelSegments(
     IReadOnlyList<LcRawStream> GeometryChunks,
     LcRawStream? Toc,
     LcRawStream? GuidStore,
+    LcRawStream? SharedNodes,
     Func<ValueTask<IReadOnlyList<byte[]>?>> PartitionProps);
 
 /// <summary>
@@ -39,6 +40,7 @@ internal static class ModelGraphReader
     private const string FragmentsSegment = "LcOpNwdFragments";
     private const string GeometrySegment = "LcOpNwdGeometry";
     private const string GuidStoreSegment = "LcOpGuidStore";
+    private const string SharedNodesSegment = "LcOpSharedNodes";
     private const string PartitionPropsSegment = "LcOaPartitionProps";
 
     /// <returns>The segments, or null when the container is not a model file (it then keeps the lenient path).</returns>
@@ -53,7 +55,7 @@ internal static class ModelGraphReader
             return null;
         }
 
-        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null, guidStore = null;
+        NwcDbCacheEntry? hierarchy = null, fragments = null, geometry = null, guidStore = null, sharedNodes = null;
         var props = new List<NwcDbCacheEntry>();
         foreach (var entry in directory.Entries)
         {
@@ -71,6 +73,9 @@ internal static class ModelGraphReader
                 case GuidStoreSegment:
                     guidStore = Once(guidStore, entry, GuidStoreSegment);
                     break;
+                case SharedNodesSegment:
+                    sharedNodes = Once(sharedNodes, entry, SharedNodesSegment);
+                    break;
                 case PartitionPropsSegment:
                     // Only recorded: the tree reader checks them when it needs them (docs/format-notes.md §2.2.1).
                     props.Add(entry);
@@ -87,6 +92,7 @@ internal static class ModelGraphReader
         var hierarchyStream = hierarchy is null ? null : SingleStream(streams, hierarchy, HierarchySegment);
         var fragmentsStream = fragments is null ? null : SingleStream(streams, fragments, FragmentsSegment);
         var guidStoreStream = guidStore is null ? null : SingleStream(streams, guidStore, GuidStoreSegment);
+        var sharedNodesStream = sharedNodes is null ? null : SingleStream(streams, sharedNodes, SharedNodesSegment);
         LcRawStream[] chunks = [];
         LcRawStream? toc = null;
         if (geometry is not null)
@@ -111,12 +117,14 @@ internal static class ModelGraphReader
             toc.Kind = NwcStreamKind.Toc;
         }
 
-        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc, guidStoreStream, () => PartitionRootStreams(streams, props));
+        return new ModelSegments(directory, hierarchyStream, fragmentsStream, chunks, toc, guidStoreStream,
+            sharedNodesStream, () => PartitionRootStreams(streams, props));
     }
 
     /// <summary>The tree first, so a tree that cannot be read fails before any geometry work; then geometry, fragments and links.</summary>
     /// <exception cref="InvalidDataException">A segment breaks its grammar or a fragment breaks a link rule.</exception>
-    public static async ValueTask<ModelGraph> ReadAsync(ModelSegments segments, NwcReaderOptions options, string rootName, CancellationToken cancellationToken)
+    public static async ValueTask<ModelGraph> ReadAsync(ModelSegments segments, NwcReaderOptions options, string rootName,
+        NwcXRefTable? xRefs, CancellationToken cancellationToken)
     {
         // The tree needs the table for element GUIDs whatever ReadGuids says.
         Guid[] guids = segments.GuidStore is not null && (options.ReadGuids || (options.BuildSceneTree && segments.Hierarchy is not null))
@@ -133,7 +141,8 @@ internal static class ModelGraphReader
         var meshes = new List<NwcMesh>();
         var transforms = new List<NwcTransform>();
         var materials = new List<NwcMaterial>();
-        var materialsByKey = new Dictionary<(string, byte, byte, byte, byte), NwcMaterial>();
+        var materialsByKey = new Dictionary<(string, byte, byte, byte, byte, NwcXRef?), NwcMaterial>();
+        var references = MaterialTextureParser.Index(xRefs);
         if ((options.ReadMeshes || options.ReadTransforms) && (segments.Toc is not null || segments.Fragments is not null))
         {
             if (segments.Toc is null)
@@ -142,7 +151,9 @@ internal static class ModelGraphReader
             }
 
             var records = await GeometrySegmentReader.ReadAsync(segments.GeometryChunks, segments.Toc, cancellationToken).ConfigureAwait(false);
-            Fragment[] fragments = segments.Fragments is null ? [] : FragmentParser.Read(await segments.Fragments.GetDataAsync().ConfigureAwait(false));
+            byte[]? sharedNodes = segments.SharedNodes is null ? null : await segments.SharedNodes.GetDataAsync().ConfigureAwait(false);
+            Fragment[] fragments = segments.Fragments is null ? [] : FragmentParser.Read(await segments.Fragments.GetDataAsync().ConfigureAwait(false),
+                sharedNodes, readTextures: options.ReadMeshes && options.ReadMaterials);
             CheckLinks(fragments, records, preorder);
             object? elementKey = null;
             for (int k = 0; k < fragments.Length; k++)
@@ -177,6 +188,7 @@ internal static class ModelGraphReader
                         Vertices = record.Vertices,
                         Indices = record.Indices,
                         Normals = record.Normals,
+                        TexCoords = record.TexCoords,
                         LineIndices = record.LineIndices,
                         LineColors = record.LineColors,
                         GeometryIndex = fragment.Record - 1,
@@ -185,8 +197,8 @@ internal static class ModelGraphReader
                         Node = leaf,
                         ElementKey = elementKey,
 
-                        // Names come from the tree, so there are no materials without it.
-                        Material = leaf is not null && options.ReadMaterials ? MaterialOf(leaf.MaterialName, fragment.Look, materialsByKey, materials) : null,
+                        Material = options.ReadMaterials && (leaf is not null || fragment.Look.DiffuseTexturePath is not null)
+                            ? MaterialOf(leaf?.MaterialName, fragment.Look, references, materialsByKey, materials) : null,
                     };
                     meshes.Add(mesh);
                     if (leaf is not null)
@@ -201,16 +213,24 @@ internal static class ModelGraphReader
         return new ModelGraph(preorder?[0], meshes, transforms, guids, materials);
     }
 
-    // One material per distinct (name, RGBA bytes), its id the order of first use (docs/format-notes.md §2.9). Shininess has no defined
+    // One material per distinct (name, RGBA bytes, texture), its id the order of first use. Shininess has no defined
     // PBR equivalent, so Roughness and Metallic keep their defaults.
     private static NwcMaterial MaterialOf(
-        string? name, FragmentLook look, Dictionary<(string, byte, byte, byte, byte), NwcMaterial> byKey, List<NwcMaterial> materials)
+        string? name, FragmentLook look, Dictionary<string, NwcXRef> references,
+        Dictionary<(string, byte, byte, byte, byte, NwcXRef?), NwcMaterial> byKey, List<NwcMaterial> materials)
     {
-        (string Name, byte R, byte G, byte B, byte A) key =
-            (string.IsNullOrEmpty(name) ? "Default" : name, Byte(look.R), Byte(look.G), Byte(look.B), Byte(1.0 - look.Transparency));
+        (string Name, byte R, byte G, byte B, byte A, NwcXRef? Texture) key =
+            (string.IsNullOrEmpty(name) ? "Default" : name, Byte(look.R), Byte(look.G), Byte(look.B), Byte(1.0 - look.Transparency),
+                MaterialTextureParser.Resolve(look.DiffuseTexturePath, references));
         if (!byKey.TryGetValue(key, out var material))
         {
-            material = new NwcMaterial { Id = materials.Count, Name = key.Name, Color = new RgbaColor(key.R / 255f, key.G / 255f, key.B / 255f, key.A / 255f) };
+            material = new NwcMaterial
+            {
+                Id = materials.Count,
+                Name = key.Name,
+                Color = new RgbaColor(key.R / 255f, key.G / 255f, key.B / 255f, key.A / 255f),
+                DiffuseTexture = key.Texture,
+            };
             byKey.Add(key, material);
             materials.Add(material);
         }

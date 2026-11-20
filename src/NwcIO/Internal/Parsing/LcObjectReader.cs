@@ -35,6 +35,16 @@ internal sealed class LcObjectReader
 
     public int ReadInt32() => BinaryPrimitives.ReadInt32LittleEndian(Take(4, "i32"));
 
+    public bool TryReadSharedIndex(out int index)
+    {
+        if (BinaryPrimitives.TryReadInt32LittleEndian(_data.AsSpan(Position), out index) && index is >= 2 and < FirstId)
+        {
+            Position += 4;
+            return true;
+        }
+        return false;
+    }
+
     public float ReadSingle() => BinaryPrimitives.ReadSingleLittleEndian(Take(4, "f32"));
 
     public double ReadDouble()

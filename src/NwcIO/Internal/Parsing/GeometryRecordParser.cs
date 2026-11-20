@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using NwcIO.Model;
 
 namespace NwcIO.Internal.Parsing;
@@ -19,6 +20,9 @@ internal sealed class GeometryRecord
 
     /// <summary>One unit normal per render vertex, <see cref="Vector3d.Zero"/> for none; null for lines.</summary>
     public required Vector3d[]? Normals { get; init; }
+
+    /// <summary>One texture coordinate per render vertex, when present.</summary>
+    public Vector2[]? TexCoords { get; init; }
 
     /// <summary>One colour per render vertex for lines; null for triangles.</summary>
     public RgbaColor[]? LineColors { get; init; }
@@ -110,6 +114,7 @@ internal static class GeometryRecordParser
         at = pos;
         int id = ReadInt32(record, ref pos);
         bool hasUv = id != 0;
+        Vector2[]? texCoords = null;
         if (hasUv)
         {
             ExpectId(id, ref nextId, at);
@@ -125,20 +130,29 @@ internal static class GeometryRecordParser
                     throw Fail("UV float count is not positive and even", at);
                 }
 
+                int pairsOffset = pos;
                 Skip(record, ref pos, 4L * fc, "UV floats pass the end");
-                if (fc / 2 != p1)
+                var pairs = new Vector2[fc / 2];
+                for (int i = 0; i < pairs.Length; i++)
                 {
-                    Tokens(record, ref pos, p1, fc / 2, false);
+                    pairs[i] = ReadUv(record, pairsOffset + 8 * i);
                 }
+                texCoords = MapUv(record, ref pos, p1, pairs);
             }
             else if (n == -p1)
             {
+                int range = pos;
                 Skip(record, ref pos, 16, "UV range passes the end");
+                var minimum = ReadUv(record, range);
+                var maximum = ReadUv(record, range + 8);
+                if (maximum.X < minimum.X || maximum.Y < minimum.Y)
+                {
+                    throw Fail("UV range maximum is below its minimum", range);
+                }
                 at = pos;
                 int w = ReadInt32(record, ref pos);
                 int bu = w & 0xFF, bv = w >> 8;
-                // One width may be 0: that coordinate is constant over the record (seen in .nwd files saved by Navisworks 2026).
-                if (w >> 16 != 0 || (bu == 0 && bv == 0))
+                if (w >> 16 != 0 || (bu == 0 && bv == 0 && minimum != maximum))
                 {
                     throw Fail("UV bit widths are not two bytes with one non-zero", at);
                 }
@@ -150,12 +164,19 @@ internal static class GeometryRecordParser
                     throw Fail("UV value count is not in 1..p1", at);
                 }
 
-                // UV values are not decoded: read for length only.
+                int packedOffset = pos;
                 SkipPacked(record, ref pos, m, bu + bv);
-                if (m != p1)
+                var packed = record[packedOffset..pos];
+                var pairs = new Vector2[m];
+                long bit = 0;
+                for (int i = 0; i < m; i++)
                 {
-                    Tokens(record, ref pos, p1, m, false);
+                    double u = ReadPackedUnit(packed, ref bit, bu);
+                    double v = ReadPackedUnit(packed, ref bit, bv);
+                    pairs[i] = new Vector2((float)(minimum.X + u * ((double)maximum.X - minimum.X)),
+                        (float)(minimum.Y + v * ((double)maximum.Y - minimum.Y)));
                 }
+                texCoords = MapUv(record, ref pos, p1, pairs);
             }
             else
             {
@@ -344,9 +365,39 @@ internal static class GeometryRecordParser
             Indices = indices,
             LineIndices = lineIndices,
             Normals = normals,
+            TexCoords = texCoords,
             LineColors = lines ? lineColors : null,
             Bounds = bounds,
         };
+    }
+
+    private static Vector2 ReadUv(ReadOnlySpan<byte> data, int offset)
+    {
+        var uv = new Vector2(BinaryPrimitives.ReadSingleLittleEndian(data[offset..]),
+            BinaryPrimitives.ReadSingleLittleEndian(data[(offset + 4)..]));
+        if (!float.IsFinite(uv.X) || !float.IsFinite(uv.Y)) throw Fail("UV is not finite", offset);
+        return uv;
+    }
+
+    private static Vector2[] MapUv(ReadOnlySpan<byte> record, ref int pos, int count, Vector2[] pairs) =>
+        pairs.Length == count ? pairs : Array.ConvertAll(Tokens(record, ref pos, count, pairs.Length, false), i => pairs[i]);
+
+    private static double ReadPackedUnit(ReadOnlySpan<byte> packed, ref long bit, int width)
+    {
+        if (width == 0) return 0;
+
+        double value = 0;
+        for (int remaining = width; remaining > 0;)
+        {
+            int available = 32 - (int)(bit & 31);
+            int take = Math.Min(remaining, available);
+            uint word = BinaryPrimitives.ReadUInt32LittleEndian(packed[(4 * (int)(bit >> 5))..]);
+            uint chunk = (word >> (available - take)) & (uint.MaxValue >> (32 - take));
+            value = Math.ScaleB(value, take) + chunk;
+            remaining -= take;
+            bit += take;
+        }
+        return value / (Math.ScaleB(1, width) - 1);
     }
 
     /// <summary>

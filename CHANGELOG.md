@@ -6,7 +6,8 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ### Fixed
 
-- Path-based Wavefront OBJ export writes a sibling `.mtl` with diffuse colors and opacity from mesh materials (#93). Texture coordinates and texture maps are pending.
+- Path-based Wavefront OBJ export writes a sibling `.mtl` with diffuse colors and opacity from mesh materials (#93).
+- Read raw and quantised mesh UVs and Generic diffuse image references with XRef remapping. OBJ/MTL and GLB exports preserve the UVs and link to external diffuse images (#93).
 
 ## [0.16.0] - 2026-11-19
 

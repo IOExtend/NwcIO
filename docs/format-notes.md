@@ -101,7 +101,7 @@ The nesting is therefore independent of the exporter UI language for the marker 
 - **Other containers**: files not read through a DbCache directory are scanned for streams `[int32 ?][int32 count]` where `(streamLength - 8) == count * 16`, followed by the 16-byte GUIDs.
 
 ### 2.4 Fragments (`LcOpNwdFragments`)
-- **Location**: the DbCache entry whose final segment is `LcOpNwdFragments` (one zlib stream). Framing: `[int32 n] n x pointer`, zero-padded to a multiple of 8. Pointers follow the rule in §2.2; every root pointer is a new class-13 object.
+- **Location**: the DbCache entry whose final segment is `LcOpNwdFragments` (one zlib stream). Framing: `[int32 n] n x pointer`, zero-padded to a multiple of 8. Some writers insert one zero word between `n` and the first `[100][13]`. Pointers follow the rule in §2.2; every root pointer is a new class-13 object.
 - **Classes**:
   - `13` fragment: `[f64 D][i32 a][i32 b][i32 c][i32 seq][ptr pose][ptr appearance][ptr geometry]`.
     - `seq`: preorder index of the owning leaf (§2.2).
@@ -111,7 +111,8 @@ The nesting is therefore independent of the exporter UI language for the marker 
   - `14` pose: `[3 x f64 t]`, a translation (identity rotation, scale 1). The Revit NWC exporter writes it for unrotated poses.
   - `15` pose: `[3 x f64 t][4 x f64 q]`, `q = (x, y, z, w)` a unit quaternion.
   - `16` pose with scale: class 15 plus `[f64 s]`. The scale is a uniform factor and can be negative.
-  - `55` appearance: `[i32 flags][ptr 54]`, plus `[ptr 185]` when `flags & 32`.
+  - `55` appearance: `[i32 flags][ptr 54]`, plus a material-asset slot when `flags & 32`. The slot is null, a class-185 object pointer, or a single shared index (`2..99`) into `LcOpSharedNodes`. The shared stream starts with a count followed by indexed pointers. An appearance with flags `0x71` has one trailing zero word in a Navisworks 2027 file saved after editing the diffuse image.
+  - `185` material asset: `[str JSON][str metadata][i32 count]`, then `count` items `[str name][i32 embedded][str path]`; an embedded item adds `[str name][i64 length][payload padded to 4]`. For the Generic diffuse image, `userassets` identifies the root key in `materials`. Its enabled `properties.colors.generic_diffuse.connections` identifies the `UnifiedBitmap` entry. `properties.uris.unifiedbitmap_Bitmap.values` supplies the path. The reader looks up that path in the XRef table and prefers the matching record's `RemappedPath` when present. Thumbnail URIs and unrelated bitmap nodes are ignored.
   - `54` material: 14 `f32`: ambient 0–2, diffuse 3–5, specular 6–8 (always 0), emissive 9–11 (always 0), shininess 12 (Revit Shininess / 128), transparency 13 (Revit Transparency / 100, values below 0.1 stored as 0). Channels are quantised to bytes. `31` (hierarchy) repeats the fields as `f64` and names the material (null for rooms).
   - `93` geometry reference: `[6 x f32 bbox][3 x f64 c][f32][i32 key][i32 rec]`. `rec` is the 1-based index of a geometry record (§2.5). The box equals the bounding box of the record's positions, and `c` is the offset of those positions: for a posed fragment it is the pose translation in the partition's frame, and it places a fragment without a pose.
 - **Placement**: the fragment pose is the full world transform of the record's positions: `world = s·R(q)·v + t`, with `s = 1` for classes 14 and 15 and `R(q)` the identity for class 14. `R(q)` is the usual rotation matrix of the normalised quaternion. No unit conversion is applied.
@@ -143,7 +144,8 @@ CSLOT  := 0 | [id][58][5634][-p1][pal][pal x 4 bytes] CTOK?  (CTOK iff pal != p1
 P      := [n][bits][n][ceil(n*bits/32) words]         (strip or polyline lengths L)
 SFIELD := [S] TOKENS(S, p1)?                          (class 94 only; tokens iff S > 0)
 UVBODY := [p1][fc][fc x f32] TOKENS(p1, fc/2)?        (raw; tokens iff fc/2 != p1)
-        | [-p1][4 x f32][w][m][ceil(m*(bu+bv)/32) words] TOKENS(p1, m)?   (quantised; tokens iff m != p1)
+        | [-p1][f32 minU][f32 minV][f32 maxU][f32 maxV][w][m]
+          [ceil(m*(bu+bv)/32) words] TOKENS(p1, m)?  (quantised; tokens iff m != p1)
 ```
 
 - **Colour palette**: entries are `[A=0xFF][B][G][R]` (a little-endian `uint32` `0xRRGGBBAA`). Evidence: a level's line colour equals its type's colour parameter (a Revit colour int, red in the low byte) in 218 of 218 level lines that are not black; the 95 whose colour tells the orders apart all match this order. A line record can carry several colours, per vertex.
@@ -165,8 +167,7 @@ UVBODY := [p1][fc][fc x f32] TOKENS(p1, fc/2)?        (raw; tokens iff fc/2 != p
 - **Normals** (class 94): a palette entry is three two's-complement values of width `B`, divided by `2^(B-1)-1` and normalised; a zero vector means no normal. `B` is not stored in the record: it is the width under which every record of the file parses (16 for `.nwc`, 8 for `.nwd`). Render vertex `r` takes `palette[NIdx[r]]`, or an axis vector for an axis code (`D0` +X, `D1` -X, `D2` +Y, `D3` -Y, `D4` +Z, `D5` -Z).
 - **Triangles** (class 94): corners are `0..p1-1` when `S = 0`, otherwise `TOKENS(S, p1)`. They are split by `L` into consecutive strips; in each strip, triangle `i` is `(c[i], c[i+1], c[i+2])` for even `i` and `(c[i+1], c[i], c[i+2])` for odd `i`. Parity restarts in every strip. The triangle count is the sum of `L-2`. Front faces are counter-clockwise.
 - **Polylines** (class 95): render vertices `0..p1-1` are split by `L` into open polylines; the segment count is the sum of `L-1`. There is no implicit closing segment.
-- **UVBODY**: the raw form has a non-negative first int `p1` and `fc` floats (two per UV pair, `fc/2` pairs). The quantised form has `-p1`, four floats, then `w`, `m` and the packed words; `bu = w & 0xFF` and `bv = (w >> 8) & 0xFF` are the bit widths of the two coordinates, so the packed block is `ceil(m*(bu+bv)/32)` words. One width may be 0, a coordinate constant over the record (seen in `.nwd` files saved by Navisworks 2026); both cannot. The token stream maps each of the `p1` render vertices to one of the `fc/2` or `m` stored pairs.
-- **Not decoded**: UV values and colour channels. Only their lengths and maps are read, to find the next field.
+- **UVBODY**: the raw form stores interleaved `f32` U/V pairs. The quantised form stores `[U0 bits][V0 bits][U1 bits][V1 bits]…` using `PACKED`. The widths are `bu = w & 0xFF` and `bv = (w >> 8) & 0xFF`. A nonzero-width code `q` represents `min + q/(2^bits - 1) × (max - min)`; width zero takes that axis's minimum. Both widths may be zero for a constant pair. The token stream maps each of the `p1` render vertices to a stored pair, independently of the position map. U/V use the lower-left origin, as confirmed by converting a synthetic OBJ with asymmetric coordinates in Navisworks.
 - **Writer records**: `NwcWriter` emits its own simplified record, `[id][94][0][60][p1][p2][p2 x f32 xyz]`, followed by the trailer `["NWCI"][indexCount][indexCount x i32][Id i32][nameLength][UTF-8 name][pad4]`. The fallback mesh parser (§2.5) restores the exact triangle indices, `Id` and `Name` from the trailer; records without it keep the rebuilt strip and the synthesized `Mesh_{index}` identity. The trailer is writer-specific: it is not part of the documented Navisworks grammar.
 
 ### 2.7 DB Cache Directory (`DbCache` / `LcOpDBCache`)
