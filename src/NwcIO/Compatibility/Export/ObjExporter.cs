@@ -1,4 +1,4 @@
-using System.Globalization;
+using System.Text;
 using NwcIO.Model;
 
 namespace NwcIO.Internal.Export;
@@ -9,6 +9,9 @@ namespace NwcIO.Internal.Export;
 /// </summary>
 internal static class ObjExporter
 {
+    private static readonly Encoding Utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+    private const string DefaultMaterial = "nwc_default";
+
     /// <summary>
     /// Writes meshes to a file in Wavefront OBJ format.
     /// </summary>
@@ -17,14 +20,68 @@ internal static class ObjExporter
         string path,
         bool worldCoordinates = true,
         string? sourceDocument = null,
-        Func<NwcMesh, string?>? objectNamePrefix = null)
+        Func<NwcMesh, string?>? objectNamePrefix = null) =>
+        WriteFileCore(meshes, path, worldCoordinates, sourceDocument, objectNamePrefix, asynchronous: false, default)
+            .GetSynchronousResult();
+
+    public static Task WriteFileAsync(IReadOnlyList<NwcMesh> meshes, string path, bool worldCoordinates,
+        string? sourceDocument, CancellationToken cancellationToken) =>
+        WriteFileCore(meshes, path, worldCoordinates, sourceDocument, null, asynchronous: true, cancellationToken).AsTask();
+
+    private static async ValueTask WriteFileCore(IReadOnlyList<NwcMesh> meshes, string path, bool worldCoordinates,
+        string? sourceDocument, Func<NwcMesh, string?>? objectNamePrefix, bool asynchronous, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(path);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        using var fs = File.Create(path);
-        using var writer = new StreamWriter(fs, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), bufferSize: 65536);
-        Write(meshes, writer, worldCoordinates, sourceDocument, objectNamePrefix);
+        var materials = new Dictionary<NwcMaterial, string>();
+        bool hasUnassigned = false;
+        foreach (var mesh in meshes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (mesh.Vertices.Count == 0 || !HasPrimitives(mesh)) continue;
+            if (mesh.Material is { } material)
+            {
+                if (!materials.ContainsKey(material))
+                {
+                    materials.Add(material, FormattableString.Invariant($"nwc_{materials.Count + 1}"));
+                }
+            }
+            else
+            {
+                hasUnassigned = true;
+            }
+        }
+
+        string? materialFileName = null;
+        (string, Func<Stream, ValueTask>)? companion = null;
+        if (materials.Count != 0)
+        {
+            string materialPath = Path.ChangeExtension(Path.GetFullPath(path), ".mtl");
+            materialFileName = Path.GetFileName(materialPath);
+            if (materialFileName != SanitizeObjLine(materialFileName) || materialFileName.Contains('#') || materialFileName.Contains('\\'))
+            {
+                throw new ArgumentException("The output file name cannot be written as an OBJ material library reference.", nameof(path));
+            }
+            companion = (materialPath, output => WriteText(output,
+                writer => WriteMaterials(writer, materials, hasUnassigned, cancellationToken)));
+        }
+
+        await AtomicFileWriter.WriteCore(path, output => WriteText(output, writer => WriteCore(meshes, writer,
+                worldCoordinates, sourceDocument, objectNamePrefix, materialFileName, companion.HasValue ? materials : null, cancellationToken)),
+            asynchronous, cancellationToken, companion).ConfigureAwait(false);
+
+        ValueTask WriteText(Stream output, Action<TextWriter> write)
+        {
+            if (asynchronous)
+            {
+                return new ValueTask(CompatibilityExport.WriteAsync(output, stream => CompatibilityExport.WriteText(stream, Utf8, write),
+                    cancellationToken));
+            }
+            CompatibilityExport.WriteText(output, Utf8, write);
+            return ValueTask.CompletedTask;
+        }
     }
 
     /// <summary>
@@ -36,7 +93,12 @@ internal static class ObjExporter
         bool worldCoordinates = true,
         string? sourceDocument = null,
         Func<NwcMesh, string?>? objectNamePrefix = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        WriteCore(meshes, writer, worldCoordinates, sourceDocument, objectNamePrefix, null, null, cancellationToken);
+
+    private static void WriteCore(IReadOnlyList<NwcMesh> meshes, TextWriter writer, bool worldCoordinates,
+        string? sourceDocument, Func<NwcMesh, string?>? objectNamePrefix,
+        string? materialFileName, Dictionary<NwcMaterial, string>? materials, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(writer);
@@ -49,6 +111,7 @@ internal static class ObjExporter
 
         writer.WriteLine(FormattableString.Invariant($"# Meshes: {meshes.Count}"));
         writer.WriteLine(FormattableString.Invariant($"# Coordinate Space: {(worldCoordinates ? "World" : "Local")}"));
+        if (materialFileName is not null) writer.WriteLine($"mtllib {materialFileName}");
         writer.WriteLine();
 
         int baseVertexIndex = 1;
@@ -84,6 +147,12 @@ internal static class ObjExporter
                 writer.WriteLine(FormattableString.Invariant($"v {pt.X:F4} {pt.Y:F4} {pt.Z:F4}"));
             }
 
+            if (materials is not null && HasPrimitives(mesh))
+            {
+                string materialName = mesh.Material is { } material ? materials[material] : DefaultMaterial;
+                writer.WriteLine($"usemtl {materialName}");
+            }
+
             // Triangle faces (1-based global indices)
             if (mesh.Indices.Count > 0)
             {
@@ -111,6 +180,29 @@ internal static class ObjExporter
             baseVertexIndex += vertices.Count;
             writer.WriteLine();
         }
+    }
+
+    private static bool HasPrimitives(NwcMesh mesh) => mesh.Indices.Count >= 3 || mesh.LineIndices.Count >= 2;
+
+    private static void WriteMaterials(TextWriter writer, Dictionary<NwcMaterial, string> materials, bool hasUnassigned,
+        CancellationToken cancellationToken)
+    {
+        foreach (var (material, name) in materials)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            WriteMaterial(name, material.Color);
+        }
+        if (hasUnassigned) WriteMaterial(DefaultMaterial, RgbaColor.White);
+
+        void WriteMaterial(string name, RgbaColor color)
+        {
+            writer.WriteLine($"newmtl {name}");
+            writer.WriteLine(FormattableString.Invariant($"Kd {Component(color.R):R} {Component(color.G):R} {Component(color.B):R}"));
+            writer.WriteLine(FormattableString.Invariant($"d {Component(color.A):R}"));
+            writer.WriteLine();
+        }
+
+        static float Component(float value) => float.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0;
     }
 
     /// <summary>OBJ directives are line based; never let a name from the file inject its own line.</summary>

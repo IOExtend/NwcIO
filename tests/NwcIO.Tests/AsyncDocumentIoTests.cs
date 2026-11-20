@@ -221,19 +221,28 @@ public sealed class AsyncDocumentIoTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task CancelledGeometryExport_PreservesExistingDestination(bool glb)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CancelledGeometryExport_PreservesExistingDestination(bool glb, bool withMaterial)
     {
         var directory = Directory.CreateTempSubdirectory("nwcio-cancel-geometry-");
         string path = Path.Combine(directory.FullName, glb ? "model.glb" : "model.obj");
+        string library = Path.ChangeExtension(path, ".mtl");
         try
         {
             byte[] original = [1, 2, 3];
             File.WriteAllBytes(path, original);
+            if (withMaterial) File.WriteAllText(library, "original materials");
             using var cancellation = new CancellationTokenSource();
             var vertices = new CancellingVertices(cancellation);
-            var doc = NwcDocument.Create(meshes: [new NwcMesh { Id = 1, Vertices = vertices, Indices = [0, 1, 2] }]);
+            var doc = NwcDocument.Create(meshes: [new NwcMesh
+            {
+                Id = 1,
+                Vertices = vertices,
+                Indices = [0, 1, 2],
+                Material = withMaterial ? new NwcMaterial { Id = 1, Name = "Glass", Color = RgbaColor.Glass } : null,
+            }]);
 
             Task save = glb
                 ? doc.SaveGlbAsync(path, worldCoordinates: false, cancellationToken: cancellation.Token)
@@ -243,7 +252,15 @@ public sealed class AsyncDocumentIoTests
             Assert.Equal(cancellation.Token, error.CancellationToken);
             Assert.True(save.IsCanceled);
             Assert.Equal(original, File.ReadAllBytes(path));
-            Assert.Equal(path, Assert.Single(Directory.GetFiles(directory.FullName)));
+            if (withMaterial)
+            {
+                Assert.Equal("original materials", File.ReadAllText(library));
+                Assert.Equal(2, Directory.GetFiles(directory.FullName).Length);
+            }
+            else
+            {
+                Assert.Equal(path, Assert.Single(Directory.GetFiles(directory.FullName)));
+            }
         }
         finally
         {

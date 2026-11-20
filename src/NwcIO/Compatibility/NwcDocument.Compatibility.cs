@@ -255,7 +255,7 @@ public sealed partial class NwcDocument
         return tests;
     }
 
-    /// <summary>Exports 3D mesh geometry to a Wavefront OBJ file.</summary>
+    /// <summary>Exports Wavefront OBJ geometry and a sibling material library when needed.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
     {
         Internal.Export.ObjExporter.WriteFile(Meshes, path, worldCoordinates, FileInfo.SourcePath);

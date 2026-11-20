@@ -10,11 +10,9 @@ public sealed partial class NwcDocument
 {
     private static readonly Encoding ExportUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
-    /// <summary>Exports Wavefront OBJ to a file asynchronously.</summary>
+    /// <summary>Exports Wavefront OBJ and a sibling material library when needed, asynchronously.</summary>
     public Task SaveObjAsync(string path, bool worldCoordinates = true, CancellationToken cancellationToken = default) =>
-        CompatibilityExport.WriteFileAsync(path, stream => CompatibilityExport.WriteText(stream, ExportUtf8,
-            writer => ObjExporter.Write(Meshes, writer, worldCoordinates, FileInfo.SourcePath, cancellationToken: cancellationToken)),
-            cancellationToken);
+        ObjExporter.WriteFileAsync(Meshes, path, worldCoordinates, FileInfo.SourcePath, cancellationToken);
 
     /// <summary>Exports Wavefront OBJ to a UTF-8 stream asynchronously.</summary>
     public Task SaveObjAsync(Stream stream, bool worldCoordinates = true, CancellationToken cancellationToken = default) =>

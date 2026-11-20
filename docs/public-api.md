@@ -136,6 +136,12 @@ In the HTML viewer, use Tab to reach the viewpoint, clash, hierarchy and set but
 Space to activate them. With focus on the 3D model view, the arrow keys orbit, + and - zoom, and
 Home resets the camera. Escape clears the current measurement while Measure is active.
 
+OBJ saves to a path, including `SaveObjAsync`, write a sibling `<name>.mtl` when exported geometry
+has materials. The library stores diffuse RGB (`Kd`) and opacity (`d`). OBJ saves to a stream or
+`TextWriter` export geometry only. Texture coordinates and texture maps are currently unsupported.
+An OBJ save with materials requires a sibling filename that can be used in an `mtllib` directive.
+The export rejects a symbolic link at the material library path.
+
 GLB geometry export requires a writable system temporary directory for its BIN chunk. The
 exporter removes the temporary file when it closes. A path-based save replaces the destination
 after the export succeeds. The complete GLB is limited to 4,294,967,292 bytes, including its

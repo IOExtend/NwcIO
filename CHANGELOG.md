@@ -4,6 +4,10 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+### Fixed
+
+- Path-based Wavefront OBJ export writes a sibling `.mtl` with diffuse colors and opacity from mesh materials (#93). Texture coordinates and texture maps are pending.
+
 ## [0.16.0] - 2026-11-19
 
 ### Added
