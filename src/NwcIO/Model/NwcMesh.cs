@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace NwcIO.Model;
 
 /// <summary>
@@ -24,6 +26,9 @@ public sealed class NwcMesh
     /// <see cref="Vector3d.Zero"/> = no normal; world normal = normalize(sign(Scale)·R·n).
     /// </summary>
     public IReadOnlyList<Vector3d>? Normals { get; init; }
+
+    /// <summary>One texture coordinate per vertex, when stored in the geometry record.</summary>
+    public IReadOnlyList<Vector2>? TexCoords { get; init; }
 
     /// <summary>
     /// Segment index pairs into <see cref="Vertices"/>; a closed polyline repeats its first vertex;

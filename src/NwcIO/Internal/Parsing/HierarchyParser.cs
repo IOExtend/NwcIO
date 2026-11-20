@@ -57,9 +57,9 @@ internal static class HierarchyParser
     }
 
     /// <summary>Reads a class-185 body (material JSON with embedded files, docs/format-notes.md §2.2), which the fragments stream holds too.</summary>
-    internal static object ReadMaterialJson(LcObjectReader reader)
+    internal static object ReadMaterialJson(LcObjectReader reader, bool readTexture = false)
     {
-        reader.ReadString();
+        string? json = reader.ReadString();
         reader.ReadString();
         int count = reader.ReadCount(12);
         for (int i = 0; i < count; i++)
@@ -79,7 +79,7 @@ internal static class HierarchyParser
             }
         }
 
-        return Dropped;
+        return readTexture && MaterialTextureParser.ReadDiffusePath(json) is { } path ? path : Dropped;
     }
 
     // IFC_GUID (-1019000) of the element's own tab, when it has the IFC form: 22 characters of the IFC alphabet, the first 0-3 (128 bits).

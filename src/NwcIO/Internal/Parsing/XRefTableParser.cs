@@ -66,18 +66,21 @@ internal static class XRefTableParser
 
             using var doc = document;
             var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
 
-            string type = root.TryGetProperty("Type", out var typeProp) ? typeProp.GetString() ?? "" : "";
-            int version = root.TryGetProperty("Version", out var verProp) && verProp.TryGetInt32(out int v) ? v : 1;
-            string savedFilename = root.TryGetProperty("SavedFilename", out var fileProp) ? fileProp.GetString() ?? "" : "";
+            string type = GetString(root, "Type");
+            int version = root.TryGetProperty("Version", out var verProp) && verProp.ValueKind == JsonValueKind.Number &&
+                verProp.TryGetInt32(out int v) ? v : 1;
+            string savedFilename = GetString(root, "SavedFilename");
 
             var references = new List<NwcXRef>();
             if (root.TryGetProperty("Table", out var tableProp) && tableProp.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in tableProp.EnumerateArray())
                 {
-                    string orig = item.TryGetProperty("OriginalPath", out var origProp) ? origProp.GetString() ?? "" : "";
-                    string remap = item.TryGetProperty("RemappedPath", out var remapProp) ? remapProp.GetString() ?? "" : "";
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+                    string orig = GetString(item, "OriginalPath");
+                    string remap = GetString(item, "RemappedPath");
                     if (!string.IsNullOrEmpty(orig) || !string.IsNullOrEmpty(remap))
                     {
                         references.Add(new NwcXRef(orig, remap));
@@ -92,4 +95,7 @@ internal static class XRefTableParser
             return null;
         }
     }
+
+    private static string GetString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
 }

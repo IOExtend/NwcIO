@@ -232,6 +232,13 @@ public sealed partial class NwcDocument
             }
         }
 
+        NwcXRefTable? xRefs = null;
+        var xrefStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.XRefJson);
+        if (xrefStream is not null)
+        {
+            xRefs = XRefTableParser.Parse(await xrefStream.LoadAsync().ConfigureAwait(false));
+        }
+
         var transforms = new List<NwcTransform>();
         var meshes = new List<NwcMesh>();
         int skippedMeshRecords = 0;
@@ -240,7 +247,7 @@ public sealed partial class NwcDocument
         cancellationToken.ThrowIfCancellationRequested();
         if (segments is not null)
         {
-            var graph = await ModelGraphReader.ReadAsync(segments, options, rootName, cancellationToken).ConfigureAwait(false);
+            var graph = await ModelGraphReader.ReadAsync(segments, options, rootName, xRefs, cancellationToken).ConfigureAwait(false);
             transforms.AddRange(graph.Transforms);
             meshes.AddRange(graph.Meshes);
             materials.AddRange(graph.Materials);
@@ -289,13 +296,6 @@ public sealed partial class NwcDocument
         if (segments is null && options.ReadMaterials)
         {
             materials.AddRange(MaterialParser.Parse(records, meshes, rootNode));
-        }
-
-        NwcXRefTable? xRefs = null;
-        var xrefStream = container.Streams.FirstOrDefault(s => s.Kind == NwcStreamKind.XRefJson);
-        if (xrefStream is not null)
-        {
-            xRefs = XRefTableParser.Parse(await xrefStream.LoadAsync().ConfigureAwait(false));
         }
 
         var dbCache = segments?.Directory;

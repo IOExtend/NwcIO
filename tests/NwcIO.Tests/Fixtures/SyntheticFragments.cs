@@ -3,7 +3,8 @@ using NwcIO.Model;
 namespace NwcIO.Tests;
 
 /// <summary>Class 55 [i32 1][new 54: ambient R,G,B, diffuse R,G,B, specular 0,0,0, emissive 0,0,0, Shininess, Transparency] as 14 f32.</summary>
-internal sealed record Look(float R, float G, float B, float Shininess, float Transparency);
+internal sealed record Look(float R, float G, float B, float Shininess, float Transparency,
+    string? MaterialJson = null, int? SharedMaterial = null, bool EditedMaterial = false);
 
 /// <summary>One fragment: TranslationOnly writes a class-14 pose (T only, S ignored), else S 1 a class-15 pose, else class 16; a new class 93 with bbox (0,0,0)-(MaxX,MaxY,MaxZ), or a back-reference
 /// to fragment SharesGeometryOf's. SharesPoseOf back-references an earlier pose. Look writes a new appearance;
@@ -55,12 +56,22 @@ internal static class SyntheticFragments
             else
             {
                 appearance[k] = w.New(55);
-                w.Int(1);
+                w.Int(look.EditedMaterial ? 0x71 : look.MaterialJson is not null || look.SharedMaterial.HasValue ? 33 : 1);
                 w.New(54);
                 foreach (float v in (float[])[look.R, look.G, look.B, look.R, look.G, look.B, 0, 0, 0, 0, 0, 0, look.Shininess, look.Transparency])
                 {
                     w.Float(v);
                 }
+                if (look.SharedMaterial is { } index)
+                {
+                    w.Int(index);
+                }
+                else if (look.MaterialJson is { } json)
+                {
+                    w.New(185);
+                    w.Str(json).Str(null).Int(0);
+                }
+                if (look.EditedMaterial) w.Int(0);
             }
 
             if (f.SharesGeometryOf >= 0)

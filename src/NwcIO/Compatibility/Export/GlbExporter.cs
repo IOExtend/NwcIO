@@ -71,6 +71,10 @@ internal static class GlbExporter
         // Copies of a source material made for line primitives that export COLOR_0, one per source material and blend flag.
         var materialsWithBlend = new HashSet<int>();
         var lineMaterialMap = new Dictionary<(int? Source, bool Blend), int>();
+        var imageUris = new Dictionary<string, int>(StringComparer.Ordinal);
+        var images = new List<string>();
+        var texturedVariants = new Dictionary<int, int>();
+        var materialTextures = new Dictionary<int, int>();
 
         for (int m = 0; m < meshes.Count; m++)
         {
@@ -247,6 +251,29 @@ internal static class GlbExporter
                     null));
             }
 
+            int? uvAccessor = null;
+            if (indices.Count > 0 && TextureExport.GetCoordinates(mesh, vCount, cancellationToken) is { } uv)
+            {
+                long uvLength = (long)vCount * 8;
+                long offset = bin.BeginView(uvLength);
+                for (int v = 0; v < vCount;)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var batch = bin.ReserveRecords(vCount - v, 8, out int count);
+                    for (int i = 0; i < count; i++, v++)
+                    {
+                        var coordinate = uv[v];
+                        BinaryPrimitives.WriteSingleLittleEndian(batch[(8 * i)..], coordinate.X);
+                        // glTF's texture origin is the upper left. NWC and OBJ use the lower left.
+                        BinaryPrimitives.WriteSingleLittleEndian(batch[(8 * i + 4)..], 1f - coordinate.Y);
+                    }
+                }
+
+                uvAccessor = accessors.Count;
+                accessors.Add(new AccessorDef(bufferViews.Count, 0, ComponentTypeFloat, vCount, "VEC2", null, null));
+                bufferViews.Add(new BufferViewDef(offset, uvLength, TargetArrayBuffer));
+            }
+
             int? triIdxAccessor = WriteIndexAccessor(bin, indices, vCount, bufferViews, accessors);
             int? lineIdxAccessor = WriteIndexAccessor(bin, lineIndices, vCount, bufferViews, accessors);
 
@@ -301,12 +328,31 @@ internal static class GlbExporter
             var primitives = new List<PrimitiveDef>();
             if (triIdxAccessor.HasValue && normAccessorIdx.HasValue)
             {
+                int? triangleMaterial = matIdx;
+                if (uvAccessor.HasValue && matIdx is { } baseIndex && TextureExport.GetImageUri(mesh.Material!.DiffuseTexture) is { } uri)
+                {
+                    if (!texturedVariants.TryGetValue(baseIndex, out int variant))
+                    {
+                        if (!imageUris.TryGetValue(uri, out int image))
+                        {
+                            image = images.Count;
+                            images.Add(uri);
+                            imageUris.Add(uri, image);
+                        }
+                        variant = materialTable.Count;
+                        materialTable.Add(mesh.Material);
+                        texturedVariants.Add(baseIndex, variant);
+                        materialTextures.Add(variant, image);
+                    }
+                    triangleMaterial = variant;
+                }
                 primitives.Add(new PrimitiveDef(
                     posAccessorIdx,
                     normAccessorIdx.Value,
                     null,
+                    uvAccessor,
                     triIdxAccessor.Value,
-                    matIdx,
+                    triangleMaterial,
                     4)); // TRIANGLES
             }
 
@@ -316,6 +362,7 @@ internal static class GlbExporter
                     posAccessorIdx,
                     null,
                     colAccessorIdx,
+                    null,
                     lineIdxAccessor.Value,
                     lineMatIdx,
                     1)); // LINES
@@ -334,6 +381,8 @@ internal static class GlbExporter
             generatorName ?? "NwcIO glTF 2.0 Exporter",
             viewpoints,
             materialsWithBlend,
+            images,
+            materialTextures,
             cancellationToken);
 
         WriteContainer(output, jsonData.Span, binFile);
@@ -393,6 +442,8 @@ internal static class GlbExporter
         string generator,
         IReadOnlyList<NwcSavedViewpoint>? viewpoints,
         HashSet<int>? materialsWithBlend,
+        List<string> images,
+        Dictionary<int, int> materialTextures,
         CancellationToken cancellationToken)
     {
         var json = new ArrayBufferWriter<byte>();
@@ -530,6 +581,7 @@ internal static class GlbExporter
                     {
                         writer.WriteNumber("COLOR_0", colAcc);
                     }
+                    if (p.UvAccessor is { } uvAcc) writer.WriteNumber("TEXCOORD_0", uvAcc);
                     writer.WriteEndObject();
 
                     writer.WriteNumber("indices", p.IndicesAccessor);
@@ -569,6 +621,12 @@ internal static class GlbExporter
                 WriteSafeFloatValue(writer, mat.Color.B);
                 WriteSafeFloatValue(writer, mat.Color.A);
                 writer.WriteEndArray();
+                if (materialTextures.TryGetValue(i, out int texture))
+                {
+                    writer.WriteStartObject("baseColorTexture");
+                    writer.WriteNumber("index", texture);
+                    writer.WriteEndObject();
+                }
                 WriteSafeFloat(writer, "metallicFactor", mat.Metallic);
                 WriteSafeFloat(writer, "roughnessFactor", mat.Roughness);
                 writer.WriteEndObject();
@@ -577,6 +635,27 @@ internal static class GlbExporter
             }
 
             if (materials.Count > 0) writer.WriteEndArray();
+
+            if (images.Count > 0)
+            {
+                writer.WriteStartArray("images");
+                foreach (string uri in images)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("uri", uri);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+
+                writer.WriteStartArray("textures");
+                for (int i = 0; i < images.Count; i++)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteNumber("source", i);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+            }
 
             // accessors
             if (accessors.Count > 0) writer.WriteStartArray("accessors");
@@ -851,6 +930,7 @@ internal static class GlbExporter
         int PositionAccessor,
         int? NormalAccessor,
         int? ColorAccessor,
+        int? UvAccessor,
         int IndicesAccessor,
         int? MaterialIndex,
         int Mode);

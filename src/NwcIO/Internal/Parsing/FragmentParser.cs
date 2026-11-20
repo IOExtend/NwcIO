@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using NwcIO.Model;
 
 namespace NwcIO.Internal.Parsing;
@@ -18,7 +19,7 @@ internal readonly record struct Fragment(
     FragmentLook Look);
 
 /// <summary>The class-54 diffuse colour (floats 3, 4, 5) and transparency (float 13) of a fragment's appearance (docs/format-notes.md §2.4).</summary>
-internal readonly record struct FragmentLook(float R, float G, float B, float Transparency);
+internal readonly record struct FragmentLook(float R, float G, float B, float Transparency, string? DiffuseTexturePath = null);
 
 /// <summary>Strict reader of the <c>LcOpNwdFragments</c> object graph (docs/format-notes.md §2.2, §2.4).</summary>
 internal static class FragmentParser
@@ -38,7 +39,12 @@ internal static class FragmentParser
 
     private static ReadOnlySpan<int> GeometryClasses => [93];
 
-    public static Fragment[] Read(byte[] data) => new Parser(new LcObjectReader(data, Segment)).ReadStream();
+    public static Fragment[] Read(byte[] data, byte[]? sharedNodes = null, bool readTextures = false)
+    {
+        bool paddedCount = data.Length >= 16 && BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(4)) == 0 &&
+            BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(8)) == 100 && BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(12)) == 13;
+        return new Parser(new LcObjectReader(data, Segment), sharedNodes, readTextures).ReadStream(paddedCount);
+    }
 
     private sealed record Pose(Vector3d Translation, Quaterniond Rotation, double Scale);
 
@@ -51,17 +57,23 @@ internal static class FragmentParser
 
         private readonly LcObjectReader _reader;
         private readonly Func<int, object> _readBody;
+        private readonly byte[]? _sharedNodes;
+        private readonly bool _readTextures;
+        private string?[]? _sharedTextures;
 
-        public Parser(LcObjectReader reader)
+        public Parser(LcObjectReader reader, byte[]? sharedNodes, bool readTextures)
         {
             _reader = reader;
             _readBody = ReadBody;
+            _sharedNodes = sharedNodes;
+            _readTextures = readTextures;
         }
 
         // [n] PTR{n}, each a new class 13, then the zero pad to 8 (docs/format-notes.md §2.4).
-        public Fragment[] ReadStream()
+        public Fragment[] ReadStream(bool paddedCount)
         {
             var fragments = new Fragment[_reader.ReadCount(MinFragmentBytes)];
+            if (paddedCount) _reader.ReadInt32();
             for (int i = 0; i < fragments.Length; i++)
             {
                 fragments[i] = (Fragment)_reader.ReadPointer(FragmentClasses, _readBody, allowNull: false, allowBackReference: false)!;
@@ -80,7 +92,7 @@ internal static class FragmentParser
             55 => ReadAppearance(),
             54 => ReadMaterial(),
             93 => ReadGeometry(),
-            185 => HierarchyParser.ReadMaterialJson(_reader),
+            185 => HierarchyParser.ReadMaterialJson(_reader, _readTextures),
             _ => throw new InvalidOperationException($"class {classId} has no body reader"),
         };
 
@@ -123,17 +135,43 @@ internal static class FragmentParser
             return double.IsFinite(value) ? value : throw _reader.Fail("pose value is not finite");
         }
 
-        // Class 55: [flags][ptr 54], then [ptr 185 or null] when flags & 32; the look is its material's, the extra is dropped.
+        // Class 55: [flags][ptr 54], then [ptr 185, a shared index, or null] when flags & 32.
         private FragmentLook ReadAppearance()
         {
             int flags = _reader.ReadInt32();
             var look = (FragmentLook)_reader.ReadPointer(MaterialClasses, _readBody, allowNull: false)!;
-            if ((flags & 32) != 0)
+            if ((flags & 32) == 0) return look;
+
+            string? texturePath;
+            if (_sharedNodes is not null && _reader.TryReadSharedIndex(out int index))
             {
-                _reader.ReadPointer(ExtraClasses, _readBody);
+                _sharedTextures ??= ReadSharedTextures(_sharedNodes, _readTextures);
+                if (index >= _sharedTextures.Length) throw _reader.Fail("appearance shared index is outside LcOpSharedNodes");
+                texturePath = _sharedTextures[index];
+            }
+            else
+            {
+                texturePath = _reader.ReadPointer(ExtraClasses, _readBody) as string;
             }
 
-            return look;
+            // Navisworks 2027 writes one more zero word for an appearance whose image was assigned in the material editor.
+            if (flags == 0x71 && _reader.ReadInt32() != 0)
+            {
+                throw _reader.Fail("appearance flag 0x71 has a nonzero trailing word");
+            }
+            return look with { DiffuseTexturePath = texturePath };
+        }
+
+        private static string?[] ReadSharedTextures(byte[] data, bool readTextures)
+        {
+            var reader = new LcObjectReader(data, "LcOpSharedNodes");
+            var textures = new string?[reader.ReadCount(8)];
+            for (int i = 0; i < textures.Length; i++)
+            {
+                textures[i] = reader.ReadPointer(ExtraClasses, _ => HierarchyParser.ReadMaterialJson(reader, readTextures)) as string;
+            }
+            reader.ReadEnd();
+            return textures;
         }
 
         // Class 54: 14 x f32: ambient 0-2, diffuse 3-5, specular 6-8, emissive 9-11, shininess 12, transparency 13.

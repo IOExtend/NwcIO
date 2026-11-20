@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using NwcIO.Internal.Parsing;
 using NwcIO.Model;
 using Xunit;
@@ -176,11 +177,28 @@ public class GeometryRecordParserTests
     public void Parse_R4RawUvSlot_ShiftsNormalIdAndDecodesAsR1()
     {
         Assert.Equal(160, FormatVectors.R4.Length);
-        AssertR1(GeometryRecordParser.Parse(FormatVectors.R4, 16));
+        var geometry = GeometryRecordParser.Parse(FormatVectors.R4, 16);
+        AssertR1(geometry);
+        Assert.Equal([Vector2.Zero, Vector2.One, Vector2.One, Vector2.Zero], geometry.TexCoords!);
     }
 
     [Fact]
-    public void Parse_QuantisedUvSlot_DecodesAsR1() => AssertR1(GeometryRecordParser.Parse(BuildR1q(), 16));
+    public void Parse_QuantisedUvSlot_DecodesAsR1()
+    {
+        var geometry = GeometryRecordParser.Parse(BuildR1q(), 16);
+        AssertR1(geometry);
+        Assert.Equal([Vector2.Zero, Vector2.One, Vector2.One, Vector2.Zero], geometry.TexCoords!);
+    }
+
+    [Fact]
+    public void Parse_QuantisedUv_InterleavesUnequalWidthsAcrossWords()
+    {
+        byte[] record = [.. BuildR1q()[..84], .. Words([0x3E000000, 0x3E800000, 0x3F600000, 0x3F200000, 0x0108, 4]),
+            .. Convert.FromHexString("7F957F00000000F0"), .. BuildR1q()[120..164]];
+        var geometry = GeometryRecordParser.Parse(record, 16);
+        AssertR1(geometry);
+        Assert.Equal([new Vector2(0.125f, 0.25f), new(0.875f, 0.25f), new(0.375f, 0.625f), new(0.875f, 0.625f)], geometry.TexCoords!);
+    }
 
     // R1q header: w at +100, m at +104 (quantised UV, docs/format-notes.md §2.6)
     [Theory]
