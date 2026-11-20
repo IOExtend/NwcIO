@@ -416,8 +416,8 @@ public sealed partial class NwcAssembly
         => OpenNwfCore(nwfPath, options, progress, asynchronous: true, cancellationToken).AsTask();
 
     /// <summary>
-    /// Builds a single document that carries the assembly scene tree, meshes with their transforms,
-    /// viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
+    /// Builds a single document that carries the assembly scene tree and its explicit visibility flags,
+    /// meshes with their transforms, viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
     /// The file info is neutral and does not claim a Revit origin.
     /// </summary>
     /// <remarks>
@@ -432,7 +432,14 @@ public sealed partial class NwcAssembly
         int nextId = 0;
         NwcNode Renumber(NwcNode source, NwcNode? parent)
         {
-            var copy = new NwcNode { Id = nextId++, Name = source.Name, Class = source.Class, Parent = parent };
+            var copy = new NwcNode
+            {
+                Id = nextId++,
+                Name = source.Name,
+                Class = source.Class,
+                IsHidden = source.IsHidden,
+                Parent = parent,
+            };
             copy.Properties.AddRange(source.Properties);
             foreach (var child in source.Children)
             {

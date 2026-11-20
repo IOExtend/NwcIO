@@ -353,6 +353,25 @@ public class AssemblyTests
         Assert.Null(document.TimeLiner);
     }
 
+    [Fact]
+    public void ToDocument_PreservesExplicitNodeVisibility()
+    {
+        var source = CreateTreeModel("Model.ifc", 0, "Grid");
+        var sourceRoot = source.RootNode!;
+        sourceRoot.IsHidden = true;
+        var sourceChild = Assert.Single(sourceRoot.Children);
+        var assembly = NwcAssembly.Create("Fed", source);
+
+        var model = Assert.Single(assembly.ToDocument().RootNode!.Children);
+        var child = Assert.Single(model.Children);
+
+        Assert.True(model.IsHidden);
+        Assert.False(child.IsHidden);
+        Assert.NotSame(sourceRoot, model);
+        Assert.NotSame(sourceChild, child);
+        Assert.Same(model, child.Parent);
+    }
+
     private static NwcDocument CreateComponentModel(string sourcePath, int meshId, double offsetX)
     {
         return new NwcDocumentBuilder().SetFileInfo(sourcePath)

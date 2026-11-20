@@ -4,6 +4,10 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+### Fixed
+
+- `NwcAssembly.ToDocument()` preserves explicit node visibility when copying the assembly tree.
+
 ## [0.17.0] - 2026-11-20
 
 ### Added
