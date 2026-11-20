@@ -1,3 +1,4 @@
+using NwcIO.Internal;
 using NwcIO.Internal.Json;
 
 namespace NwcIO.Model;
@@ -20,6 +21,10 @@ public sealed partial class NwcAssembly
             .Distinct()
             .Skip(1)
             .Any();
+
+    internal NwcLengthUnit CommonLengthUnit => HasMixedLengthUnits
+        ? NwcLengthUnit.Unknown
+        : Models.Select(model => model.LengthUnit).FirstOrDefault(unit => unit.GetMetresPerUnit().HasValue);
 
     /// <summary>
     /// Synthetic assembly root. Its id is negative so it cannot collide with the
@@ -183,7 +188,13 @@ public sealed partial class NwcAssembly
         rootNode.Children.AddRange(rootChildren);
 
         var assembly = new NwcAssembly(name, modelList, rootNode, allMeshes, [.. matSet], totalBox, allViewpoints, meshModelIndexes);
-        assembly.Diagnostics = modelList.SelectMany(m => m.Diagnostics).ToList();
+        var diagnostics = modelList.SelectMany(m => m.Diagnostics).ToList();
+        if (assembly.HasMixedLengthUnits)
+        {
+            diagnostics.Add(new NwcDiagnostic(NwcDiagnosticSeverity.Warning, "MixedLengthUnits",
+                "The assembly contains models with different length units. Their original coordinates were retained."));
+        }
+        assembly.Diagnostics = diagnostics;
         return assembly;
     }
 
@@ -230,7 +241,20 @@ public sealed partial class NwcAssembly
         NwcReaderOptions? options,
         IProgress<NwcProgress>? progress,
         CancellationToken cancellationToken)
+        => LoadFromDirectoryCore(directoryPath, searchPatterns, recursive, options, progress, asynchronous: false, cancellationToken)
+            .GetSynchronousResult();
+
+    private static async ValueTask<NwcAssembly> LoadFromDirectoryCore(
+        string directoryPath,
+        IReadOnlyList<string> searchPatterns,
+        bool recursive,
+        NwcReaderOptions? options,
+        IProgress<NwcProgress>? progress,
+        bool asynchronous,
+        CancellationToken cancellationToken)
     {
+        if (asynchronous) cancellationToken.ThrowIfCancellationRequested();
+
         ArgumentNullException.ThrowIfNull(searchPatterns);
         if (!Directory.Exists(directoryPath))
         {
@@ -259,12 +283,15 @@ public sealed partial class NwcAssembly
         for (int i = 0; i < files.Length; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            docs.Add(NwcDocument.Open(files[i], options, null, cancellationToken));
+            docs.Add(await OpenModel(files[i], options, asynchronous, cancellationToken).ConfigureAwait(false));
             progress?.Report(new NwcProgress("load-models", i + 1, files.Length));
         }
 
         string assemblyName = Path.GetFileName(directoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        return Create(assemblyName, docs);
+        cancellationToken.ThrowIfCancellationRequested();
+        var assembly = Create(assemblyName, docs);
+        cancellationToken.ThrowIfCancellationRequested();
+        return assembly;
     }
 
     /// <summary>
@@ -282,14 +309,24 @@ public sealed partial class NwcAssembly
         NwcReaderOptions? options,
         IProgress<NwcProgress>? progress,
         CancellationToken cancellationToken)
+        => OpenNwfCore(nwfPath, options, progress, asynchronous: false, cancellationToken).GetSynchronousResult();
+
+    private static async ValueTask<NwcAssembly> OpenNwfCore(
+        string nwfPath,
+        NwcReaderOptions? options,
+        IProgress<NwcProgress>? progress,
+        bool asynchronous,
+        CancellationToken cancellationToken)
     {
+        if (asynchronous) cancellationToken.ThrowIfCancellationRequested();
+
         if (!File.Exists(nwfPath))
         {
             throw new FileNotFoundException($"NWF file not found: {nwfPath}", nwfPath);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var primaryDoc = NwcDocument.Open(nwfPath, options, null, cancellationToken);
+        var primaryDoc = await OpenModel(nwfPath, options, asynchronous, cancellationToken).ConfigureAwait(false);
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(nwfPath)) ?? ".";
 
         var loadedDocs = new List<NwcDocument> { primaryDoc };
@@ -307,35 +344,31 @@ public sealed partial class NwcAssembly
             foreach (var xref in primaryDoc.XRefs.References)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                // Every reference counts, loaded or not, so Completed reaches Total.
-                processed++;
                 if (!xref.TryResolve(baseDir, out string resolved))
                 {
                     unresolved.Add(xref);
-                    progress?.Report(new NwcProgress("load-models", processed, total));
-                    continue;
                 }
-
-                // Load every resolved file once, whatever the stored path spelled like.
-                if (!loadedPaths.Add(Path.GetFullPath(resolved)))
+                else if (loadedPaths.Add(Path.GetFullPath(resolved)))
                 {
-                    progress?.Report(new NwcProgress("load-models", processed, total));
-                    continue;
+                    // Load every resolved file once, whatever the stored path spelled like.
+                    if (resolved.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) ||
+                        resolved.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
+                    {
+                        loadedDocs.Add(await OpenModel(resolved, options, asynchronous, cancellationToken).ConfigureAwait(false));
+                    }
+                    else
+                    {
+                        skipped.Add(xref);
+                    }
                 }
 
-                if (!resolved.EndsWith(".nwc", StringComparison.OrdinalIgnoreCase) &&
-                    !resolved.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
-                {
-                    skipped.Add(xref);
-                    progress?.Report(new NwcProgress("load-models", processed, total));
-                    continue;
-                }
-
-                loadedDocs.Add(NwcDocument.Open(resolved, options, null, cancellationToken));
+                // Every reference counts, including entries that did not load a model.
+                processed++;
                 progress?.Report(new NwcProgress("load-models", processed, total));
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         string assemblyName = Path.GetFileNameWithoutExtension(nwfPath);
         var assembly = Create(assemblyName, loadedDocs);
         assembly.UnresolvedXRefs = unresolved;
@@ -353,29 +386,38 @@ public sealed partial class NwcAssembly
                 $"Skipped unsupported NWF reference: '{x.EffectivePath}'.")));
             assembly.Diagnostics = diagnostics;
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
         return assembly;
     }
 
-    /// <summary>Loads a folder asynchronously. The current implementation wraps the synchronous loader.</summary>
+    private static ValueTask<NwcDocument> OpenModel(
+        string path, NwcReaderOptions? options, bool asynchronous, CancellationToken cancellationToken) =>
+        asynchronous
+            ? new ValueTask<NwcDocument>(NwcDocument.OpenAsync(path, options, cancellationToken: cancellationToken))
+            : ValueTask.FromResult(NwcDocument.Open(path, options, progress: null, cancellationToken));
+
+    /// <summary>Loads documents in a folder using asynchronous file reads.</summary>
     public static Task<NwcAssembly> LoadFromDirectoryAsync(
         string directoryPath,
         string searchPattern = "*.nwc",
         NwcReaderOptions? options = null,
         IProgress<NwcProgress>? progress = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => LoadFromDirectory(directoryPath, searchPattern, options, progress, cancellationToken), cancellationToken);
+        => LoadFromDirectoryCore(directoryPath, [searchPattern], recursive: false, options, progress,
+            asynchronous: true, cancellationToken).AsTask();
 
-    /// <summary>Opens a .nwf asynchronously. The current implementation wraps the synchronous loader.</summary>
+    /// <summary>Opens a .nwf and its referenced models using asynchronous file reads.</summary>
     public static Task<NwcAssembly> OpenNwfAsync(
         string nwfPath,
         NwcReaderOptions? options = null,
         IProgress<NwcProgress>? progress = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => OpenNwf(nwfPath, options, progress, cancellationToken), cancellationToken);
+        => OpenNwfCore(nwfPath, options, progress, asynchronous: true, cancellationToken).AsTask();
 
     /// <summary>
-    /// Builds a single document that carries the assembly scene tree, meshes with their transforms,
-    /// viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
+    /// Builds a single document that carries the assembly scene tree and its explicit visibility flags,
+    /// meshes with their transforms, viewpoints, GUIDs, the assembly selection sets and the assembly TimeLiner schedule.
     /// The file info is neutral and does not claim a Revit origin.
     /// </summary>
     /// <remarks>
@@ -390,7 +432,14 @@ public sealed partial class NwcAssembly
         int nextId = 0;
         NwcNode Renumber(NwcNode source, NwcNode? parent)
         {
-            var copy = new NwcNode { Id = nextId++, Name = source.Name, Class = source.Class, Parent = parent };
+            var copy = new NwcNode
+            {
+                Id = nextId++,
+                Name = source.Name,
+                Class = source.Class,
+                IsHidden = source.IsHidden,
+                Parent = parent,
+            };
             copy.Properties.AddRange(source.Properties);
             foreach (var child in source.Children)
             {

@@ -57,22 +57,56 @@ public static class NwcClashGrouper
             }
         }
 
-        // Pairwise proximity check
+        var cells = new Dictionary<(long X, long Y, long Z), List<int>>();
+        var unindexed = new List<int>();
+        // The extra half-cell leaves room for rounding at an exact radius or a cell boundary.
+        double cellSize = 2 * clusterDistance;
         for (int i = 0; i < n; i++)
         {
-            var p1 = results[i].ClashPoint;
-            for (int j = i + 1; j < n; j++)
+            var p = results[i].ClashPoint;
+            if (!double.IsNormal(distSqThreshold) ||
+                !TryCell(p.X, out long x) || !TryCell(p.Y, out long y) || !TryCell(p.Z, out long z))
             {
-                var p2 = results[j].ClashPoint;
-                double dx = p1.X - p2.X;
-                double dy = p1.Y - p2.Y;
-                double dz = p1.Z - p2.Z;
-                double dSq = dx * dx + dy * dy + dz * dz;
+                // Preserve the distance comparison for extreme quotients or a squared radius
+                // that overflowed or underflowed.
+                for (int j = 0; j < i; j++) JoinIfClose(i, j);
+                unindexed.Add(i);
+                continue;
+            }
 
-                if (dSq <= distSqThreshold)
+            foreach (int j in unindexed) JoinIfClose(i, j);
+            for (long cz = z - 1; cz <= z + 1; cz++)
+            {
+                for (long cy = y - 1; cy <= y + 1; cy++)
                 {
-                    Union(i, j);
+                    for (long cx = x - 1; cx <= x + 1; cx++)
+                    {
+                        if (!cells.TryGetValue((cx, cy, cz), out var neighbors)) continue;
+                        foreach (int j in neighbors) JoinIfClose(i, j);
+                    }
                 }
+            }
+
+            if (!cells.TryGetValue((x, y, z), out var bucket)) cells.Add((x, y, z), bucket = []);
+            bucket.Add(i);
+        }
+
+        bool TryCell(double coordinate, out long cell)
+        {
+            double scaled = coordinate / cellSize;
+            // At larger quotients the cell division can lose precision even before flooring.
+            const double maxExactCell = 1L << 50;
+            cell = 0;
+            if (!(Math.Abs(scaled) < maxExactCell)) return false;
+            cell = (long)Math.Floor(scaled);
+            return true;
+        }
+
+        void JoinIfClose(int i, int j)
+        {
+            if ((results[j].ClashPoint - results[i].ClashPoint).LengthSquared <= distSqThreshold)
+            {
+                Union(j, i);
             }
         }
 

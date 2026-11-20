@@ -235,7 +235,7 @@ public sealed partial class NwcDocument
         var tests = string.IsNullOrEmpty(testName)
             ? ClashTests
             : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
-        Model.Clash.NwcClashBcfExporter.SaveTests(path, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Model.Clash.NwcClashBcfExporter.SaveTests(path, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), LengthUnit);
     }
 
     /// <summary>Exports detected clash results to a BCF 2.1 stream.</summary>
@@ -244,7 +244,7 @@ public sealed partial class NwcDocument
         var tests = string.IsNullOrEmpty(testName)
             ? ClashTests
             : ClashTests.Where(t => string.Equals(t.Name, testName, StringComparison.OrdinalIgnoreCase));
-        Model.Clash.NwcClashBcfExporter.WriteTests(stream, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Model.Clash.NwcClashBcfExporter.WriteTests(stream, tests, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), LengthUnit);
     }
 
     /// <summary>Loads clash detective tests and results from a Navisworks Clash Report XML file.</summary>
@@ -255,7 +255,7 @@ public sealed partial class NwcDocument
         return tests;
     }
 
-    /// <summary>Exports 3D mesh geometry to a Wavefront OBJ file.</summary>
+    /// <summary>Exports Wavefront OBJ geometry and a sibling material library when needed.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
     {
         Internal.Export.ObjExporter.WriteFile(Meshes, path, worldCoordinates, FileInfo.SourcePath);
@@ -268,16 +268,20 @@ public sealed partial class NwcDocument
     }
 
     /// <summary>Exports 3D mesh geometry, materials, and saved cameras to a binary glTF 2.0 file (.glb).</summary>
-    public void SaveGlb(string path, bool worldCoordinates = true)
-    {
-        Internal.Export.GlbExporter.WriteFile(Meshes, Materials, path, worldCoordinates, viewpoints: SavedViewpoints);
-    }
+    public void SaveGlb(string path, bool worldCoordinates = true) =>
+        SaveGlb(path, NwcGlbExportOptions.ForCoordinates(worldCoordinates));
 
     /// <summary>Exports 3D mesh geometry, materials, and saved cameras to a binary glTF 2.0 stream (.glb).</summary>
-    public void SaveGlb(Stream stream, bool worldCoordinates = true)
-    {
-        Internal.Export.GlbExporter.Write(Meshes, Materials, stream, worldCoordinates, viewpoints: SavedViewpoints);
-    }
+    public void SaveGlb(Stream stream, bool worldCoordinates = true) =>
+        SaveGlb(stream, NwcGlbExportOptions.ForCoordinates(worldCoordinates));
+
+    /// <summary>Exports binary glTF 2.0 to a file using the specified coordinate and camera options.</summary>
+    public void SaveGlb(string path, NwcGlbExportOptions options) =>
+        Internal.Export.GlbExporter.WriteFile(Meshes, Materials, path, options, viewpoints: SavedViewpoints);
+
+    /// <summary>Exports binary glTF 2.0 to a stream using the specified coordinate and camera options.</summary>
+    public void SaveGlb(Stream stream, NwcGlbExportOptions options) =>
+        Internal.Export.GlbExporter.Write(Meshes, Materials, stream, options, viewpoints: SavedViewpoints);
 
     /// <summary>Exports 3D mesh geometry, materials, spatial structure, and properties to an IFC STEP physical file (.ifc).</summary>
     public void SaveIfc(string path, NwcIfcExportOptions? options = null)
@@ -302,25 +306,25 @@ public sealed partial class NwcDocument
     /// <summary>Exports saved viewpoints to a buildingSMART BCF 2.1 zip archive (.bcfzip).</summary>
     public void SaveViewpointsBcf(string path)
     {
-        Internal.Export.BcfExporter.WriteViewpointsFile(SavedViewpoints, path, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Internal.Export.BcfExporter.WriteViewpointsFile(SavedViewpoints, path, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), MetresPerUnit ?? 1.0);
     }
 
     /// <summary>Exports saved viewpoints to a buildingSMART BCF 2.1 zip stream.</summary>
     public void SaveViewpointsBcf(Stream stream)
     {
-        Internal.Export.BcfExporter.WriteViewpoints(SavedViewpoints, stream, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"));
+        Internal.Export.BcfExporter.WriteViewpoints(SavedViewpoints, stream, Path.GetFileNameWithoutExtension(FileInfo.SourcePath ?? "Model"), MetresPerUnit ?? 1.0);
     }
 
     /// <summary>Exports saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints file.</summary>
-    public void SaveViewpointsXml(string path, string units = "m")
+    public void SaveViewpointsXml(string path, string? units = null)
     {
-        Model.Sectioning.NwcXmlViewpointSerializer.Save(path, SavedViewpoints, units);
+        Model.Sectioning.NwcXmlViewpointSerializer.Save(path, SavedViewpoints, units ?? LengthUnit.GetSymbol() ?? "m");
     }
 
     /// <summary>Serializes saved viewpoints, cameras, clipping planes, and redlines to an Autodesk Navisworks XML viewpoints string.</summary>
-    public string ToViewpointsXml(string units = "m")
+    public string ToViewpointsXml(string? units = null)
     {
-        return Model.Sectioning.NwcXmlViewpointSerializer.Serialize(SavedViewpoints, units);
+        return Model.Sectioning.NwcXmlViewpointSerializer.Serialize(SavedViewpoints, units ?? LengthUnit.GetSymbol() ?? "m");
     }
 
     /// <summary>

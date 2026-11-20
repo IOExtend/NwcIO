@@ -1311,6 +1311,102 @@ public sealed class ClashDetectiveTests
         Assert.Same(test, Assert.Single(assembly.ClashTests));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClashDetection_SpatialQueriesPreserveBruteForceOrder(bool federated)
+    {
+        double[] offsets = [20, 0, 1, 21, 40, 20.5, 0.5, 19];
+        var meshes = offsets.Select((x, i) => new NwcMesh
+        {
+            Id = i,
+            Vertices = [new(0, 0, 0), new(2, 0, 0), new(0, 2, 0)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = i, Translation = new Vector3d(x, 0, 0) },
+        }).ToArray();
+        var expected = (from a in meshes
+                        from b in meshes
+                        where a.Id < b.Id && Math.Abs(offsets[a.Id] - offsets[b.Id]) <= 2
+                        select (a.Id, b.Id)).ToArray();
+        var test = new NwcClashTest("Reference", NwcClashTestType.Hard, tolerance: 0);
+        if (federated)
+        {
+            var assembly = NwcAssembly.Create("Federation", NwcDocument.Create(meshes: meshes[..4]),
+                NwcDocument.Create(meshes: meshes[4..]));
+            NwcClashDetector.Run(assembly, test);
+        }
+        else
+        {
+            NwcClashDetector.Run(NwcDocument.Create(meshes: meshes), test);
+        }
+
+        Assert.Equal(expected, test.Results.Select(result => (result.Item1.Mesh!.Id, result.Item2.Mesh!.Id)));
+        for (int i = 0; i < test.Results.Count; i++)
+        {
+            var result = test.Results[i];
+            var (a, b) = expected[i];
+            Assert.Equal($"Clash{i + 1}", result.Name);
+            Assert.Equal((offsets[a] + offsets[b]) * 0.5 + 2.0 / 3, result.ClashPoint.X, 12);
+            Assert.Equal(2.0 / 3, result.ClashPoint.Y, 12);
+            Assert.Equal(0, result.Distance);
+        }
+    }
+
+    [Theory]
+    [InlineData(NwcClashTestType.Hard)]
+    [InlineData(NwcClashTestType.Clearance)]
+    [InlineData(NwcClashTestType.Duplicates)]
+    public void ClashDetection_TransformsEachMeshOnlyOncePerRun(NwcClashTestType type)
+    {
+        var vertices = new CountingVertices([new(0, 0, 0), new(2, 0, 0), new(0, 2, 0)]);
+        var meshes = Enumerable.Range(0, 4).Select(i => new NwcMesh
+        {
+            Id = i,
+            Vertices = vertices,
+            Indices = [0, 1, 2],
+        }).ToArray();
+        var doc = NwcDocument.Create(meshes: meshes);
+        foreach (var mesh in meshes) mesh.Transform = new NwcTransform { Id = mesh.Id, Translation = new(5, 0, 0) };
+        int before = vertices.Reads;
+
+        var test = NwcClashDetector.Run(doc, new NwcClashTest("Cached", type));
+
+        Assert.Equal(6, test.Results.Count);
+        Assert.Equal(meshes.Length * vertices.Count, vertices.Reads - before);
+    }
+
+    [Fact]
+    public void ClashDetection_TriangleCullingPreservesNearCoplanarContact()
+    {
+        var a = new NwcMesh { Id = 1, Vertices = [new(0, 0, 0), new(2, 0, 0), new(0, 2, 0)], Indices = [0, 1, 2] };
+        var b = new NwcMesh
+        {
+            Id = 2,
+            Vertices = [new(0, 0, 1e-7), new(2, 0, 1e-7), new(0, 2, 1e-7), new(0, 0, 0)],
+            Indices = [0, 1, 2],
+        };
+
+        var test = NwcClashDetector.Run(NwcDocument.Create(meshes: [a, b]), new NwcClashTest("Coplanar"));
+
+        Assert.Equal(5e-8, Assert.Single(test.Results).ClashPoint.Z, 15);
+    }
+
+    private sealed class CountingVertices(Vector3d[] values) : IReadOnlyList<Vector3d>
+    {
+        public int Count => values.Length;
+        public int Reads { get; private set; }
+        public Vector3d this[int index]
+        {
+            get
+            {
+                Reads++;
+                return values[index];
+            }
+        }
+        public IEnumerator<Vector3d> GetEnumerator() => ((IEnumerable<Vector3d>)values).GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private sealed class ClashProgress(Action<NwcProgress> report) : IProgress<NwcProgress>
     {
         public void Report(NwcProgress value) => report(value);

@@ -9,6 +9,235 @@ namespace NwcIO.Tests;
 public class GlbExportTests
 {
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SaveGlb_ConvertsPositionsBoundsAndNormals(bool yUp)
+    {
+        var document = NwcDocument.Create(meshes: [new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 10), new(1000, 0, 0), new(0, 1000, 10), new(1000, 1000, 0)],
+            Indices = [0, 1, 2],
+        }]);
+        using var output = new MemoryStream();
+
+        document.SaveGlb(output, new NwcGlbExportOptions
+        {
+            ConvertZUpToYUp = yUp,
+            UnitScale = yUp ? 1 : 0.001,
+        });
+
+        byte[] glb = output.ToArray();
+        using var json = ReadGlbJson(glb);
+        var root = json.RootElement;
+        var positions = GlbAccessor(root, 0, TrianglesMode, "POSITION");
+        if (yUp)
+        {
+            Assert.Equal(new Vector3d(0, 10, 0), ReadGlbVector(glb, root, positions, 0));
+            Assert.Equal(new Vector3d(0, 0, -1000), ReadJsonVector(positions.GetProperty("min")));
+            Assert.Equal(new Vector3d(1000, 10, 0), ReadJsonVector(positions.GetProperty("max")));
+            var normals = GlbAccessor(root, 0, TrianglesMode, "NORMAL");
+            var normal = ReadGlbVector(glb, root, normals, 0);
+            Assert.Equal(0.0099995, normal.X, 7);
+            Assert.Equal(0.99995, normal.Y, 6);
+            Assert.Equal(0, normal.Z);
+        }
+        else
+        {
+            Assert.Equal(new Vector3d(1, 0, 0), ReadGlbVector(glb, root, positions, 1));
+            Assert.Equal(Vector3d.Zero, ReadJsonVector(positions.GetProperty("min")));
+            var max = positions.GetProperty("max");
+            Assert.Equal(1f, max[0].GetSingle());
+            Assert.Equal(1f, max[1].GetSingle());
+            Assert.Equal(0.01f, max[2].GetSingle());
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SaveGlb_RecenterUsesDoublePrecisionBoundsOfExportedAssembly(bool worldCoordinates)
+    {
+        const double east = 1e12;
+        var first = NwcDocument.Create(meshes: [new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(0, 0, 0), new(2, 0, 0), new(0, 2, 0)],
+            Indices = [0, 1, 2],
+            Transform = new NwcTransform { Id = 1, Translation = new(east, 0, 0) },
+        }]);
+        var second = NwcDocument.Create(meshes:
+        [
+            new NwcMesh
+            {
+                Id = 2,
+                Vertices = [new(4, 2, 0), new(6, 2, 0)],
+                Indices = [],
+                LineIndices = [0, 1],
+                Transform = new NwcTransform { Id = 2, Translation = new(east, 0, 0) },
+            },
+            new NwcMesh
+            {
+                Id = 3,
+                Vertices = [new(50, 0, 0), new(100, 0, 0)],
+                Indices = [],
+                LineIndices = [0, 2],
+            },
+        ]);
+        var assembly = NwcAssembly.Create("Recenter", first, second);
+        using var output = new MemoryStream();
+
+        assembly.SaveGlb(output, new NwcGlbExportOptions
+        {
+            WorldCoordinates = worldCoordinates,
+            RecenterToOrigin = true,
+            ExportCameras = false,
+        });
+
+        byte[] glb = output.ToArray();
+        using var json = ReadGlbJson(glb);
+        var scene = json.RootElement;
+        Assert.Equal(2, Assert.Single(scene.GetProperty("scenes")[0].GetProperty("nodes").EnumerateArray()).GetInt32());
+        var root = scene.GetProperty("nodes")[2];
+        Assert.Equal(new Vector3d(worldCoordinates ? east + 3 : 3, 1, 0), ReadJsonVector(root.GetProperty("translation")));
+        Assert.Collection(root.GetProperty("children").EnumerateArray(),
+            child => Assert.Equal(0, child.GetInt32()), child => Assert.Equal(1, child.GetInt32()));
+        Assert.False(scene.TryGetProperty("cameras", out _));
+        Assert.Equal(new Vector3d(-3, -1, 0), ReadGlbVector(glb, scene, GlbAccessor(scene, 0, TrianglesMode, "POSITION"), 0));
+        Assert.Equal(new Vector3d(3, 1, 0), ReadGlbVector(glb, scene, GlbAccessor(scene, 1, LinesMode, "POSITION"), 1));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SaveGlb_ConvertsCameraPoseAndProjectionWithGeometry(bool recenter)
+    {
+        var camera = new NwcCamera
+        {
+            Position = new(3000, 4000, 5000),
+            Rotation = new(0, Math.Sqrt(0.5), 0, Math.Sqrt(0.5)),
+            NearDistance = 100,
+            FarDistance = 50_000,
+            AspectRatio = 2,
+            FocalDistance = 4000,
+        };
+        var document = NwcDocument.Create(meshes: [new NwcMesh
+        {
+            Id = 1,
+            Vertices = [new(1000, 1000, 3000), new(3000, 1000, 3000), new(1000, 3000, 3000)],
+            Indices = [0, 1, 2],
+        }], savedViewpoints:
+        [
+            new NwcSavedViewpoint { Name = "Perspective", Camera = camera },
+            new NwcSavedViewpoint { Name = "Orthographic", Camera = camera with { Projection = NwcCameraProjection.Orthographic } },
+        ]);
+        using var output = new MemoryStream();
+
+        document.SaveGlb(output, new NwcGlbExportOptions
+        {
+            ConvertZUpToYUp = true,
+            UnitScale = 0.001,
+            RecenterToOrigin = recenter,
+        });
+
+        using var json = ReadGlbJson(output.ToArray());
+        var scene = json.RootElement;
+        var nodes = scene.GetProperty("nodes");
+        var offset = recenter ? ReadJsonVector(nodes[3].GetProperty("translation")) : Vector3d.Zero;
+        Assert.Equal(recenter ? new Vector3d(2, 3, -2) : Vector3d.Zero, offset);
+        for (int i = 0; i < 2; i++)
+        {
+            var node = nodes[1 + i];
+            Assert.Equal(i, node.GetProperty("camera").GetInt32());
+            var eye = ReadJsonVector(node.GetProperty("translation"));
+            Assert.Equal(recenter ? new Vector3d(1, 2, -2) : new Vector3d(3, 5, -4), eye);
+            Assert.Equal(new Vector3d(3, 5, -4), eye + offset);
+            var rotation = node.GetProperty("rotation");
+            var rotated = new NwcCamera
+            {
+                Rotation = new(rotation[0].GetDouble(), rotation[1].GetDouble(), rotation[2].GetDouble(), rotation[3].GetDouble()),
+            };
+            Assert.True(rotated.Rotation.IsNormalized());
+            Assert.InRange((rotated.Direction - new Vector3d(-1, 0, 0)).Length, 0, 1e-12);
+            Assert.InRange((rotated.Up - new Vector3d(0, 0, -1)).Length, 0, 1e-12);
+        }
+
+        var cameras = scene.GetProperty("cameras");
+        var perspective = cameras[0].GetProperty("perspective");
+        var orthographic = cameras[1].GetProperty("orthographic");
+        Assert.Equal(2, perspective.GetProperty("aspectRatio").GetDouble());
+        Assert.Equal(Math.PI / 3, perspective.GetProperty("yfov").GetDouble(), 12);
+        Assert.Equal(2, orthographic.GetProperty("xmag").GetDouble());
+        Assert.Equal(1, orthographic.GetProperty("ymag").GetDouble());
+        foreach (var projection in new[] { perspective, orthographic })
+        {
+            Assert.Equal(0.1, projection.GetProperty("znear").GetDouble());
+            Assert.Equal(50, projection.GetProperty("zfar").GetDouble());
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void SaveGlb_RejectsInvalidUnitScaleBeforeWriting(double scale)
+    {
+        using var output = new MemoryStream();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            NwcDocument.Create().SaveGlb(output, new NwcGlbExportOptions { UnitScale = scale }));
+        Assert.Equal(0, output.Length);
+    }
+
+    [Fact]
+    public async Task SaveGlb_OptionsWorkAcrossPathStreamAndAsyncOverloads()
+    {
+        var document = NwcDocument.Create(meshes: [TriangleMesh(1, null)]);
+        var assembly = NwcAssembly.Create("Overloads", document);
+        var options = new NwcGlbExportOptions { ConvertZUpToYUp = true, UnitScale = 0.001 };
+        using var expected = new MemoryStream();
+        using var asyncStream = new MemoryStream();
+        using var assemblyStream = new MemoryStream();
+        string path = Path.Combine(Path.GetTempPath(), $"nwcio-test-{Guid.NewGuid():N}.glb");
+        try
+        {
+            document.SaveGlb(expected, options);
+            document.SaveGlb(path, options);
+            Assert.Equal(expected.ToArray(), File.ReadAllBytes(path));
+            await document.SaveGlbAsync(asyncStream, options);
+            Assert.Equal(expected.ToArray(), asyncStream.ToArray());
+            await document.SaveGlbAsync(path, options);
+            Assert.Equal(expected.ToArray(), File.ReadAllBytes(path));
+
+            assembly.SaveGlb(assemblyStream, options);
+            assembly.SaveGlb(path, options);
+            Assert.Equal(assemblyStream.ToArray(), File.ReadAllBytes(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static JsonElement GlbAccessor(JsonElement root, int mesh, int mode, string attribute) =>
+        root.GetProperty("accessors")[PrimitiveOf(root, mesh, mode).GetProperty("attributes").GetProperty(attribute).GetInt32()];
+
+    private static Vector3d ReadGlbVector(byte[] glb, JsonElement root, JsonElement accessor, int index)
+    {
+        var view = root.GetProperty("bufferViews")[accessor.GetProperty("bufferView").GetInt32()];
+        int start = 28 + BinaryPrimitives.ReadInt32LittleEndian(glb.AsSpan(12))
+            + view.GetProperty("byteOffset").GetInt32() + accessor.GetProperty("byteOffset").GetInt32() + index * 12;
+        return new Vector3d(
+            BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(start)),
+            BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(start + 4)),
+            BinaryPrimitives.ReadSingleLittleEndian(glb.AsSpan(start + 8)));
+    }
+
+    private static Vector3d ReadJsonVector(JsonElement array) =>
+        new(array[0].GetDouble(), array[1].GetDouble(), array[2].GetDouble());
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void GlbExporter_WriteFile_KeepsDestinationOnFailure(bool existing)

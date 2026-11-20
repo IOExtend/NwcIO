@@ -21,7 +21,7 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 | `NwcPropertyRecord` | Property record (`Class`, `Name`, `Value`, `ValueType`, `Tag`, `FirstInt`; typed `IntValue`, `DoubleValue`, `ReferenceId`, `ReferenceTag`, `ReferenceClass`). On node properties of the strict path, `Class` is the property tab name (category, for example `Element`), `Name` the property name and `FirstInt` the key object id. Records scanned from property streams (`NwcDocument.PropertyRecords`, and node properties of other files) keep their internal class names. `TabInternalName` and `InternalName` are the internal names of the tab and the key on strict-path node properties, null on scanned records. |
 | `NwcPropertyTab` | One property tab of a strict-path node (`NwcNode.PropertyTabs`, in stored slot order): display `Name`, `InternalName`, `Properties`. A tab object shared by several nodes is one instance. |
 | `NwcMesh` | Triangle mesh with vertices, indices, `Normals` aligned with vertices, `LineIndices` for polylines, world-space transform, bounding box, and material. Model files hold one mesh per placed fragment; `Id` is the fragment index. Meshes of fragments that share a geometry record share their `Vertices`, `Indices`, `Normals`, `LineIndices` and `LineColors` arrays; do not mutate them. `GeometryIndex` (the geometry record; −1 outside model files) and `LineColors` (per vertex, line meshes of model files). |
-| `NwcMaterial` | Colour and PBR material. On the strict path, with meshes and the scene tree, each mesh's material is decoded from the file: `Name` is the name of the nearest class-31 material on its leaf or an ancestor (`Default` when there is none or it is empty), `Color` is the diffuse colour of its appearance with alpha `1 - transparency`, each channel rounded to a byte (halves away from zero), and `Roughness` and `Metallic` keep their defaults (the file's shininess is not mapped); one material per distinct name and colour bytes, `Id` in order of first use, and `NwcDocument.Materials` lists them; `NwcNode.Material` stays null. Without the scene tree there are no materials. Elsewhere nothing is decoded from material data in the file: names come from material references in property records and the colour from a `revit_Color` record that follows the definition. A material without that record gets a neutral grey and `IsInferred = true`; no colour is guessed from the name. Meshes are not matched to materials by name or size: every mesh without a material shares one neutral `Default Material` with `IsInferred = true` (a new instance per document, listed in `NwcDocument.Materials`). `IsInferred` is `true` for a colour or material that is not read from the file. |
+| `NwcMaterial` | Colour and PBR material. On the strict path, `Name` comes from the nearest class-31 material on the mesh's leaf or an ancestor (`Default` when absent or empty), `Color` comes from the fragment's diffuse appearance with alpha `1 - transparency`, and `DiffuseTexture` comes from its Generic diffuse map. Each colour channel is rounded to a byte (halves away from zero). `Roughness` and `Metallic` keep their defaults. `NwcDocument.Materials` lists distinct name, RGBA and texture combinations in order of first use. With `BuildSceneTree = false`, appearances with a diffuse image still supply a material named `Default`. Elsewhere names come from material references in property records and the colour from a `revit_Color` record that follows the definition. A material without that record gets a neutral grey and `IsInferred = true`. Meshes without a material share one neutral `Default Material` per document with `IsInferred = true`. |
 | `NwcTransform` | Parsed pose/transform records with quaternion rotation, uniform `Scale` (negative for a mirrored placement) and affine 4×4 matrix conversion. Model files hold one transform per fragment, with the same `Id` as its mesh. |
 | `NwcFileInfo` | Source path, loader plugin, export timestamp from partition header, format version, text encoding, and chunk marker from section headers. |
 | `NwcDbCacheDirectory` & `NwcDbCacheEntry` | The `LcOpDBCache` directory (`NwcDocument.DbCache`, null when the file has none or it cannot be parsed). `DatabaseName` is the name of the `LcOpDBCache` entry or `""`; `Entries` lists every entry in file order and `Find` looks one up by segment name (exact or suffix, case-insensitive). Each entry has `Name`, `Flags`, `Offset` (an absolute file offset), `Length` and `Extra` (`a + b*2^32` of its two trailing 32-bit fields). |
@@ -45,6 +45,30 @@ use asynchronous reads and writes for file and stream overloads and pass the can
 to the underlying I/O. Parsing, serialization and compression perform synchronous CPU work between I/O operations.
 Stream overloads leave the supplied stream open.
 
+The document's `SaveObjAsync`, `SaveGlbAsync`, `SaveIfcAsync`, `SaveViewpointsBcfAsync`,
+`SaveViewpointsXmlAsync` and `SaveHtmlViewerAsync` accept file paths or streams and a
+`CancellationToken`. OBJ and IFC also accept a `TextWriter`. The compatibility formatters
+run on a worker thread and forward writes and flushes to the destination's async methods with
+the token. Successful path exports replace the destination atomically. Cancellation may leave
+partial output in a caller-owned stream or writer, which remains open.
+
+`NwcAssembly.LoadFromDirectoryAsync` and `NwcAssembly.OpenNwfAsync` read model files asynchronously
+and pass cancellation through to each read. They load models sequentially in the same order as their
+synchronous counterparts. Directory discovery and reference resolution use synchronous filesystem metadata.
+The `load-models` phase reports each folder model, or the primary NWF and each of its reference entries,
+including missing, duplicate and unsupported references.
+
+`NwcDocument.LengthUnit` and `MetresPerUnit` describe the original coordinates. Set
+`NwcReaderOptions.LengthUnit` to override inference. Clash detection, proximity grouping,
+clash matrix cells and revision diff all interpret tolerances in the input coordinate units.
+Grid locations and length measurements keep these values and display the corresponding unit
+symbol. The measurement overloads accept a unit when their input is a standalone point or mesh.
+IFC converts known coordinates to its selected output unit. BCF camera positions and orthogonal
+view scales are exported in metres, using the original coordinates when the unit is unknown.
+Viewpoint XML labels default to the document's unit when known and accept an explicit label.
+`NwcAssembly.HasMixedLengthUnits` and the `MixedLengthUnits` diagnostic report mixed units.
+Assembly geometry retains its original coordinates.
+
 ## Coordination & Clash Detection (`NwcIO.Model.Clash`)
 
 | Type | Description |
@@ -66,6 +90,10 @@ total on completion. An empty selection reports `0/0` once. Cancellation is chec
 and during triangle comparisons, including clearance tests. If cancelled, the run throws
 `OperationCanceledException` and discards the results it added, preserving prior results and groups.
 The convenience methods register a test only after it completes.
+
+Clash tests and matrix cells use a spatial index to find candidate pairs in selection order.
+Each run reuses transformed vertices, and hard clash tests cull triangles outside the shared
+region before testing for intersection. Proximity grouping finds nearby clashes with a spatial grid.
 
 ## 4D TimeLiner, Selection Sets & Appearance (`NwcIO.Model.TimeLiner`, `.Sets`, `.Appearance`)
 
@@ -100,9 +128,35 @@ The convenience methods register a test only after it completes.
 | Type | Description |
 |---|---|
 | `NwcDocument.SaveIfc` / `NwcAssembly.SaveIfc` | ISO 10303-21 STEP export supporting IFC2x3 Coordination View and modern IFC4 mesh tessellation (`IfcTriangulatedFaceSet`), configured via `NwcIfcExportOptions` (`NwcIfcSchemaVersion`, `NwcIfcLengthUnit`). Frozen: bug fixes only. |
-| `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. Frozen: bug fixes only. |
+| `NwcDocument.SaveGlb` / `SaveObj`, `NwcAssembly.SaveGlb` / `SaveObj` | Binary glTF 2.0 and Wavefront OBJ geometry export entry points. `NwcGlbExportOptions` configures GLB path and stream exports, including `NwcDocument.SaveGlbAsync`. |
 | `NwcDocument.SaveHtmlViewer` / `NwcAssembly.SaveHtmlViewer` | Interactive single-file 3D WebGL viewer exporter with 4D schedule playback (`NwcHtmlViewerExporter`, `NwcHtmlViewerOptions`). Frozen: bug fixes only. |
 | `NwcJsonExportOptions` | Indentation and content toggles for JSON export (`NwcDocument` and the CLI). |
+
+In the HTML viewer, use Tab to reach the viewpoint, clash, hierarchy and set buttons, then Enter or
+Space to activate them. With focus on the 3D model view, the arrow keys orbit, + and - zoom, and
+Home resets the camera. Escape clears the current measurement while Measure is active.
+
+OBJ saves to a path, including `SaveObjAsync`, write a sibling `<name>.mtl` when exported geometry
+has materials. `NwcMesh.TexCoords` holds optional per-vertex UVs with a lower-left origin. OBJ
+writes `vt` and indexes it from faces, including when writing to a stream or `TextWriter`.
+The material library stores diffuse RGB (`Kd`), opacity (`d`), and `map_Kd` for a diffuse image.
+GLB writes `TEXCOORD_0` with a top-left origin, and `baseColorTexture` for external PNG or JPEG images.
+`NwcMaterial.DiffuseTexture` holds the image reference, including any XRef remapping. Exporters
+emit references to local paths. Keep the referenced images available at those paths. Relative
+references are interpreted relative to the exported asset. Embedded image payloads and other
+material channels remain outside this support.
+An OBJ save with materials requires a sibling filename that can be used in an `mtllib` directive.
+The export rejects a symbolic link at the material library path.
+
+Use `NwcGlbExportOptions` to set the GLB coordinate system and camera options.
+
+| Option | Default | Effect |
+|---|---|---|
+| `WorldCoordinates` | `true` | Bake mesh placements into the exported vertices. Set to `false` to export local mesh vertices. Saved cameras start in document coordinates in either mode. |
+| `ConvertZUpToYUp` | `false` | Rotate mesh positions, normals and cameras via `(x, y, z) → (x, z, -y)`. |
+| `UnitScale` | `1.0` | Multiply positions and camera lengths by a positive finite factor. Use `0.001` for millimetres to metres, or use `NwcDocument.MetresPerUnit` when the source unit is known. |
+| `RecenterToOrigin` | `false` | Subtract the exported mesh bounds' center in double precision before packing vertices as float32. A shared root node restores the offset in exported axes and units, including for saved cameras. |
+| `ExportCameras` | `true` | Include cameras from saved viewpoints. |
 
 GLB geometry export requires a writable system temporary directory for its BIN chunk. The
 exporter removes the temporary file when it closes. A path-based save replaces the destination

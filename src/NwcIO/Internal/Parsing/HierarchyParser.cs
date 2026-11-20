@@ -57,9 +57,9 @@ internal static class HierarchyParser
     }
 
     /// <summary>Reads a class-185 body (material JSON with embedded files, docs/format-notes.md §2.2), which the fragments stream holds too.</summary>
-    internal static object ReadMaterialJson(LcObjectReader reader)
+    internal static object ReadMaterialJson(LcObjectReader reader, bool readTexture = false)
     {
-        reader.ReadString();
+        string? json = reader.ReadString();
         reader.ReadString();
         int count = reader.ReadCount(12);
         for (int i = 0; i < count; i++)
@@ -79,7 +79,7 @@ internal static class HierarchyParser
             }
         }
 
-        return Dropped;
+        return readTexture && MaterialTextureParser.ReadDiffusePath(json) is { } path ? path : Dropped;
     }
 
     // IFC_GUID (-1019000) of the element's own tab, when it has the IFC form: 22 characters of the IFC alphabet, the first 0-3 (128 bits).
@@ -135,6 +135,7 @@ internal static class HierarchyParser
                 Name = node.Name,
                 Class = node.Class,
                 Tag = node.Tag,
+                IsHidden = node.IsHidden,
                 Parent = parent,
                 MaterialName = node.MaterialName ?? parent.MaterialName,
                 Transform = node.Transform,
@@ -216,6 +217,7 @@ internal static class HierarchyParser
         string Name,
         string Class,
         int X,
+        bool IsHidden,
         string? MaterialName,
         NwcTransform? Transform,
         List<NwcPropertyTab> Tabs,
@@ -329,7 +331,7 @@ internal static class HierarchyParser
 
             string? name = _reader.ReadString();
             var username = ReadUsername();
-            _reader.ReadInt32();
+            bool hidden = (_reader.ReadInt32() & 1) != 0;
             int x = _reader.ReadInt32();
             if (x < 0 || x > _guidCount)
             {
@@ -372,7 +374,7 @@ internal static class HierarchyParser
             }
 
             var (size, propertyReferences, height) = Measure(children, ownProperties);
-            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, materialName, transform, tabs, hyperlinks, ownProperties, children, size, propertyReferences, height);
+            return new Node(classId, name ?? username.Display ?? "", username.Internal ?? "", x, hidden, materialName, transform, tabs, hyperlinks, ownProperties, children, size, propertyReferences, height);
         }
 
         // The NODE32 trailer (docs/format-notes.md §2.2), read and dropped: [i32 2][i32] 3 x f64 [i32][str loader plugin][i32 format version]

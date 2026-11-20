@@ -82,23 +82,25 @@ public sealed class ReaderCancellationTests
         Assert.Equal(["read-container"], progress.Reports.Select(p => p.Phase));
     }
 
-    [Fact]
-    public void LoadFromDirectory_CanceledBetweenModels_StopsAfterFirstModel()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LoadFromDirectory_CanceledBetweenModels_StopsAfterFirstModel(bool asynchronous)
     {
         string directory = TempDirectory();
         try
         {
-            foreach (var name in new[] { "a.nwc", "b.nwc", "c.nwc" })
-            {
-                NwcDocument.Create().Save(Path.Combine(directory, name));
-            }
+            NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+            File.WriteAllText(Path.Combine(directory, "b.nwc"), "Invalid model");
             using var cancellation = new CancellationTokenSource();
             var progress = new CollectingProgress { OnReport = p => { if (p.Phase == "load-models") cancellation.Cancel(); } };
 
-            Assert.Throws<OperationCanceledException>(() =>
-                NwcAssembly.LoadFromDirectory(directory, "*.nwc", null, progress, cancellation.Token));
+            var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => asynchronous
+                ? NwcAssembly.LoadFromDirectoryAsync(directory, progress: progress, cancellationToken: cancellation.Token)
+                : Task.FromResult(NwcAssembly.LoadFromDirectory(directory, "*.nwc", null, progress, cancellation.Token)));
 
-            Assert.Single(progress.Reports, p => p.Phase == "load-models");
+            Assert.Equal(cancellation.Token, error.CancellationToken);
+            Assert.Equal(new NwcProgress("load-models", 1, 2), Assert.Single(progress.Reports));
         }
         finally
         {
@@ -106,23 +108,34 @@ public sealed class ReaderCancellationTests
         }
     }
 
-    [Fact]
-    public void OpenNwf_CanceledBetweenReferences_StopsBeforeNextReference()
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    public async Task OpenNwf_CanceledBetweenModels_StopsBeforeNextReference(bool asynchronous, int cancelAfter)
     {
         string directory = TempDirectory();
         try
         {
             string nwf = Path.Combine(directory, "fed.nwf");
-            WriteNwf(nwf, "missing.nwc", "a.nwc");
+            WriteNwf(nwf, "a.nwc", "b.nwc");
             NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+            File.WriteAllText(Path.Combine(directory, "b.nwc"), "Invalid model");
             using var cancellation = new CancellationTokenSource();
-            var progress = new CollectingProgress { OnReport = _ => cancellation.Cancel() };
+            var progress = new CollectingProgress
+            {
+                OnReport = report => { if (report.Completed == cancelAfter) cancellation.Cancel(); },
+            };
 
-            Assert.Throws<OperationCanceledException>(() =>
-                NwcAssembly.OpenNwf(nwf, null, progress, cancellation.Token));
+            var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => asynchronous
+                ? NwcAssembly.OpenNwfAsync(nwf, progress: progress, cancellationToken: cancellation.Token)
+                : Task.FromResult(NwcAssembly.OpenNwf(nwf, null, progress, cancellation.Token)));
 
-            // Only the primary document was reported: the unresolved reference was never visited.
-            Assert.Single(progress.Reports);
+            Assert.Equal(cancellation.Token, error.CancellationToken);
+            Assert.Equal(
+                Enumerable.Range(1, cancelAfter).Select(completed => new NwcProgress("load-models", completed, 3)),
+                progress.Reports);
         }
         finally
         {
@@ -130,8 +143,10 @@ public sealed class ReaderCancellationTests
         }
     }
 
-    [Fact]
-    public void OpenNwf_ProgressReachesTotalWhenReferencesAreNotLoaded()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenNwf_ProgressReachesTotalWhenReferencesAreNotLoaded(bool asynchronous)
     {
         string directory = TempDirectory();
         try
@@ -142,9 +157,11 @@ public sealed class ReaderCancellationTests
             File.WriteAllText(Path.Combine(directory, "tex.png"), "x");
             var progress = new CollectingProgress();
 
-            var assembly = NwcAssembly.OpenNwf(nwf, null, progress, CancellationToken.None);
+            var assembly = asynchronous
+                ? await NwcAssembly.OpenNwfAsync(nwf, progress: progress)
+                : NwcAssembly.OpenNwf(nwf, null, progress, CancellationToken.None);
 
-            Assert.Equal(2, assembly.Models.Count);
+            Assert.Equal([nwf, Path.Combine(directory, "a.nwc")], assembly.Models.Select(model => model.GetLoadedPath()));
             Assert.Single(assembly.UnresolvedXRefs);
             Assert.Single(assembly.SkippedXRefs);
             Assert.Equal(
@@ -190,17 +207,77 @@ public sealed class ReaderCancellationTests
         }
     }
 
-    [Fact]
-    public async Task LoadFromDirectoryAsync_LoadsModels()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LoadAssemblyAsync_PreCancelled_ReturnsCancelledTask(bool nwf)
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var progress = new CollectingProgress();
+
+        var task = nwf
+            ? NwcAssembly.OpenNwfAsync("", progress: progress, cancellationToken: cancellation.Token)
+            : NwcAssembly.LoadFromDirectoryAsync("", progress: progress, cancellationToken: cancellation.Token);
+
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        Assert.True(task.IsCanceled);
+        Assert.Empty(progress.Reports);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LoadAssemblyAsync_CancelledAtLastModel_ReturnsCancelledTask(bool nwf)
     {
         string directory = TempDirectory();
         try
         {
-            NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+            string path = Path.Combine(directory, "fed.nwf");
+            if (nwf)
+            {
+                WriteNwf(path);
+            }
+            else
+            {
+                NwcDocument.Create().Save(Path.Combine(directory, "a.nwc"));
+            }
 
-            var assembly = await NwcAssembly.LoadFromDirectoryAsync(directory);
+            using var cancellation = new CancellationTokenSource();
+            var progress = new CollectingProgress { OnReport = _ => cancellation.Cancel() };
+            var task = nwf
+                ? NwcAssembly.OpenNwfAsync(path, progress: progress, cancellationToken: cancellation.Token)
+                : NwcAssembly.LoadFromDirectoryAsync(directory, progress: progress, cancellationToken: cancellation.Token);
 
-            Assert.Single(assembly.Models);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+            Assert.True(task.IsCanceled);
+            Assert.Equal(new NwcProgress("load-models", 1, 1), Assert.Single(progress.Reports));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LoadFromDirectoryAsync_LoadsModelsInPathOrder()
+    {
+        string directory = TempDirectory();
+        try
+        {
+            var b = Path.Combine(directory, "b.nwc");
+            var a = Path.Combine(directory, "a.nwc");
+            NwcDocument.Create().Save(b);
+            NwcDocument.Create().Save(a);
+            var progress = new CollectingProgress();
+
+            var assembly = await NwcAssembly.LoadFromDirectoryAsync(directory,
+                options: new NwcReaderOptions { KeepStreamCatalog = false }, progress: progress);
+
+            Assert.Equal([a, b], assembly.Models.Select(model => model.GetLoadedPath()));
+            Assert.All(assembly.Models, model => Assert.Empty(model.Container.Streams));
+            Assert.Equal([new NwcProgress("load-models", 1, 2), new NwcProgress("load-models", 2, 2)], progress.Reports);
         }
         finally
         {

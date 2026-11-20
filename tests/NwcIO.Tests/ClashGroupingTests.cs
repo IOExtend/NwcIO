@@ -221,6 +221,21 @@ public sealed class ClashGroupingTests
     }
 
     [Fact]
+    public void GroupByProximity_KeepsTransitiveClustersAndInputOrderAcrossCells()
+    {
+        var test = new NwcClashTest("Grid");
+        double[] coordinates = [2, -1, 30, 0, 1, 31, 40, 1e20, 1e20];
+        var clashes = coordinates.Select((x, i) => CreateClash($"Clash {i}", new Vector3d(x, 0, 0), 0)).ToArray();
+        test.Results.AddRange(clashes);
+
+        Assert.Equal(3, NwcClashGrouper.GroupByProximity(test, clusterDistance: 1));
+        Assert.Equal([clashes[0], clashes[1], clashes[3], clashes[4]], test.Groups[0].Clashes);
+        Assert.Equal([clashes[2], clashes[5]], test.Groups[1].Clashes);
+        Assert.Equal([clashes[7], clashes[8]], test.Groups[2].Clashes);
+        Assert.Same(clashes[6], Assert.Single(test.Results));
+    }
+
+    [Fact]
     public void GroupByPrimaryElement_BundlesByItem1()
     {
         var test = new NwcClashTest("ElementTest");

@@ -14,7 +14,11 @@ public static class NwcXmlViewpointSerializer
     private const string SchemaLocation = "http://download.autodesk.com/us/navisworks/schemas/nw-exchange-12.0.xsd";
 
     /// <summary>Serializes a list of saved viewpoints to a Navisworks exchange XML string.</summary>
-    public static string Serialize(IEnumerable<NwcSavedViewpoint> viewpoints, string units = "m")
+    public static string Serialize(IEnumerable<NwcSavedViewpoint> viewpoints, string units = "m") =>
+        Serialize(viewpoints, units, default);
+
+    internal static string Serialize(
+        IEnumerable<NwcSavedViewpoint> viewpoints, string units, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(viewpoints);
 
@@ -23,7 +27,11 @@ public static class NwcXmlViewpointSerializer
             new XElement("exchange",
                 new XAttribute(XNamespace.None + "units", units),
                 new XElement("viewpoints",
-                    viewpoints.Select(SerializeViewpoint))));
+                    viewpoints.Select(viewpoint =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        return SerializeViewpoint(viewpoint);
+                    }))));
 
         return doc.Declaration + Environment.NewLine + doc.ToString();
     }

@@ -45,6 +45,7 @@ internal static class Program
           --clash-xml <file.xml> Run clash detection and export Navisworks Clash Report XML (.xml)
           --clash-bcf <file.bcfzip> Run clash detection and export buildingSMART BCF 2.1 archive (.bcfzip)
           --clash-matrix <file.json> Execute multi-discipline coordination matrix and export JSON report
+                                      Matrix tolerances are in document units
           --clash-matrix-md <file.md> Export clash matrix coordination report as Markdown table
           --clash-matrix-bcf <file.bcfzip> Export clash matrix conflicts to buildingSMART BCF 2.1 zip
           --clash-group <mode> Group clashes: proximity, element, grid, layer

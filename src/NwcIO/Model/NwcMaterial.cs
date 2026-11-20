@@ -12,6 +12,9 @@ public sealed class NwcMaterial
     /// <summary>Base diffuse / albedo RGBA color.</summary>
     public RgbaColor Color { get; set; } = RgbaColor.White;
 
+    /// <summary>Optional diffuse image reference. The remapped path takes precedence over the original.</summary>
+    public NwcXRef? DiffuseTexture { get; set; }
+
     /// <summary>PBR metallic factor [0.0 .. 1.0].</summary>
     public float Metallic { get; set; } = 0.1f;
 

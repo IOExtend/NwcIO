@@ -6,7 +6,7 @@ namespace NwcIO.Model.Clash;
 /// </summary>
 internal static class NwcTriangleIntersection
 {
-    private const double Epsilon = 1e-7;
+    internal const double Epsilon = 1e-7;
 
     /// <summary>
     /// Tests whether two 3D triangles intersect and returns the approximate intersection point.

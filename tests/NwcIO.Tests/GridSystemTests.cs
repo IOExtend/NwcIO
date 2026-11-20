@@ -37,7 +37,7 @@ public sealed class GridSystemTests
     [Fact]
     public void GridSystem_AfterDirectLineAddition_UpdatesIntersectionsAndLocation()
     {
-        var grids = new NwcGridSystem();
+        var grids = new NwcGridSystem { LengthUnit = NwcLengthUnit.Meters };
         grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
         grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(30, 0, 0));
         Assert.Single(grids.GetIntersections());
@@ -54,7 +54,7 @@ public sealed class GridSystemTests
     [Fact]
     public void GridSystem_AfterDirectLineRemoval_UpdatesIntersectionsAndLocation()
     {
-        var grids = new NwcGridSystem();
+        var grids = new NwcGridSystem { LengthUnit = NwcLengthUnit.Meters };
         var line = grids.AddLine("A", new Vector3d(0, -10, 0), new Vector3d(0, 10, 0));
         grids.AddLine("B", new Vector3d(20, -10, 0), new Vector3d(20, 10, 0));
         grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(30, 0, 0));
@@ -92,7 +92,7 @@ public sealed class GridSystemTests
     [Fact]
     public void GridSystem_FindsNearestAndFormatsLocation()
     {
-        var grids = new NwcGridSystem("Building Grids");
+        var grids = new NwcGridSystem("Building Grids") { LengthUnit = NwcLengthUnit.Meters };
         grids.AddLine("A", new Vector3d(0, -20, 0), new Vector3d(0, 20, 0));
         grids.AddLine("B", new Vector3d(6, -20, 0), new Vector3d(6, 20, 0));
         grids.AddLine("1", new Vector3d(-10, 0, 0), new Vector3d(20, 0, 0));

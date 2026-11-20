@@ -353,6 +353,25 @@ public class AssemblyTests
         Assert.Null(document.TimeLiner);
     }
 
+    [Fact]
+    public void ToDocument_PreservesExplicitNodeVisibility()
+    {
+        var source = CreateTreeModel("Model.ifc", 0, "Grid");
+        var sourceRoot = source.RootNode!;
+        sourceRoot.IsHidden = true;
+        var sourceChild = Assert.Single(sourceRoot.Children);
+        var assembly = NwcAssembly.Create("Fed", source);
+
+        var model = Assert.Single(assembly.ToDocument().RootNode!.Children);
+        var child = Assert.Single(model.Children);
+
+        Assert.True(model.IsHidden);
+        Assert.False(child.IsHidden);
+        Assert.NotSame(sourceRoot, model);
+        Assert.NotSame(sourceChild, child);
+        Assert.Same(model, child.Parent);
+    }
+
     private static NwcDocument CreateComponentModel(string sourcePath, int meshId, double offsetX)
     {
         return new NwcDocumentBuilder().SetFileInfo(sourcePath)
@@ -398,8 +417,10 @@ public class AssemblyTests
         NwcIO.Internal.Container.NwcContainerWriter.Write(fs, [xrefStream]);
     }
 
-    [Fact]
-    public void OpenNwf_ResolvesSubfoldersDeduplicatesAndReportsMissing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenNwf_ResolvesSubfoldersDeduplicatesAndReportsMissing(bool asynchronous)
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "nwcio-nwf-" + Guid.NewGuid().ToString("N"));
         string archDir = Path.Combine(tempDir, "Arch");
@@ -423,7 +444,7 @@ public class AssemblyTests
                 nowhere + "/Mech/D.nwc",            // nowhere to be found: unresolved
                 "Textures/tex.png");                // resolves but unsupported: skipped
 
-            var assembly = NwcAssembly.OpenNwf(nwfPath);
+            var assembly = asynchronous ? await NwcAssembly.OpenNwfAsync(nwfPath) : NwcAssembly.OpenNwf(nwfPath);
 
             // nwf doc + A, B, C — B must appear once despite two references.
             Assert.Equal(4, assembly.Models.Count);
