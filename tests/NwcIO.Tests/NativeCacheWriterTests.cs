@@ -102,6 +102,39 @@ public class NativeCacheWriterTests
     }
 
     [Fact]
+    public void NativeRoundTripKeepsHiddenNodesAndTheirGeometry()
+    {
+        var root = new NwcNode { Id = 1, Name = "Model", Class = "Model" };
+        var hidden = new NwcNode { Id = 2, Name = "Grid", Class = "LcRevitElement", IsHidden = true };
+        var visible = new NwcNode { Id = 3, Name = "Model line", Class = "LcRevitElement" };
+        root.Children.AddRange([hidden, visible]);
+        var document = NwcDocument.Create(
+            fileInfo: new() { LengthUnit = NwcLengthUnit.Feet },
+            rootNode: root,
+            meshes: [Line(1, hidden), Line(2, visible)]);
+        using var stream = new MemoryStream();
+        NwcWriter.WriteNative(document, stream);
+        stream.Position = 0;
+
+        var reopened = NwcDocument.Open(stream, new() { Strict = true });
+        Assert.NotNull(reopened.DbCache?.Find("LcOpShadOverridesElement"));
+        var meshes = reopened.Meshes;
+        Assert.Equal(2, meshes.Count);
+        Assert.True(Assert.Single(meshes, mesh => mesh.Node?.Name == "Grid").Node!.IsHidden);
+        Assert.False(Assert.Single(meshes, mesh => mesh.Node?.Name == "Model line").Node!.IsHidden);
+        Assert.All(meshes, mesh => Assert.Equal(2, mesh.LineIndices.Count));
+
+        static NwcMesh Line(int id, NwcNode owner) => new()
+        {
+            Id = id,
+            Node = owner,
+            Vertices = [new(0, 0, 0), new(1, 0, 0)],
+            Indices = [],
+            LineIndices = [0, 1],
+        };
+    }
+
+    [Fact]
     public void UnsupportedMeshLeavesOutputEmpty()
     {
         var root = new NwcNode { Id = 1, Name = "model.rvt", Class = "Model" };

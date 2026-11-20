@@ -17,6 +17,7 @@ internal sealed class NativeCacheModelWriter : IDisposable
     private readonly MemoryStream _geometry = new();
     private readonly List<int> _recordLengths = [];
     private readonly List<Guid> _guids = [];
+    private readonly List<int> _hiddenNodes = [];
     private readonly Dictionary<RgbaColor, int> _appearances = [];
     private readonly ILookup<NwcNode?, NwcMesh> _meshes;
     private readonly double _feetPerUnit;
@@ -44,7 +45,7 @@ internal sealed class NativeCacheModelWriter : IDisposable
         return writer.Write(document, root);
     }
 
-    private IReadOnlyList<NativeCacheSegment> Write(NwcDocument document, NwcNode root)
+    private List<NativeCacheSegment> Write(NwcDocument document, NwcNode root)
     {
         string sourceName = document.FileInfo.SourcePath ?? root.Name;
         _hierarchy.Write(1);
@@ -52,7 +53,7 @@ internal sealed class NativeCacheModelWriter : IDisposable
         _hierarchy.Write(_hierarchy.NextId());
         _hierarchy.Write(1);
         _fragments.Write(document.Meshes.Count);
-        WriteNode(root);
+        WriteNode(root, hiddenAncestor: false);
         _hierarchy.Write(1);
         long end = _hierarchy.BaseStream.Position;
         _hierarchy.BaseStream.Position = 4;
@@ -69,7 +70,7 @@ internal sealed class NativeCacheModelWriter : IDisposable
         hash.AppendData(_properties.Finish());
         byte[] identity = hash.GetHashAndReset();
 
-        return
+        List<NativeCacheSegment> segments =
         [
             Single("IOExtendNwcSource", WriteSource(document.FileInfo, sourceName)),
             // Fixed native descriptor for the triangle compression layout.
@@ -85,9 +86,24 @@ internal sealed class NativeCacheModelWriter : IDisposable
             Single(Cache + "LcOpGuidStore", WriteGuids()),
             Single("LcOpOdyFileInfoChunk", WriteFileInfo(sourceName, identity)),
         ];
+        if (_hiddenNodes.Count > 0)
+            segments.Add(Single(Cache + "LcOpShadOverridesElement", WriteVisibilityOverrides()));
+        return segments;
     }
 
-    private void WriteNode(NwcNode node)
+    private byte[] WriteVisibilityOverrides()
+    {
+        using var writer = new NativeCacheBinaryWriter();
+        writer.Write(_hiddenNodes.Count);
+        foreach (int sequence in _hiddenNodes)
+        {
+            writer.Write(sequence);
+            writer.Write(0x101); // Explicit hide override.
+        }
+        return writer.Finish();
+    }
+
+    private void WriteNode(NwcNode node, bool hiddenAncestor)
     {
         var meshes = _meshes[node];
         bool hasMeshes = meshes.Any();
@@ -107,10 +123,11 @@ internal sealed class NativeCacheModelWriter : IDisposable
         }
 
         int seq = ++_sequence;
+        if (node.IsHidden) _hiddenNodes.Add(seq);
         var properties = node.Properties.Where(IsModelProperty).GroupBy(property => property.Class).ToArray();
         var id = node.Properties.FirstOrDefault(property => property.Class == "Revit" && property.Name == "Element ID");
         bool hasId = int.TryParse(id?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int elementId) && elementId > 0;
-        WriteNodeHeader(isGroup, node.Name, node.Class, element, properties.Length + (hasId ? 1 : 0));
+        WriteNodeHeader(isGroup, node.Name, node.Class, element, properties.Length + (hasId ? 1 : 0), node.IsHidden);
         foreach (var group in properties)
         {
             _hierarchy.Write(0);
@@ -136,22 +153,23 @@ internal sealed class NativeCacheModelWriter : IDisposable
             if (hasMeshes)
             {
                 seq = ++_sequence;
-                WriteNodeHeader(false, node.Name, node.Class, 0, 0);
+                WriteNodeHeader(false, node.Name, node.Class, 0, 0, hidden: false);
             }
         }
 
+        bool hidden = hiddenAncestor || node.IsHidden;
         foreach (var mesh in meshes)
-            WriteFragment(mesh, seq);
+            WriteFragment(mesh, seq, hidden);
         foreach (var child in node.Children)
-            WriteNode(child);
+            WriteNode(child, hidden);
     }
 
-    private void WriteNodeHeader(bool group, string name, string type, int element, int propertyCount)
+    private void WriteNodeHeader(bool group, string name, string type, int element, int propertyCount, bool hidden)
     {
         _hierarchy.NewObject(group ? 53 : 22);
         _hierarchy.WriteText(name);
         WriteName(_hierarchy, name, type);
-        _hierarchy.Write(0);
+        _hierarchy.Write(hidden ? 1 : 0);
         _hierarchy.Write(element);
         _hierarchy.Write(propertyCount);
     }
@@ -172,7 +190,7 @@ internal sealed class NativeCacheModelWriter : IDisposable
         }
     }
 
-    private void WriteFragment(NwcMesh mesh, int sequence)
+    private void WriteFragment(NwcMesh mesh, int sequence, bool hidden)
     {
         if (mesh.Transform is { } transform && (transform.Rotation != Quaterniond.Identity || transform.Scale != 1))
             throw new ArgumentException("Native NWC output requires transforms with rotation and scale baked into the vertices.");
@@ -189,7 +207,7 @@ internal sealed class NativeCacheModelWriter : IDisposable
         _fragments.NewObject(13);
         _fragments.WriteDouble(radius);
         _fragments.Write(mesh.LineIndices.Count > 0 ? mesh.LineIndices.Count / 2 : mesh.TriangleCount);
-        _fragments.Write(4);
+        _fragments.Write(hidden ? 6 : 4);
         _fragments.Write(0x2100);
         _fragments.Write(sequence);
         _fragments.NewObject(14);
