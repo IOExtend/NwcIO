@@ -335,7 +335,7 @@ public sealed partial class NwcAssembly
         GlbExporter.WriteFile(AllMeshes, AllMaterials, path, worldCoordinates, "NwcIO Assembly", SavedViewpoints);
     }
 
-    /// <summary>Exports the entire federated assembly to a Wavefront OBJ file.</summary>
+    /// <summary>Exports the federated assembly as Wavefront OBJ with a sibling material library when needed.</summary>
     public void SaveObj(string path, bool worldCoordinates = true)
     {
         ObjExporter.WriteFile(AllMeshes, path, worldCoordinates, Name, GetObjModelLabel);
