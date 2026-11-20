@@ -4,14 +4,25 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-20
+
 ### Added
 
+- `NwcNode.IsHidden` reads the node visibility flag, and `NwcWriter.WriteNative` preserves hidden nodes, their geometry and the visibility overrides used by Navisworks (#282).
+- Federated assembly reads and compatibility exports offer cancellable asynchronous entry points. Clash detection also accepts cancellation and reports progress (#272, #276, #277).
 - `NwcGlbExportOptions` supports Y-up conversion, unit scaling, precision-preserving recentering and optional saved cameras in GLB exports (#45).
 
 ### Fixed
 
 - Path-based Wavefront OBJ export writes a sibling `.mtl` with diffuse colors and opacity from mesh materials (#93).
 - Read raw and quantised mesh UVs and Generic diffuse image references with XRef remapping. OBJ/MTL and GLB exports preserve the UVs and link to external diffuse images (#93).
+
+- The HTML viewer exposes keyboard access to its controls (#278).
+- Measurements and camera exports apply the model length unit (#279).
+
+### Performance
+
+- Clash detection and grouping use spatial pruning (#280).
 
 ## [0.16.0] - 2026-11-19
 
