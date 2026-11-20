@@ -4,6 +4,10 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+### Added
+
+- `NwcGlbExportOptions` supports Y-up conversion, unit scaling, precision-preserving recentering and optional saved cameras in GLB exports (#45).
+
 ### Fixed
 
 - Path-based Wavefront OBJ export writes a sibling `.mtl` with diffuse colors and opacity from mesh materials (#93).
