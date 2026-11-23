@@ -64,6 +64,28 @@ public class CliArgumentValidationTests
         Assert.StartsWith("nwcio", out2.Trim());
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("2147483648")]
+    [InlineData("1.5")]
+    [InlineData("abc")]
+    public void MaxPropertyRefs_InvalidValue_Exits1(string value)
+    {
+        var (exit, _, error) = Run("--max-property-refs", value);
+        Assert.Equal(1, exit);
+        Assert.Contains("for --max-property-refs", error);
+        Assert.Contains("Expected an integer", error);
+    }
+
+    [Fact]
+    public void MaxPropertyRefs_MissingValue_Exits1()
+    {
+        var (exit, _, error) = Run("--max-property-refs", "--report");
+        Assert.Equal(1, exit);
+        Assert.Contains("Missing argument for --max-property-refs", error);
+    }
+
     [Fact]
     public void ValueOption_ConsumingFlagOrOption_Exits1WithError()
     {

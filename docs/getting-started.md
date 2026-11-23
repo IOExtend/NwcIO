@@ -137,6 +137,14 @@ doc.SaveHtmlViewer("interactive_site.html", new NwcHtmlViewerOptions
 
 ## CLI Usage
 
+The DbCache scene tree reader allows 134,217,728 property and property tab references by default.
+Each occurrence of a shared node contributes its references to the total. Use `--max-property-refs` with a positive
+32-bit integer to change the limit for a run. A higher limit can increase memory use.
+
+```bash
+nwcio model.nwd model.json --no-meshes --no-materials --no-transforms --max-property-refs 268435456 --report
+```
+
 Run standard coordination and export tasks from your terminal or CI/CD pipelines. Except `--report`, the commands below use frozen features (bug fixes only):
 
 ```bash

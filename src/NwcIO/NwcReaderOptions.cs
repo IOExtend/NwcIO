@@ -3,6 +3,8 @@ namespace NwcIO;
 /// <summary>Options controlling what <see cref="NwcDocument.Open"/> reads and keeps.</summary>
 public sealed class NwcReaderOptions
 {
+    private int _maxExpandedPropertyReferences = Internal.Parsing.HierarchyParser.DefaultMaxExpandedPropertyReferences;
+
     public static NwcReaderOptions Default { get; } = new();
 
     /// <summary>Parse the scene-tree/property streams (default: true).</summary>
@@ -57,6 +59,22 @@ public sealed class NwcReaderOptions
     /// <see cref="NwcDocument.Open(string, NwcReaderOptions?)"/> throw <see cref="InvalidDataException"/>.
     /// </summary>
     public long MaxTotalDecompressedBytes { get; set; } = Internal.Container.NwcContainerReader.DefaultMaxTotalDecompressedBytes;
+
+    /// <summary>
+    /// Positive cap on the total property records and property tabs referenced by nodes in the expanded DbCache
+    /// scene tree (default: 134,217,728). Exceeding it throws <see cref="InvalidDataException"/> before expansion.
+    /// Raising the cap can increase memory use.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The assigned value is zero or negative.</exception>
+    public int MaxExpandedPropertyReferences
+    {
+        get => _maxExpandedPropertyReferences;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
+            _maxExpandedPropertyReferences = value;
+        }
+    }
 
     /// <summary>
     /// Cap on the vertices of one geometry record on the lenient reader path (default: 200,000). Larger records are skipped.

@@ -13,8 +13,8 @@ internal static class HierarchyParser
     // shortcut: fixed cap on expanded node occurrences against crafted DAGs (real files stay near 1M); raise it if a real model needs more
     public const int MaxExpandedNodes = 1 << 23;
 
-    // shortcut: fixed cap on property and property-tab references copied into expanded nodes (every occurrence copies its node's lists, about 1 GiB at the cap), against crafted DAGs; raise it if a real model needs more
-    public const int MaxExpandedProperties = 1 << 27;
+    // Every occurrence copies its node's property and tab references, about 1 GiB at the default cap.
+    public const int DefaultMaxExpandedPropertyReferences = 1 << 27;
 
     private const string Segment = "LcOpNwdLogicalHierarchy";
     private const string PropsSegment = "LcOaPartitionProps";
@@ -43,16 +43,19 @@ internal static class HierarchyParser
     /// Gives the <c>LcOaPartitionProps</c> root streams, its table of contents excluded; called once, at the first null attribute slot or
     /// after the hierarchy tail. It returns null, or is null, when the file has no such segment; an empty list is a segment without streams.
     /// </param>
+    /// <param name="maxExpandedPropertyReferences">Caps the sum of property records and tabs across all node occurrences.</param>
     /// <returns>The nodes in preorder; [0] is the synthetic root (Id 0, Name <paramref name="rootName"/>, Class "Model", Tag 0).</returns>
     public static IReadOnlyList<NwcNode> Read(
         byte[] data,
         string rootName,
         bool includeProperties = true,
         IReadOnlyList<Guid>? guids = null,
-        Func<IReadOnlyList<byte[]>?>? partitionProps = null)
+        Func<IReadOnlyList<byte[]>?>? partitionProps = null,
+        int maxExpandedPropertyReferences = DefaultMaxExpandedPropertyReferences)
     {
         guids ??= [];
-        var (top, total) = new Parser(new LcObjectReader(data, Segment), guids.Count, partitionProps ?? (() => null)).ReadStream();
+        var (top, total) = new Parser(new LcObjectReader(data, Segment), guids.Count, partitionProps ?? (() => null),
+            maxExpandedPropertyReferences).ReadStream();
         return Expand(top, rootName, total, includeProperties, guids);
     }
 
@@ -238,6 +241,7 @@ internal static class HierarchyParser
     {
         private readonly LcObjectReader _reader;
         private readonly int _guidCount;
+        private readonly int _maxExpandedPropertyReferences;
 
         // Null in a parser of one LcOaPartitionProps stream, which holds roots and no nodes.
         private readonly Func<IReadOnlyList<byte[]>?>? _partitionProps;
@@ -246,10 +250,12 @@ internal static class HierarchyParser
         // The roots the null attribute slots take; ReadStream sets it from the header.
         private PartitionRoots? _roots;
 
-        public Parser(LcObjectReader reader, int guidCount, Func<IReadOnlyList<byte[]>?>? partitionProps)
+        public Parser(LcObjectReader reader, int guidCount, Func<IReadOnlyList<byte[]>?>? partitionProps,
+            int maxExpandedPropertyReferences = DefaultMaxExpandedPropertyReferences)
         {
             _reader = reader;
             _guidCount = guidCount;
+            _maxExpandedPropertyReferences = maxExpandedPropertyReferences;
             _partitionProps = partitionProps;
             _readBody = ReadBody;
         }
@@ -431,9 +437,9 @@ internal static class HierarchyParser
             }
 
             // Each occurrence copies its node's tab references and records, so a small DAG over a property-heavy leaf multiplies them.
-            if (propertyReferences > MaxExpandedProperties)
+            if (propertyReferences > _maxExpandedPropertyReferences)
             {
-                throw _reader.Fail($"expanded tree exceeds {MaxExpandedProperties} property references");
+                throw _reader.Fail($"expanded tree exceeds {_maxExpandedPropertyReferences} property references");
             }
 
             if (height > LcObjectReader.MaxNestingDepth)

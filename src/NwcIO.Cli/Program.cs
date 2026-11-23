@@ -75,6 +75,7 @@ internal static class Program
           --catalog          Include raw container stream catalog (offsets, sizes, kinds)
           --no-transforms    Exclude 3D transform matrices from JSON export
           --no-tree          Skip reading the scene tree and exclude it from JSON export
+          --max-property-refs <count> Cap expanded scene tree property and tab references (default: 134217728)
           --no-indent        Write compact JSON instead of pretty-printed indented JSON
           --bvh-stats        Include Bounding Volume Hierarchy (BVH) spatial index statistics
           --raycast <coords> Perform 3D raycast test: "originX,originY,originZ,dirX,dirY,dirZ"
@@ -168,6 +169,7 @@ internal static class Program
         bool includeCatalog = false;
         bool includeTransforms = true;
         bool includeTree = true;
+        int? maxExpandedPropertyReferences = null;
         bool indent = true;
         bool printReport = false;
 
@@ -211,6 +213,15 @@ internal static class Program
                     break;
                 case "--no-tree":
                     includeTree = false;
+                    break;
+                case "--max-property-refs":
+                    if (!TryConsumeValue(args, ref i, arg, out string maxRefsValue, @err)) return 1;
+                    if (!int.TryParse(maxRefsValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int maxRefs) || maxRefs <= 0)
+                    {
+                        @err.WriteLine($"Error: Invalid value '{maxRefsValue}' for {arg}. Expected an integer from 1 to 2147483647.");
+                        return 1;
+                    }
+                    maxExpandedPropertyReferences = maxRefs;
                     break;
                 case "--no-meshes":
                     readMeshes = false;
@@ -540,6 +551,10 @@ internal static class Program
             BuildSceneTree = includeTree,
             KeepStreamCatalog = includeCatalog,
         };
+        if (maxExpandedPropertyReferences is int limit)
+        {
+            readerOptions.MaxExpandedPropertyReferences = limit;
+        }
 
         if (!multipleInputs && !isDirectory && !isNwf && !isManifest)
         {
@@ -1052,7 +1067,11 @@ internal static class Program
                     @err.WriteLine($"Error: Baseline file '{explicitDiffBaseline}' not found.");
                     return 2;
                 }
-                var baseDoc = NwcDocument.Open(explicitDiffBaseline, new NwcReaderOptions { BuildSceneTree = includeTree });
+                var baseDoc = NwcDocument.Open(explicitDiffBaseline, new NwcReaderOptions
+                {
+                    BuildSceneTree = includeTree,
+                    MaxExpandedPropertyReferences = readerOptions.MaxExpandedPropertyReferences,
+                });
                 var diffReport = baseDoc.Compare(doc, new Model.Diff.NwcDiffOptions { GeometricTolerance = diffTolerance });
 
                 if (!string.IsNullOrEmpty(explicitDiffJsonPath))
