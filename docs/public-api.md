@@ -33,6 +33,10 @@ The supported surface is the `NwcIO` and `NwcIO.Model.*` namespaces listed here 
 `NwcDocument.GetLoadedPath()` returns the full path of a document opened by filename. It returns `null` for
 documents opened from a stream or created in memory. `NwcFileInfo.SourcePath` is the source path stored in the file.
 
+`NwcReaderOptions.MaxExpandedPropertyReferences` caps the total references to property records and tabs across
+all node occurrences in a DbCache scene tree. The default is 134,217,728. Set a positive `int` to change the limit.
+Exceeding it throws `InvalidDataException` before the reader expands the tree. A higher limit can increase memory use.
+
 `NwcDocument.Open` overloads for paths and streams accept an `IProgress<NwcProgress>` and
 `CancellationToken`. Cancellation is checked during container scanning and between parsing phases.
 A non-seekable input uses a temporary file. With `KeepStreamCatalog = false`, stream payloads

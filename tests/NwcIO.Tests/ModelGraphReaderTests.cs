@@ -248,6 +248,48 @@ public class ModelGraphReaderTests
     }
 
     [Fact]
+    public async Task Open_ExpandedPropertyLimitCountsEachOccurrence_SyncAndAsync()
+    {
+        var shared = new TreeNode("Leaf", "Leaf", Slots:
+            [new HTab(new Tab("Data", "Data", "data", new Prop("Id", "id", 2, 1)))]);
+        var (hierarchy, _) = SyntheticTree.Write(1, new TreeNode("Group", "Group", Children: [shared, shared]));
+        byte[] file = SyntheticNwcFile.Build(hierarchy, null, [], []);
+        var options = new NwcReaderOptions { MaxExpandedPropertyReferences = 3, KeepStreamCatalog = false };
+        using var input = new MemoryStream(file);
+
+        var syncError = Assert.Throws<InvalidDataException>(() => NwcDocument.Open(input, options));
+        input.Position = 0;
+        var asyncError = await Assert.ThrowsAsync<InvalidDataException>(() => NwcDocument.OpenAsync(input, options));
+        Assert.Contains("expanded tree exceeds 3 property references", syncError.Message);
+        Assert.Equal(syncError.Message, asyncError.Message);
+
+        options.MaxExpandedPropertyReferences = 4;
+        input.Position = 0;
+        var synchronous = NwcDocument.Open(input, options);
+        input.Position = 0;
+        var asynchronous = await NwcDocument.OpenAsync(input, options);
+        foreach (var document in new[] { synchronous, asynchronous })
+        {
+            var group = Assert.Single(document.RootNode!.Children);
+            Assert.Equal(2, group.Children.Count);
+            Assert.All(group.Children, leaf =>
+            {
+                Assert.Single(leaf.Properties);
+                Assert.Single(leaf.PropertyTabs);
+            });
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void ExpandedPropertyLimitRejectsNonPositiveValues(int limit)
+    {
+        var options = new NwcReaderOptions();
+        Assert.Throws<ArgumentOutOfRangeException>(() => options.MaxExpandedPropertyReferences = limit);
+    }
+
+    [Fact]
     public void Save_StrictlyReadMeshesAndTransforms_ReopenWithSamePlacement()
     {
         // F1 with fragment 1's pose turned into class 15: two class-15 fragments on leaves 2 and 3 sharing record 1

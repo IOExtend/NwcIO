@@ -70,6 +70,50 @@ public class CliExitCodeTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MaxPropertyRefs_AppliesToInputAndDiffBaseline(bool useBaseline)
+    {
+        string root = TempRoot();
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "input.nwd");
+            string output = Path.Combine(root, "out.json");
+            string baseline = Path.Combine(root, "baseline.nwd");
+            string diff = Path.Combine(root, "diff.json");
+            byte[] file = SyntheticNwcFile.Build(HierarchyParserTests.PropertyLeafHierarchy(), null, [], []);
+            string[] args = [path, output, "--no-meshes", "--no-materials", "--no-transforms", "--report"];
+            if (useBaseline)
+            {
+                var (empty, _) = SyntheticTree.Write(1);
+                File.WriteAllBytes(path, SyntheticNwcFile.Build(empty, null, [], []));
+                File.WriteAllBytes(baseline, file);
+                args = [.. args, "--diff", baseline, "--diff-json", diff];
+            }
+            else
+            {
+                File.WriteAllBytes(path, file);
+            }
+
+            string expectedOutput = useBaseline ? diff : output;
+            using var error = new StringWriter();
+            Assert.Equal(3, NwcIO.Cli.Program.Run([.. args, "--max-property-refs", "3"], errorWriter: error));
+            Assert.Contains("expanded tree exceeds 3 property references", error.ToString());
+            Assert.False(File.Exists(expectedOutput));
+
+            using var retryError = new StringWriter();
+            int exit = NwcIO.Cli.Program.Run([.. args, "--max-property-refs", "4"], errorWriter: retryError);
+            Assert.True(exit == 0, retryError.ToString());
+            Assert.True(File.Exists(expectedOutput));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public void PartitionHierarchyFolder_OpensWithAndWithoutTree()
     {

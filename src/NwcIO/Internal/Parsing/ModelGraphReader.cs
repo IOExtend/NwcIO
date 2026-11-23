@@ -135,7 +135,8 @@ internal static class ModelGraphReader
         {
             preorder = segments.Hierarchy is null
                 ? [new NwcNode { Id = 0, Name = rootName, Class = "Model", Tag = 0 }]
-                : await ReadHierarchy(segments.Hierarchy, rootName, options.ReadPropertyRecords, guids, segments.PartitionProps).ConfigureAwait(false);
+                : await ReadHierarchy(segments.Hierarchy, rootName, options.ReadPropertyRecords, guids, segments.PartitionProps,
+                    options.MaxExpandedPropertyReferences).ConfigureAwait(false);
         }
 
         var meshes = new List<NwcMesh>();
@@ -272,12 +273,13 @@ internal static class ModelGraphReader
 
     private static async ValueTask<IReadOnlyList<NwcNode>> ReadHierarchy(
         LcRawStream hierarchy, string rootName, bool includeProperties, Guid[] guids,
-        Func<ValueTask<IReadOnlyList<byte[]>?>> partitionProps)
+        Func<ValueTask<IReadOnlyList<byte[]>?>> partitionProps, int maxExpandedPropertyReferences)
     {
         byte[] data = await hierarchy.GetDataAsync().ConfigureAwait(false);
         if (!hierarchy.RequiresAsyncRead)
         {
-            return HierarchyParser.Read(data, rootName, includeProperties, guids, () => partitionProps().GetSynchronousResult());
+            return HierarchyParser.Read(data, rootName, includeProperties, guids,
+                () => partitionProps().GetSynchronousResult(), maxExpandedPropertyReferences);
         }
 
         // The hierarchy always checks the roots on a successful parse. Defer validation failures to that same point.
@@ -296,7 +298,7 @@ internal static class ModelGraphReader
         {
             failure?.Throw();
             return roots;
-        });
+        }, maxExpandedPropertyReferences);
     }
 
     // The LcOaPartitionProps root streams, once the last stream, the table of contents [i32 k][k x i32 compressed length] zero-padded

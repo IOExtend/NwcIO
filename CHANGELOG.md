@@ -4,6 +4,10 @@ All notable changes to the `NwcIO` library, the CLI and the `NwcIO.Scene` adapte
 
 ## [Unreleased]
 
+### Added
+
+- `--max-property-refs` and `NwcReaderOptions.MaxExpandedPropertyReferences` let callers raise the expanded scene tree property reference limit for large models (#288).
+
 ### Fixed
 
 - `NwcAssembly.ToDocument()` preserves explicit node visibility when copying the assembly tree.
